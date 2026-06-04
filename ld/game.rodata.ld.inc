@@ -88,6 +88,7 @@
       build/OUTCODE/src/game/cobjdata.o (.rodata);
       build/OUTCODE/src/game/cheat_buttons.o (.rodata);
       build/OUTCODE/src/game/practice_states.o (.rodata);
+      build/OUTCODE/src/practice/practice_config.o (.rodata);
       build/OUTCODE/src/game/unk_092890.o (.rodata);
       build/OUTCODE/src/game/unk_092E50.o (.rodata);
       build/OUTCODE/src/game/player.o (.rodata);

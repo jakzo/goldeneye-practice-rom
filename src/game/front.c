@@ -25,6 +25,7 @@
 #include "math_floor.h"
 #include "objective_status.h"
 #include "player.h"
+#include "practice/practice_config.h"
 #include "spectrum.h"
 #include "textrelated.h"
 #include "blood_animation.h"
@@ -2266,6 +2267,13 @@ void init_menu05_fileselect(void)
     s32 sp24 = 0x6e000;
     Gfx* sp20 = (s32)(ptr_logo_and_walletbond_DL) + (s32)(4096*10);
     int i;
+
+#ifdef PRACTICE_ROM
+    if (practice.skip_logos_on_startup) {
+        // Normally done during legal screen, done here since that's skipped
+        fileValidateSaves();
+    }
+#endif
 
     prev_keypresses = FALSE;
 
@@ -12813,6 +12821,15 @@ Gfx * constructor_menu19_spectrum(Gfx * DL)
 
 void frontChangeMenu(MENU menu, s32 reload)
 {
+    // if (menu == MENU_LEGAL_SCREEN ||
+    //     menu == MENU_NINTENDO_LOGO ||
+    //     menu == MENU_RAREWARE_LOGO ||
+    //     menu == MENU_EYE_INTRO ||
+    //     menu == MENU_GOLDENEYE_LOGO)
+    // {
+    //     menu = MENU_FILE_SELECT;
+    // }
+
     if ((menu == MENU_RUN_STAGE) || (menu == MENU_SPECTRUM_EMU))
     {
         is_emulating_spectrum = TRUE;

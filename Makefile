@@ -143,6 +143,9 @@ RSPOBJECTS := $(foreach file,$(RSPCODE),$(BUILD_DIR)/$(file:.s=.bin))
 CODEFILES := $(foreach dir,src,$(wildcard $(dir)/*.c))
 CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 
+PRACTICEFILES_C := $(foreach dir,src/practice,$(wildcard $(dir)/*.c))
+PRACTICEOBJECTS := $(foreach file,$(PRACTICEFILES_C),$(BUILD_DIR)/$(file:.c=.o))
+
 GAMEFILES_C := $(foreach dir,src/game,$(wildcard $(dir)/*.c))
 GAMEFILES_S := $(foreach dir,src/game,$(wildcard $(dir)/*.s))
 GAMEOBJECTS := $(foreach file,$(GAMEFILES_S),$(BUILD_DIR)/$(file:.s=.o)) \
@@ -176,7 +179,7 @@ IMAGE_OBJS := $(foreach file,$(IMAGE_BINS),$(BUILD_DIR)/$(file:.bin=.o))
 RZFILES := inflate/inflate.c
 RZOBJECTS := $(foreach file,$(RZFILES),$(BUILD_DIR)/src/$(file:.c=.o))
 
-OBJECTS := $(RSPOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(OBSEGMENT) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS)
+OBJECTS := $(RSPOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(OBSEGMENT) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS) $(PRACTICEOBJECTS)
 
 ## Command Line args for builders ##
 
@@ -200,7 +203,7 @@ else
   CC := $(IRIX_ROOT)/cc
 endif
 
-CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64
+CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM
 
 LD := $(TOOLCHAIN)ld
 LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld
@@ -209,7 +212,7 @@ LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld
 LDFLAGS := -T $(LD_SCRIPT) -Map $(BUILD_DIR)/ge007.$(OUTCODE).map --no-warn-mismatch
 
 AS := $(TOOLCHAIN)as
-ASFLAGS := -march=vr4300 -mabi=32 $(INCLUDE) $(ASMDEFS) 
+ASFLAGS := -march=vr4300 -mabi=32 $(INCLUDE) $(ASMDEFS) --defsym PRACTICE_ROM=1
 # Use the system installed armips if available. Otherwise use the one provided with this repository.
 ifneq (,$(shell which armips 2>/dev/null))
   ARMIPS              := armips
@@ -238,7 +241,7 @@ OBJCOPY := $(TOOLCHAIN)objcopy
 .SECONDARY:
 	$(APPELF) $(APPROM) $(APPBIN) $(ULTRAOBJECTS) $(BUILD_DIR)/ge007.$(OUTCODE).map \
 	$(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) \
-	$(OBSEG_OBJECTS) $(OBSEG_RZ) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS) $(MUSIC_RZ_FILES)
+	$(OBSEG_OBJECTS) $(OBSEG_RZ) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS) $(MUSIC_RZ_FILES) $(PRACTICEOBJECTS)
 
 # Dont delete these intermediate targets on make cancelation.
 .PRECIOUS: %.bin  %.o
@@ -321,7 +324,7 @@ endif
 #	$(CC) -c -Wab,-r4300_mul -non_shared -G 0 -Xcpluscomm $(CFLAGWARNING) -woff 819,820,852,821,838,649 -signed $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 $(OPTIMIZATION) -o $@ $<
 
 #Link Files
-$(APPELF): $(RSPOBJECTS) $(ULTRAOBJECTS) $(HEADEROBJECTS) $(OBSEG_RZ) $(BUILD_DIR)/$(OBSEGMENT) $(MUSIC_RZ_FILES) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) ge007.ld
+$(APPELF): $(RSPOBJECTS) $(ULTRAOBJECTS) $(HEADEROBJECTS) $(OBSEG_RZ) $(BUILD_DIR)/$(OBSEGMENT) $(MUSIC_RZ_FILES) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) $(PRACTICEOBJECTS) ge007.ld
 	cpp $(LDFILEOPTS) -P ge007.ld -o $(BUILD_DIR)/ge007.$(OUTCODE).ld
 	@echo "Linking Files into ELF"
 	$(LD) $(LDFLAGS) -o $@
@@ -377,7 +380,7 @@ libultraclean: commonclean
 	rm -f $(ULTRAOBJECTS)
 
 codeclean: commonclean libultraclean
-	rm -f $(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(RSPOBJECTS)
+	rm -f $(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(RSPOBJECTS) $(PRACTICEOBJECTS)
 
 clean: codeclean dataclean
 	@echo "\nAll Code and Asset Binaries Cleared! Make will Re-Build these next time.\n"

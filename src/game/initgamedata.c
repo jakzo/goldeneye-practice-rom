@@ -1,5 +1,6 @@
 #include <ultra64.h>
 #include "front.h"
+#include "practice/practice_config.h"
 #include <bondconstants.h>
  /**
   * initGameData
@@ -7,7 +8,11 @@
   **/
 void initGameData(void) {
     current_menu = MENU_INVALID;
+#ifdef PRACTICE_ROM
+    menu_update = practice.skip_logos_on_startup ? MENU_FILE_SELECT : MENU_LEGAL_SCREEN;
+#else
     menu_update = MENU_LEGAL_SCREEN;
+#endif
     maybe_prev_menu = MENU_INVALID;
     g_MenuTimer = 0;
     selected_stage = LEVELID_NONE;
