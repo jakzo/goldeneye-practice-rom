@@ -1,8 +1,5 @@
 ## 1. Project Overview
-This repository contains a work-in-progress, byte-matching decompilation of the N64 game **GoldenEye 007**. It compiles C source files and assembly files back into matching `.z64` ROM binaries matching the official hashes:
-* **NTSC-US (US)**: `ge007.u.z64` (`sha1: abe01e4aeb033b6c0836819f549c791b26cfde83`)
-* **NTSC-JP (JP)**: `ge007.j.z64` (`sha1: 2a5dade32f7fad6c73c659d2026994632c1b3174`)
-* **PAL-EU (EU)**: `ge007.e.z64` (`sha1: 167c3c433dec1f1eb921736f7d53fac8cb45ee31`)
+This repository contains a custom ROM for the N64 game **GoldenEye 007** with various utilities for practicing speedruns. It is a fork of a work-in-progress, byte-matching decompilation of the original N64 game. It compiles C source files and assembly files back into `.z64` ROM binaries.
 
 ---
 
@@ -21,6 +18,7 @@ goldeneye_src
 ├── scripts/                 # Asset extraction, diffing, and environment helper scripts
 ├── src/                     # C and Assembly source files
 │   ├── game/                # Core game-specific code (cheats, gun, player logic, objectives, text, etc.)
+│   ├── practice/            # Utilities for practicing speedruns (new code goes here)
 │   ├── inflate/             # Game decompression logic (zlib/inflate)
 │   ├── libultra/            # N64 SDK library code
 │   └── libultrare/          # N64 SDK library code modified by Rare
@@ -59,8 +57,8 @@ When tasked with modification or analysis of gameplay, look here first:
 
 * **Cheats & Inputs**:
   * `src/game/cheat_buttons.c` / `src/game/cheat_buttons.h`: Handles controller combination checks, cheat menu bindings, and cheat activations.
-* **Practice / Custom ROM State**:
-  * `src/game/practice_states.c` / `src/game/practice_states.h`: Custom state handling often used in speedrun practice configurations.
+* **Practice**:
+  * `src/practice`: Folder containing utilities for speedrun practice. All new logic goes in files here. This is not in the original game.
 * **Weapon Logic**:
   * `src/game/gun.c` / `src/game/gun.h`: Massive file handling shooting, aiming, projectile calculations, reloading, and weapon state.
 * **Player Physics & Camera**:
@@ -69,6 +67,8 @@ When tasked with modification or analysis of gameplay, look here first:
 * **Linker & Memory Map**:
   * `ge007.ld`: Top-level linker specification arranging code segments and overlays.
   * `ld/`: Segment definitions specifying BSS/text/rodata address overlays.
+
+When modifying original non-practice source code or adding code to existing non-practice files, an `#if PRACTICE_ROM` conditional should be wrapped around the modifications/additions with any original code in an `#else` block. Code inside the `practice` folder does not need these conditional blocks since it is all new.
 
 ---
 
