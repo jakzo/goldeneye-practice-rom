@@ -1,5 +1,6 @@
 #include <ultra64.h>
 #include "unk_0C0A70.h"
+#include "practice/practice_timescale.h"
 
 // data
 s32 lastFrameCounter = -1;
@@ -47,6 +48,15 @@ void updateFrameCounters(s32 deltaFrames)
 {
     copy_of_osgetcount_value_0 = (s32) copy_of_osgetcount_value_1;
     copy_of_osgetcount_value_1 = osGetCount();
+
+#ifdef PRACTICE_ROM
+    if (g_IsTimeScaleChanged) {
+        f32 exact_delta = (f32)deltaFrames * g_TimeScaleFinal;
+        g_FractionalClockTimerAcc += exact_delta;
+        deltaFrames = (s32)g_FractionalClockTimerAcc;
+        g_FractionalClockTimerAcc -= (f32)deltaFrames;
+    }
+#endif
 
     lastFrameCounter = currentFrameCounter;
     currentFrameCounter = (s32) (currentFrameCounter + deltaFrames);

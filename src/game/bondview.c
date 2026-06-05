@@ -42,6 +42,7 @@
 #include "explosions.h"
 #include "os_extension.h"
 #include "unk_0B3200.h"
+#include "practice/practice_timescale.h"
 
 #ifdef VERSION_EU
 
@@ -10893,6 +10894,14 @@ void MoveBond(s8 stick_x, s8 stick_y, u16 buttons, u16 oldbuttons)
             sp220 *= 0.6f * 1.0f;
             sp21C *= 0.6f * 1.0f;
         }
+
+#ifdef PRACTICE_ROM
+        // Make leaning affected by time scale
+        if (g_TimeScaleFinal < 1.0f) {
+            sp220 *= g_TimeScaleFinal;
+            sp21C *= g_TimeScaleFinal;
+        }
+#endif
 
         speedsideways = g_CurrentPlayer->speedsideways * MAX_SPEED_FACTOR;
         speedforwards = g_CurrentPlayer->speedforwards;

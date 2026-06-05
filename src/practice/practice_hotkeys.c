@@ -6,6 +6,10 @@
 #include "player_2.h"
 #include "practice_states.h"
 #include "practice_config.h"
+#include "practice_timescale.h"
+#include "bondview.h"
+
+extern int sprintf(char *dst, const char *fmt, ...);
 
 struct HotkeysLayout {
     u16 trigger;
@@ -40,13 +44,36 @@ bool practice_check_hotkeys(void)
     u16 jgb = joyGetButtons(get_cur_playernum(), ANY_BUTTON);
     u16 jgbptf = joyGetButtonsPressedThisFrame(get_cur_playernum(), ANY_BUTTON);
 
-    if ((jgb & keys->trigger) && (jgbptf & keys->down)) {
-        save_game_state();
-        return TRUE;
+    if (jgb & keys->trigger) {
+        if (!g_IsTimePaused) pause();
+
+        if (jgbptf & keys->down) {
+            save_game_state();
+            return TRUE;
+        }
+        if (jgbptf & keys->up) {
+            load_game_state();
+            return TRUE;
+        }
+        if (jgbptf & keys->left) {
+            char msg[32];
+            f32 new_time_scale = g_TimeScale - 0.1f;
+            set_time_scale(new_time_scale);
+            sprintf(msg, "TIME SCALE: %.1f", g_TimeScale);
+            HUDMESSAGEBOTTOM(msg);
+            return TRUE;
+        }
+        if (jgbptf & keys->right) {
+            char msg[32];
+            f32 new_time_scale = g_TimeScale + 0.1f;
+            set_time_scale(new_time_scale);
+            sprintf(msg, "TIME SCALE: %.1f", g_TimeScale);
+            HUDMESSAGEBOTTOM(msg);
+            return TRUE;
+        }
+    } else if (g_IsTimePaused) {
+        unpause();
     }
-    if ((jgb & keys->trigger) && (jgbptf & keys->up)) {
-        load_game_state();
-        return TRUE;
-    }
+
     return FALSE;
 }
