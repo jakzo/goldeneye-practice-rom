@@ -5,7 +5,7 @@
 
 struct PracticeConfig {
     s32 skip_logos_on_startup;
-    s32 left_handed_hotkeys;
+    s32 left_trigger_hotkeys;
 };
 
 extern struct PracticeConfig practice;

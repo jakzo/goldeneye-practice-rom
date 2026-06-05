@@ -3,6 +3,7 @@
 #include <bondgame.h>
 #include <bondconstants.h>
 #include <joy.h>
+#include "os.h"
 #include "player_2.h"
 #include "practice_states.h"
 #include "practice_config.h"
@@ -11,51 +12,28 @@
 
 extern int sprintf(char *dst, const char *fmt, ...);
 
-struct HotkeysLayout {
-    u16 trigger;
-    u16 up;
-    u16 down;
-    u16 left;
-    u16 right;
-};
-
-static const struct HotkeysLayout g_hotkeys_normal = {
-    L_TRIG,
-    U_JPAD,
-    D_JPAD,
-    L_JPAD,
-    R_JPAD,
-};
-
-static const struct HotkeysLayout g_hotkeys_left_handed = {
-    R_TRIG,
-    U_CBUTTONS,
-    D_CBUTTONS,
-    L_CBUTTONS,
-    R_CBUTTONS,
-};
-
 bool practice_check_hotkeys(void)
 {
-    const struct HotkeysLayout *keys = practice.left_handed_hotkeys
-        ? &g_hotkeys_left_handed
-        : &g_hotkeys_normal;
+    u16 jgbptf;
 
     u16 jgb = joyGetButtons(get_cur_playernum(), ANY_BUTTON);
-    u16 jgbptf = joyGetButtonsPressedThisFrame(get_cur_playernum(), ANY_BUTTON);
+    u16 trigger = practice.left_trigger_hotkeys ? L_TRIG : R_TRIG;
 
-    if (jgb & keys->trigger) {
+    if (jgb & trigger) {
         if (!g_IsTimePaused) pause();
 
-        if (jgbptf & keys->down) {
+        jgbptf = joyGetButtonsPressedThisFrame(get_cur_playernum(), ANY_BUTTON);
+
+        if (jgbptf & D_JPAD) {
             save_game_state();
             return TRUE;
         }
-        if (jgbptf & keys->up) {
+        if (jgbptf & U_JPAD) {
             load_game_state();
             return TRUE;
         }
-        if (jgbptf & keys->left) {
+
+        if (jgbptf & L_JPAD) {
             char msg[32];
             f32 new_time_scale = g_TimeScale - 0.1f;
             set_time_scale(new_time_scale);
@@ -63,7 +41,7 @@ bool practice_check_hotkeys(void)
             HUDMESSAGEBOTTOM(msg);
             return TRUE;
         }
-        if (jgbptf & keys->right) {
+        if (jgbptf & R_JPAD) {
             char msg[32];
             f32 new_time_scale = g_TimeScale + 0.1f;
             set_time_scale(new_time_scale);
