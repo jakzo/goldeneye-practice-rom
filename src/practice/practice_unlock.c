@@ -4,6 +4,12 @@
 #include "game/file2.h"
 #include "practice_unlock.h"
 
+extern s32 fileGetSaveStageDifficultyTime(save_data* save, LEVEL_SOLO_SEQUENCE levelid, DIFFICULTY difficulty);
+extern save_data *fileGetSaveForFoldernum(u32 folder);
+extern void fileBuildWriteNewSave(u32 folder);
+extern void fileSetDifficultyStageTime(save_data *save, LEVEL_SOLO_SEQUENCE levelid, DIFFICULTY difficulty, s32 newtime);
+extern void fileWriteSave(save_data *save);
+
 void practice_unlock_default_profile(void) {
     save_data *save;
     bool isUnlocked;
@@ -18,6 +24,10 @@ void practice_unlock_default_profile(void) {
     }
     if (!save) return;
     
+    if (save->options == 0) {
+        save->options = DEFAULT_OPTIONS;
+    }
+    
     isUnlocked =
         save->unlocked_cheats_1 == 0xFF &&
         save->unlocked_cheats_2 == 0xFF &&
@@ -27,7 +37,9 @@ void practice_unlock_default_profile(void) {
 
     for (level = SP_LEVEL_DAM; level < SP_LEVEL_MAX; level++) {
         for (diff = DIFFICULTY_AGENT; diff < DIFFICULTY_007; diff++) {
-            fileSetDifficultyStageTime(save, level, diff, 0x3FF);
+            if (fileGetSaveStageDifficultyTime(save, level, diff) == 0) {
+                fileSetDifficultyStageTime(save, level, diff, 0x3FF);
+            }
         }
     }
     
