@@ -18,7 +18,7 @@ To avoid distributing copyrighted material, only patch files are to be included 
 
 ## Debugging
 
-Easiest way is to log to the screen with `practice_ui_display_message`.
+Easiest way is to log to the screen with `practiceLogDebug`.
 
 However if you use an emulator like [ares](https://ares-emu.net/download) you can start a GDB server and compiling with `FINAL=NO` will include debug symbols, so you can use GDB to attach a debugger and step through the code. Full command is:
 

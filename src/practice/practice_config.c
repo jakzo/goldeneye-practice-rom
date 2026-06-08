@@ -8,4 +8,5 @@ struct PracticeConfig practice = {
     TRUE, // left_trigger_hotkeys
     LEVELID_NONE, // boot_level
     TRUE, // disable_intro_cutscenes
+    TRUE, // show_debug_logs
 };

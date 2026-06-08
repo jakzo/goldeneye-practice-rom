@@ -38,19 +38,15 @@ bool practice_check_hotkeys(void)
     }
 
     if (jgbptf & L_JPAD) {
-        char msg[32];
         f32 new_time_scale = ((s32)(g_TimeScale * 10.0f + 0.5f) - 1) * 0.1f;
         set_time_scale(new_time_scale);
-        sprintf(msg, "Time scale: %.1f", g_TimeScale);
-        practice_ui_display_message(msg);
+        practiceLogInfo("Time scale: %.1f", g_TimeScale);
         return TRUE;
     }
     if (jgbptf & R_JPAD) {
-        char msg[32];
         f32 new_time_scale = ((s32)(g_TimeScale * 10.0f + 0.5f) + 1) * 0.1f;
         set_time_scale(new_time_scale);
-        sprintf(msg, "Time scale: %.1f", g_TimeScale);
-        practice_ui_display_message(msg);
+        practiceLogInfo("Time scale: %.1f", g_TimeScale);
         return TRUE;
     }
 

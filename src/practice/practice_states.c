@@ -398,14 +398,14 @@ void save_game_state(void)
 
     g_HasSavedState = TRUE;
     sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, 0);
-    practice_ui_display_message("STATE SAVED");
+    practiceLogInfo("STATE SAVED");
 }
 
 void load_game_state(void)
 {
     if (g_CurrentPlayer == NULL || !g_HasSavedState) {
         if (!g_HasSavedState) {
-            practice_ui_display_message("NO SAVED STATE");
+            practiceLogWarn("NO SAVED STATE");
         }
         return;
     }
@@ -415,5 +415,5 @@ void load_game_state(void)
     load_doors_state();
 
     sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, 0);
-    practice_ui_display_message("STATE LOADED");
+    practiceLogInfo("STATE LOADED");
 }

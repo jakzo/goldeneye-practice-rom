@@ -33,6 +33,7 @@
 #include "textrelated.h"
 #include "initmenus.h"
 #include "cheat_buttons.h"
+#include "practice/practice_ui.h"
 #include "bg.h"
 #include "objective.h"
 #include "mp_watch.h"
@@ -1094,6 +1095,11 @@ Gfx* lvlRender(Gfx* DL)
 
             DL = mp_watch_menu_display(DL);
         }
+
+#ifdef PRACTICE_ROM
+        DL = practice_ui_render(DL);
+#endif
+
     }
 
     gDPSetScissor(DL++, G_SC_NON_INTERLACE, 0, 0, viGetX(), viGetY());

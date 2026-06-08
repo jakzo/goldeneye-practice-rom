@@ -3,8 +3,10 @@
 
 #include <ultra64.h>
 
-void practice_ui_display_message(const char *message);
-void practice_ui_tick(void);
+void practiceLogDebug(const char *fmt, ...);
+void practiceLogInfo(const char *fmt, ...);
+void practiceLogWarn(const char *fmt, ...);
+void practiceLogError(const char *fmt, ...);
 Gfx *practice_ui_render(Gfx *gdl);
 
 #endif /* PRACTICE_UI_H */
