@@ -93,6 +93,7 @@
       build/OUTCODE/src/practice/practice_timescale.o (.data);
       build/OUTCODE/src/practice/practice_ui.o (.data);
       build/OUTCODE/src/practice/practice_unlock.o (.data);
+      build/OUTCODE/src/practice/practice_grenade_cam.o (.data);
       build/OUTCODE/src/game/unk_092890.o (.data);
       build/OUTCODE/src/game/unk_092E50.o (.data);
       build/OUTCODE/src/game/player.o (.data);

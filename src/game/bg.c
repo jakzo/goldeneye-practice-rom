@@ -375,6 +375,10 @@ Gfx *sub_GAME_7F0B6898(Gfx *arg0, s32 room_index);
 
 Gfx *bgScissorCurrentPlayerView(Gfx *arg0, s32 arg1, s32 arg2, s32 arg3, s32 arg4);
 
+#ifdef PRACTICE_ROM
+Gfx *sub_GAME_7F0B8D78_practice(Gfx *arg0);
+#endif
+
 // end forward declarations
 
 
@@ -2027,6 +2031,125 @@ glabel sub_GAME_7F0B3C8C
 #endif
 
 
+#ifdef PRACTICE_ROM
+Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
+{
+    s32 i;
+    s32 j;
+    s32 b_max;
+    s32 b_min;
+    b_min = 99999999;
+    b_max = 0;
+
+    for (j=0; j<g_BgNumberOfRoomsDrawn; j++)
+    {
+        b_max = (b_max < dword_CODE_bss_8007FFA0[j].unk1) ? dword_CODE_bss_8007FFA0[j].unk1 : b_max;
+        b_min = (dword_CODE_bss_8007FFA0[j].unk1 < b_min) ? dword_CODE_bss_8007FFA0[j].unk1 : b_min;
+    }
+
+    for (i=b_min; i <= b_max; i++)
+    {
+
+        for (j=0; j<g_BgNumberOfRoomsDrawn; j++)
+        {
+            if (i == dword_CODE_bss_8007FFA0[j].unk1)
+            {
+                gSPMatrix(gdl++, osVirtualToPhysical((void*)currentPlayerGetProjectionMatrix()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
+                gdl = fogRenderClearFogMode(gdl);
+
+                if (get_debug_do_draw_obj())
+                {
+                    if (sub_GAME_7F0BD8F0())
+                    {
+                        gdl = chrpropsRenderPass(gdl, dword_CODE_bss_8007FFA0[j].roomid, 0);
+                    }
+                }
+
+                gSPMatrix(gdl++, osVirtualToPhysical((void*)get_BONDdata_field_10E0()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
+                gdl = fogSetRenderFogColor(
+                    bgScissorCurrentPlayerViewF(
+                        gdl++,
+                        dword_CODE_bss_8007FFA0[j].bbox.f[0][0],
+                        dword_CODE_bss_8007FFA0[j].bbox.f[0][1],
+                        dword_CODE_bss_8007FFA0[j].bbox.f[1][0],
+                        dword_CODE_bss_8007FFA0[j].bbox.f[1][1]),
+                    0);
+
+                if (get_debug_do_draw_bg())
+                {
+                    if (sub_GAME_7F0BD8F0())
+                    {
+                        gdl = sub_GAME_7F0B677C(gdl, dword_CODE_bss_8007FFA0[j].roomid);
+                    }
+                }
+
+                gSPMatrix(gdl++, osVirtualToPhysical((void*)currentPlayerGetProjectionMatrix()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
+                gdl = fogRenderClearFogMode(gdl);
+
+                if (get_debug_do_draw_obj())
+                {
+                    if (sub_GAME_7F0BD8F0())
+                    {
+                        gdl = chrpropsRenderPass(gdl, dword_CODE_bss_8007FFA0[j].roomid, 2);
+                    }
+                }
+            }
+        }
+    }
+
+    gdl = bgScissorCurrentPlayerViewDefault(fogRenderClearFogMode(gdl));
+    gSPMatrix(gdl++, osVirtualToPhysical((void*)get_BONDdata_field_10E0()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
+
+    if (sub_GAME_7F0BD8F0())
+    {
+        gdl = explosionCallRenderBulletImpactOnProp(explosionRenderScorchBuffer(gdl));
+    }
+
+    for (i=b_max; i >= b_min; i--)
+    {
+        for (j=0; j<g_BgNumberOfRoomsDrawn; j++)
+        {
+            if (i == dword_CODE_bss_8007FFA0[j].unk1)
+            {
+                gSPMatrix(gdl++, osVirtualToPhysical((void*)get_BONDdata_field_10E0()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
+                gdl = fogSetRenderFogColor(
+                    bgScissorCurrentPlayerViewF(
+                        gdl++,
+                        dword_CODE_bss_8007FFA0[j].bbox.f[0][0],
+                        dword_CODE_bss_8007FFA0[j].bbox.f[0][1],
+                        dword_CODE_bss_8007FFA0[j].bbox.f[1][0],
+                        dword_CODE_bss_8007FFA0[j].bbox.f[1][1]),
+                    1);
+
+                if (get_debug_do_draw_bg())
+                {
+                    if (sub_GAME_7F0BD8F0())
+                    {
+                        gdl = sub_GAME_7F0B6898(gdl, dword_CODE_bss_8007FFA0[j].roomid);
+                    }
+                }
+
+                gSPMatrix(gdl++, osVirtualToPhysical((void*)currentPlayerGetProjectionMatrix()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
+                gdl = fogRenderClearFogMode(gdl);
+
+                /* Note: Omit the transparency/alpha pass (chrpropsRenderPass with pass = 1)
+                 * for characters and props during PIP rendering. The main player's Pass 1
+                 * has already freed the character skeletal joint/bone matrices (field_20)
+                 * for the frame, so trying to re-render transparent parts here will
+                 * read invalid/stale memory and crash the N64 CPU. */
+                // if (get_debug_do_draw_obj())
+                // {
+                //     if (sub_GAME_7F0BD8F0())
+                //     {
+                //         gdl = chrpropsRenderPass(gdl, dword_CODE_bss_8007FFA0[j].roomid, 1);
+                //     }
+                // }
+            }
+        }
+    }
+    return gdl;
+}
+#endif
 
 
 
@@ -3526,6 +3649,27 @@ Gfx *bgLevelRender(Gfx *arg0)
     return bondviewGfxPlayerField5cMatrix(arg0++);
 }
 
+#ifdef PRACTICE_ROM
+Gfx *bgLevelRender_practice(Gfx *arg0)
+{
+    gSPSetLights1(arg0++, GlobalLight);
+    gSPLookAt(arg0++, sub_GAME_7F078474());
+    gSPSegment(arg0++, SPSEGMENT_BG_DL, ptr_bg_data);
+
+    if (dword_CODE_bss_8007FF88 == 1)
+    {
+        gSPDisplayList(arg0++, dword_CODE_bss_8007BF98);
+    }
+    else
+    {
+        arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78_practice(fogSetRenderFogColor(arg0, 0))));
+    }
+
+    gSPMatrix(arg0++, g_viProjectionMatrix, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
+
+    return bondviewGfxPlayerField5cMatrix(arg0++);
+}
+#endif
 
 
 
@@ -10922,6 +11066,29 @@ Gfx *sub_GAME_7F0B8D78(Gfx *arg0)
 
     return bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B3C8C(arg0));
 }
+
+#ifdef PRACTICE_ROM
+Gfx *sub_GAME_7F0B8D78_practice(Gfx *arg0)
+{
+    s32 i;
+    if (levelentry_index == LEVEL_INDEX_DAM)
+    {
+        for (i=0; i<g_BgNumberOfRoomsDrawn; i++)
+        {
+            // The lake in dam is a single giant room, id 0x23
+            if (dword_CODE_bss_8007FFA0[i].roomid == 0x23)
+            {
+                // speculation in discord: unk1 is probably draw order or similar,
+                // this is a hack to draw the lake first.
+                dword_CODE_bss_8007FFA0[i].unk1 = 0;
+                break;
+            }
+        }
+    }
+
+    return bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B3C8C_practice(arg0));
+}
+#endif
 
 
 

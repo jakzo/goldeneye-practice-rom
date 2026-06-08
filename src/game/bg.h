@@ -141,6 +141,7 @@ s32 sub_GAME_7F0B9A7C(s32 arg0);
 s32 sub_GAME_7F0B9A2C(s32 arg0);
 void bgRoomVisibilityRelated(void);
 Gfx* bgLevelRender(Gfx *arg0);
+Gfx* bgLevelRender_practice(Gfx *arg0);
 Gfx *bgScissorCurrentPlayerView(Gfx *arg0, s32 left, s32 top, s32 width, s32 height);
 Gfx* bgScissorCurrentPlayerViewDefault(Gfx* arg0);
 Gfx* bgScissorCurrentPlayerViewF(Gfx* arg0, f32 arg1, f32 arg2, f32 arg3, f32 arg4);
