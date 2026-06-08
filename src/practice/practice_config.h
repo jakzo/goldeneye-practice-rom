@@ -4,11 +4,11 @@
 #include <ultra64.h>
 
 struct PracticeConfig {
-    s32 skip_logos_on_startup;
-    s32 left_trigger_hotkeys;
-    s32 boot_level;
-    s32 disable_intro_cutscenes;
-    s32 show_debug_logs;
+  s32 skip_logos_on_startup;
+  s32 left_trigger_hotkeys;
+  s32 boot_level;
+  s32 disable_intro_cutscenes;
+  s32 show_debug_logs;
 };
 
 extern struct PracticeConfig practice;
