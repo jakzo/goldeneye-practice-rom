@@ -1,0 +1,71 @@
+name: Release practice ROM patch
+
+on:
+  push:
+    branches: [master]
+    paths-ignore:
+      - "*.md"
+      - ".github/**"
+      - ".gitignore"
+  workflow_dispatch:
+
+jobs:
+  build-patch:
+    runs-on: ubuntu
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install binutils-mips-linux-gnu make xdelta
+          wget -q https://github.com/n64decomp/qemu-irix/releases/download/v2.11-deb/qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
+          sudo dpkg -i qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
+
+      - name: Download US base ROM
+        run: |
+          wget -q -O baserom.u.z64 "${{ secrets.BASE_ROM_US_DOWNLOAD_LINK }}"
+          ls -lh baserom.u.z64
+          sha256sum baserom.u.z64
+
+      - name: Extract US assets
+        run: ./scripts/extract_baserom.u.sh
+
+      - name: Build practice ROM (IDO via QEMU)
+        run: make -j$(nproc) COMPARE=0 IDO_RECOMP=NO
+
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=build-${{ github.run_number }}" >> $GITHUB_OUTPUT
+            echo "name=Goldeneye Practice ROM (build ${{ github.run_number }})" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+            echo "make_latest=false" >> $GITHUB_OUTPUT
+            echo "filename=goldeneye_practice_rom_build_${{ github.run_number }}.xdelta" >> $GITHUB_OUTPUT
+          else
+            # TODO: Read from changelog and name with latest version name
+            VERSION=1.0.0
+            CHANGELOG="Test changelog"
+            echo "tag=latest" >> $GITHUB_OUTPUT
+            echo "name=Goldeneye Practice ROM v$VERSION" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+            echo "make_latest=true" >> $GITHUB_OUTPUT
+            echo "filename=goldeneye_practice_rom_v$VERSION.xdelta" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate xdelta patch
+        run: |
+          xdelta3 -s baserom.u.z64 build/u/ge007.u.z64 "${{ steps.tag.outputs.filename }}"
+          ls -lh "${{ steps.tag.outputs.filename }}"
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.name }}
+          prerelease: ${{ steps.tag.outputs.prerelease }}
+          make_latest: ${{ steps.tag.outputs.make_latest }}
+          files: ${{ steps.tag.outputs.filename }}

@@ -6,7 +6,7 @@
 - Extract assets from the ROM with `docker run --rm -v $(pwd):/home/dev goldeneye ./scripts/extract_baserom.u.sh`
 - Build with `docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 FINAL=NO`
     - For future builds just run this command again, the others were one-off setup
-- The built ROM will be at `build/ge007.u.z64`
+- The built ROM will be at `build/u/ge007.u.z64`
 
 ## Development
 
@@ -43,3 +43,9 @@ docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0
 ```
 
 I find I need to do this when switching between building with `FINAL=YES` and `FINAL=NO`.
+
+## Release
+
+All pushes to master branch trigger Github actions to build a patch and release it as a prerelease.
+
+To trigger a full version release, update [CHANGELOG.md](./CHANGELOG.md) to add a new entry for your version, then manually trigger the release action and it will pull the latest entry from the CHANGELOG.md and use that version in the name and the contents as the release body.
