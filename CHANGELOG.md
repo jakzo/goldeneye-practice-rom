@@ -1,6 +1,6 @@
-# 1.0.0
+# 0.1.0
 
-Initial version. Adds features:
+Initial version. Not super useful yet since the main features are not finished yet but here it is. Adds features:
 
 - [alpha] **Save states**
     - During gameplay press `L + D-Down` to save current state
