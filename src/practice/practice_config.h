@@ -9,6 +9,7 @@ struct PracticeConfig {
   s32 boot_level;
   s32 disable_intro_cutscenes;
   s32 show_debug_logs;
+  s32 show_hundredths_on_timer;
 };
 
 extern struct PracticeConfig practice;

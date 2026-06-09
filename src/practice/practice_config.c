@@ -9,4 +9,5 @@ struct PracticeConfig practice = {
     LEVELID_RUNWAY, // boot_level
     TRUE,           // disable_intro_cutscenes
     TRUE,           // show_debug_logs
+    TRUE,           // show_hundredths_on_timer
 };

@@ -44,6 +44,10 @@
 #include "ob.h"
 #include "gbi_extension.h"
 
+#ifdef PRACTICE_ROM
+#include "practice/practice_config.h"
+#endif
+
 
 
 struct BriefingDataSomething
@@ -8046,7 +8050,15 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     missiontime = missiontimer / 60;
     stagename[0] = '\0';
     targettime = solo_target_time_array[mission_folder_setup_entries[briefingpage].mission_num][difficulty];
+#ifdef PRACTICE_ROM
+    if (practice.show_hundredths_on_timer) {
+        s32 hundredths = (missiontimer % 60) * 100 / 60;
+        sprintf(stagename, "%02d:%02d.%02d", missiontime / 60, missiontime % 60, hundredths);
+    } else
+#endif
+    {
     sprintf(stagename, "%02d:%02d", missiontime / 60, missiontime % 60);
+    }
     x = 0x82;
     y = 0xA7;
     DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
