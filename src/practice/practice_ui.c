@@ -9,14 +9,10 @@
 #include <ultra64.h>
 
 // Bank Gothic: compact in-game HUD font
-extern s32 ptrFontBankGothic;
-extern s32 ptrFontBankGothicChars;
 #define LOGGER_FONT_TABLE ptrFontBankGothic
 #define LOGGER_FONT_CHARS ptrFontBankGothicChars
 
 // Zurich Bold: large, bold menu font
-// extern s32 ptrFontZurichBold;
-// extern s32 ptrFontZurichBoldChars;
 // #define LOGGER_FONT_TABLE ptrFontZurichBold
 // #define LOGGER_FONT_CHARS ptrFontZurichBoldChars
 

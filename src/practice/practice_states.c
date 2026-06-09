@@ -27,12 +27,14 @@
 // - blood on death
 // - camera rotation on death
 // - crashes when restoring during death replay
+// Props:
+// - respawn on destroy
+// - reset health
 
 extern void *memcpy(void *dst, const void *src, size_t count);
 extern s32 get_numguards(void);
 extern PropRecord pos_data_entry[];
 extern void place_item_in_hand_swap_and_make_visible(s32 hand, s32 item);
-extern void doorDeactivatePortal(DoorRecord *door);
 
 static bool g_HasSavedState = FALSE;
 
@@ -344,66 +346,367 @@ static void load_guards_state(void) {
 }
 
 // ==========================================
-// 3. DOORS STATE SAVING AND LOADING
+// 2b. PROP RECOVERY: ID <-> INDEX
 // ==========================================
 
-#define MAX_SAVED_DOORS 64
+#define MAX_SAVED_PROPS 600
+
+static s16 idToIndex[MAX_SAVED_PROPS];
+static s32 propRecoveryIdCounter = 0;
+
+static s16 propAddToRecovery(PropRecord *prop) {
+  s16 id = propRecoveryIdCounter;
+  if (id < MAX_SAVED_PROPS) {
+    idToIndex[id] = prop - pos_data_entry;
+    propRecoveryIdCounter++;
+  }
+  return id;
+}
+
+static PropRecord *propRecoverByIndex(s16 prop_index) {
+  if (prop_index >= 0 && prop_index < POS_DATA_ENTRY_LEN) {
+    return &pos_data_entry[prop_index];
+  }
+  return NULL;
+}
+
+// ==========================================
+// 3. PROP STATE SAVING AND LOADING
+// ==========================================
 
 typedef struct {
-  struct DoorRecord *door;
-  f32 openPosition;
-  f32 speed;
-  s8 openstate;
+  s16 id;
+  s16 prop_def_type; /* PROPDEF_* type */
   bool active;
-} SavedDoorState;
 
-static SavedDoorState g_SavedDoors[MAX_SAVED_DOORS];
-static s32 g_SavedDoorsCount = 0;
+  /* Saved object-level state */
+  u32 object_flags;
+  u32 object_flags2;
+  u32 object_runtime_bitflags;
+  rgba_u8 shadecol;
+  rgba_u8 nextcol;
 
-static void save_doors_state(void) {
+  /* Saved prop-level state */
+  u8 prop_flags;
+  u8 prop_state;
+  f32 prop_damage;
+  f32 prop_maxdamage;
+  coord3d prop_pos;
+
+  /* Saved door-specific state */
+  f32 door_openPosition; /* 0=closed, 1=open */
+  f32 door_speed;
+  s8  door_openstate;    /* DOORSTATE enum */
+  s16 linkedDoorId;      /* Prop recovery ID of linked door (or -1) */
+
+  /* Saved ammo-specific state (MultiAmmoCrateRecord extras) */
+  u16 ammo_unk80;
+  u16 ammo_quantities[AMMOTYPE_GLOBAL_MAX];
+} SavedPropState;
+
+static SavedPropState g_SavedProps[MAX_SAVED_PROPS];
+static s32 g_SavedPropsCount = 0;
+
+// ==========================================
+// 4. PROP STATE SAVING AND LOADING
+// ==========================================
+
+static void save_props_state(void) {
   s32 i;
 
-  g_SavedDoorsCount = 0;
+  g_SavedPropsCount = 0;
+  propRecoveryIdCounter = 0;
+
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
     PropRecord *prop = &pos_data_entry[i];
-    if (prop->type == PROP_TYPE_DOOR && prop->door != NULL) {
-      g_SavedDoors[g_SavedDoorsCount].door = prop->door;
-      g_SavedDoors[g_SavedDoorsCount].openPosition = prop->door->openPosition;
-      g_SavedDoors[g_SavedDoorsCount].speed = prop->door->speed;
-      g_SavedDoors[g_SavedDoorsCount].openstate = prop->door->openstate;
-      g_SavedDoors[g_SavedDoorsCount].active = TRUE;
-      g_SavedDoorsCount++;
-      if (g_SavedDoorsCount >= MAX_SAVED_DOORS) {
-        break;
+    ObjectRecord *obj;
+    s16 propdef_type;
+
+    // Only process props that have an associated object
+    if (prop->obj == NULL) {
+      continue;
+    }
+    obj = prop->obj;
+    propdef_type = obj->type;
+
+    g_SavedProps[g_SavedPropsCount].id = propAddToRecovery(prop);
+    g_SavedProps[g_SavedPropsCount].prop_def_type = propdef_type;
+    g_SavedProps[g_SavedPropsCount].active = TRUE;
+    g_SavedProps[g_SavedPropsCount].object_flags = obj->flags;
+    g_SavedProps[g_SavedPropsCount].object_flags2 = obj->flags2;
+    g_SavedProps[g_SavedPropsCount].object_runtime_bitflags =
+        obj->runtime_bitflags;
+    g_SavedProps[g_SavedPropsCount].shadecol = obj->shadecol;
+    g_SavedProps[g_SavedPropsCount].nextcol = obj->nextcol;
+    g_SavedProps[g_SavedPropsCount].prop_flags = prop->flags;
+    g_SavedProps[g_SavedPropsCount].prop_state = obj->state;
+    g_SavedProps[g_SavedPropsCount].prop_damage = obj->damage;
+    g_SavedProps[g_SavedPropsCount].prop_maxdamage = obj->maxdamage;
+    g_SavedProps[g_SavedPropsCount].prop_pos = obj->runtime_pos;
+
+    /* Save door-specific state for PROPDEF_DOOR */
+    if (propdef_type == PROPDEF_DOOR) {
+      DoorRecord *door = (DoorRecord *)obj;
+      g_SavedProps[g_SavedPropsCount].door_openPosition = door->openPosition;
+      g_SavedProps[g_SavedPropsCount].door_speed = door->speed;
+      g_SavedProps[g_SavedPropsCount].door_openstate = door->openstate;
+      if (door->linkedDoor != NULL) {
+        g_SavedProps[g_SavedPropsCount].linkedDoorId = propAddToRecovery(door->linkedDoor->prop);
+      } else {
+        g_SavedProps[g_SavedPropsCount].linkedDoorId = -1;
       }
+      g_SavedProps[g_SavedPropsCount].ammo_unk80 = 0;
+      {
+        s32 _k;
+        for (_k = 0; _k < AMMOTYPE_GLOBAL_MAX; _k++)
+          g_SavedProps[g_SavedPropsCount].ammo_quantities[_k] = 0;
+      }
+    } else if (propdef_type == PROPDEF_AMMO) {
+      MultiAmmoCrateRecord *ammo = (MultiAmmoCrateRecord *)obj;
+      g_SavedProps[g_SavedPropsCount].linkedDoorId = -1;
+      g_SavedProps[g_SavedPropsCount].door_openPosition = 0;
+      g_SavedProps[g_SavedPropsCount].door_speed = 0;
+      g_SavedProps[g_SavedPropsCount].door_openstate = 0;
+      g_SavedProps[g_SavedPropsCount].ammo_unk80 = ammo->unk80;
+      memcpy(g_SavedProps[g_SavedPropsCount].ammo_quantities, ammo->quantities, sizeof(ammo->quantities));
+    } else {
+      g_SavedProps[g_SavedPropsCount].linkedDoorId = -1;
+      g_SavedProps[g_SavedPropsCount].door_openPosition = 0;
+      g_SavedProps[g_SavedPropsCount].door_speed = 0;
+      g_SavedProps[g_SavedPropsCount].door_openstate = 0;
+      g_SavedProps[g_SavedPropsCount].ammo_unk80 = 0;
+      {
+        s32 _k;
+        for (_k = 0; _k < AMMOTYPE_GLOBAL_MAX; _k++)
+          g_SavedProps[g_SavedPropsCount].ammo_quantities[_k] = 0;
+      }
+    }
+
+    g_SavedPropsCount++;
+    if (g_SavedPropsCount >= MAX_SAVED_PROPS) {
+      break;
     }
   }
 }
 
-static void load_doors_state(void) {
+static void load_props_state(void) {
   s32 i;
 
-  for (i = 0; i < g_SavedDoorsCount; i++) {
-    if (g_SavedDoors[i].active && g_SavedDoors[i].door != NULL) {
-      struct DoorRecord *door = g_SavedDoors[i].door;
-      door->openPosition = g_SavedDoors[i].openPosition;
-      door->speed = g_SavedDoors[i].speed;
-      door->openstate = g_SavedDoors[i].openstate;
+  for (i = 0; i < g_SavedPropsCount; i++) {
+    PropRecord *prop;
+    ObjectRecord *obj;
 
-      // Instantly sync visual state and portals
-      door7F052B00(door);
-      if (door->openPosition > 0.0f) {
-        doorActivatePortal(door);
-      } else {
-        doorDeactivatePortal(door);
+    prop = propRecoverByIndex(idToIndex[g_SavedProps[i].id]);
+    if (prop == NULL || !g_SavedProps[i].active) {
+      continue;
+    }
+    obj = prop->obj;
+    if (obj == NULL) {
+      continue;
+    }
+
+    switch (obj->type) {
+    // ----------------------------------------------------------------
+    // PROPDEF_DOOR (1) - SAVE: door movement state + linked door ref.
+    // ----------------------------------------------------------------
+    // case PROPDEF_DOOR: {
+    //   DoorRecord *door = (DoorRecord *)obj;
+    //   const SavedPropState *saved = &g_SavedProps[i];
+
+    //   /* Restore door movement state */
+    //   door->openPosition = saved->door_openPosition;
+    //   door->speed = saved->door_speed;
+    //   door->openstate = saved->door_openstate;
+
+    //   /* Re-resolve linked door pointer from saved prop recovery ID */
+    //   if (saved->linkedDoorId >= 0) {
+    //     PropRecord *linkedProp = propRecoverByIndex(idToIndex[saved->linkedDoorId]);
+    //     if (linkedProp != NULL && linkedProp->obj != NULL) {
+    //       door->linkedDoor = (DoorRecord *)linkedProp->obj;
+    //     }
+    //   }
+
+    //   /* Sound pointers are runtime-allocated (ALSoundState*).
+    //    * They cannot be resolved after load - set to NULL to avoid
+    //    * stale pointer access (sndGetPlayingState on stale ptr crashes).
+    //    * The door's sound system will recreate them on next movement.
+    //    */
+    //   door->openSoundState = NULL;
+    //   door->closeSoundState = NULL;
+    //   break;
+    // }
+    // ----------------------------------------------------------------
+    // PROPDEF_PROP (3) - SAVE: self-contained state.
+    // ----------------------------------------------------------------
+    case PROPDEF_PROP:
+    // ----------------------------------------------------------------
+    // PROPDEF_KEY (4) - SAVE: self-contained (same as standard prop).
+    // ----------------------------------------------------------------
+    case PROPDEF_KEY:
+    // ----------------------------------------------------------------
+    // PROPDEF_ALARM (5) - SAVE: self-contained state (state/flags).
+    // ----------------------------------------------------------------
+    case PROPDEF_ALARM:
+    // ----------------------------------------------------------------
+    // PROPDEF_CCTV (6) - SAVE: self-contained state (state/flags).
+    // ----------------------------------------------------------------
+    case PROPDEF_CCTV:
+    // ----------------------------------------------------------------
+    // PROPDEF_MAGAZINE (7) - SAVE: self-contained state (state/flags).
+    // ----------------------------------------------------------------
+    case PROPDEF_MAGAZINE:
+    // ----------------------------------------------------------------
+    // PROPDEF_COLLECTABLE (8) - SAVE: self-contained state (state/flags).
+    // ----------------------------------------------------------------
+    case PROPDEF_COLLECTABLE:
+    // ----------------------------------------------------------------
+    // PROPDEF_GUARD (9) - SKIP: complex AI system (ailist,
+    //                       action_union, ChrRecord cross-references).
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_MONITOR (10) - SKIP: references global animation
+    //                       controller blocks (monitor_ani_control_blocks).
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_MULTI_MONITOR (11) - SKIP: references global animation
+    //                       controller blocks.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_RACK (12) - SKIP: complex rack data.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_AUTOGUN (13) - SKIP: references audio (snd), has
+    //                       complex internal state.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_SWITCH (19) - SKIP: bidirectional cross-references
+    //                       via LinkRecord -> LinkRecord next/prev.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_LINK (14) - SKIP: bidirectional cross-references
+    //                       via LinkRecord -> ObjectRecord -> prop.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_HAT (17) - SKIP: references g_HatSlots[].
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_GUARD_ATTRIBUTE (18) - SKIP: references ChrRecord.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_SWITCH (19) - SKIP: bidirectional cross-references
+    //                       via LinkRecord -> LinkRecord next/prev.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_AMMO (20) - SAVE: state + quantities array from
+    //                       MultiAmmoCrateRecord. Must restore
+    //                       quantities or the spawning loop hangs
+    //                       when all slots are 0.
+    // ----------------------------------------------------------------
+    // case PROPDEF_AMMO: {
+    //   const SavedPropState *saved = &g_SavedProps[i];
+    //   MultiAmmoCrateRecord *ammo = (MultiAmmoCrateRecord *)obj;
+
+    //   obj->flags = saved->object_flags;
+    //   obj->flags2 = saved->object_flags2;
+    //   obj->runtime_bitflags = saved->object_runtime_bitflags;
+    //   obj->shadecol = saved->shadecol;
+    //   obj->nextcol = saved->nextcol;
+    //   obj->state = saved->prop_state;
+    //   obj->damage = saved->prop_damage;
+    //   obj->maxdamage = saved->prop_maxdamage;
+    //   prop->flags = saved->prop_flags;
+    //   obj->runtime_pos = saved->prop_pos;
+
+    //   // Restore MultiAmmoCrateRecord-specific fields
+    //   ammo->unk80 = saved->ammo_unk80;
+    //   memcpy(ammo->quantities, saved->ammo_quantities, sizeof(ammo->quantities));
+
+    //   // Sync visual model position from saved coordinates
+    //   setsuboffset(obj->model, &saved->prop_pos);
+    //   break;
+    // }
+    // ----------------------------------------------------------------
+    // PROPDEF_ARMOUR (21) - SAVE: self-contained state (state/flags).
+    // ----------------------------------------------------------------
+    case PROPDEF_ARMOUR:
+    // ----------------------------------------------------------------
+    // PROPDEF_TAG (22) - SAVE: self-contained (state/flags).
+    // ----------------------------------------------------------------
+    case PROPDEF_TAG:
+      // ----------------------------------------------------------------
+      // Restore the prop and object state:
+      //   prop->flags  - enabled, onscreen, damaged
+      //   obj->state   - destroyed, respawn, damaged
+      //   obj->flags / flags2 - control/response flags
+      //   obj->runtime_bitflags - removed, activated, deposited
+      //   obj->damage / maxdamage - health system
+      //   obj->shadecol / nextcol - visual color state
+      //   obj->runtime_pos - world position (also sets model offset)
+      // ----------------------------------------------------------------
+      {
+        const SavedPropState *saved = &g_SavedProps[i];
+        obj->flags = saved->object_flags;
+        obj->flags2 = saved->object_flags2;
+        obj->runtime_bitflags = saved->object_runtime_bitflags;
+        obj->shadecol = saved->shadecol;
+        obj->nextcol = saved->nextcol;
+        obj->state = saved->prop_state;
+        obj->damage = saved->prop_damage;
+        obj->maxdamage = saved->prop_maxdamage;
+        prop->flags = saved->prop_flags;
+        obj->runtime_pos = saved->prop_pos;
+
+        // Sync visual model position from saved coordinates
+        setsuboffset(obj->model, &saved->prop_pos);
       }
-      door7F053B10(door);
+      break;
+    // ----------------------------------------------------------------
+    // PROPDEF_OBJECTIVE_* (23-34) - SKIP: objective metadata,
+    //                          may reference objects by index.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_GAS_RELEASING (36) - SKIP: complex gas logic.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_RENAME (37) - SKIP: references PropDefHeaderRecord.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_LOCK_DOOR (38) - SAVE: lock object health is handled
+    //                       by generic prop mechanism above. The
+    //                       LockDoorRecord chain pointers remain
+    //                       valid since the level is not reloaded.
+    // ----------------------------------------------------------------
+    case PROPDEF_LOCK_DOOR:
+      /* Lock health already saved/restored via generic mechanism
+       * when the lock object itself is processed as a regular prop.
+       * The door's PADLOCKEDDOOR flag is saved via object_runtime_bitflags.
+       * No extra work needed - chain pointers persist across save/load.
+       */
+      break;
+    // ----------------------------------------------------------------
+    // PROPDEF_TRUCK (39) - SKIP: complex vehicle state.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_HELI (40) - SKIP: complex vehicle state.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_SAFE (42) / PROPDEF_SAFE_ITEM (42) - SKIP: references
+    //                       door openPosition cross-references.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_TANK (45) - SKIP: complex tank state.
+    // ----------------------------------------------------------------
+    // ----------------------------------------------------------------
+    // PROPDEF_CAMERAPOS (46) - SKIP: save/restore in bondview.
+    // ----------------------------------------------------------------
+    default:
+      break;
     }
   }
 }
 
 // ==========================================
-// 4. MAIN PUBLIC ENTRY POINTS
+// 5. MAIN PUBLIC ENTRY POINTS
 // ==========================================
 
 void save_game_state(void) {
@@ -413,7 +716,7 @@ void save_game_state(void) {
 
   save_bond_state();
   save_guards_state();
-  save_doors_state();
+  save_props_state();
 
   g_HasSavedState = TRUE;
   sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, 0);
@@ -430,7 +733,7 @@ void load_game_state(void) {
 
   load_bond_state();
   load_guards_state();
-  load_doors_state();
+  load_props_state();
 
   sndPlaySfx(g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, 0);
   practiceLogInfo("STATE LOADED");
