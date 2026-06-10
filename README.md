@@ -17,6 +17,7 @@ This ROM provides tools for practicing speedruns of Goldeneye 007 on the Nintend
 
 ## Features
 
+- **Timer displayed during levels**
 - **End screen timer displays hundredths**
 - **Skip level intro cutscenes**
     - Starting a level goes straight into it, rather than playing the intro cutscene

@@ -63,6 +63,8 @@ jobs:
             # Write multi-line body via heredoc syntax
             echo "body<<EOF" >> $GITHUB_OUTPUT
             echo "$BODY" >> $GITHUB_OUTPUT
+            echo "" >> $GITHUB_OUTPUT
+            echo "[How to install](https://github.com/jakzo/goldeneneye-practice-rom#how-to-install)" >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           fi
 
