@@ -1,4 +1,5 @@
 #include "practice_ui.h"
+#include "game/bondview.h"
 #include "game/textrelated.h"
 #include "practice_config.h"
 #include <PR/os.h>
@@ -7,6 +8,8 @@
 #include <fr.h>
 #include <stdarg.h>
 #include <ultra64.h>
+
+extern int sprintf(char *dst, const char *fmt, ...);
 
 // Bank Gothic: compact in-game HUD font
 #define LOGGER_FONT_TABLE ptrFontBankGothic
@@ -178,13 +181,36 @@ Gfx *practice_ui_render(Gfx *gdl) {
 
   // Render green "P" indicator at bottom-left of the visible area
   {
-    struct fontchar *fontChars = ptrFontZurichBoldChars;
-    struct fontchar *charP = &fontChars['P'];
+    struct fontchar *fontCharsZurich = ptrFontZurichBoldChars;
+    struct fontchar *charP = &fontCharsZurich['P'];
     s32 p_x = MARGIN_RIGHT;
     s32 p_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
-    gdl = textRenderGlow(gdl, &p_x, &p_y, "P", fontChars, ptrFontZurichBold,
-                         0x00FF00FF, 0x000000FF, (s16)viGetX(), (s16)viGetY(),
-                         0, 0);
+    gdl = textRenderGlow(gdl, &p_x, &p_y, "P", fontCharsZurich,
+                         ptrFontZurichBold, 0x00FF00FF, 0x000000FF,
+                         (s16)viGetX(), (s16)viGetY(), 0, 0);
+
+    // Render mission timer next to the "P" indicator
+    if (practice.show_mission_timer) {
+      char timer_buf[16];
+      s32 timer_x = MARGIN_RIGHT;
+      s32 timer_y;
+
+      if (is_timer_active && g_CameraMode == CAMERAMODE_FP) {
+        s32 missionTime = getMissiontimer();
+        s32 minutes = missionTime / 60 / 60;
+        s32 seconds = missionTime / 60 % 60;
+        s32 hundredths = (missionTime % 60) * 100 / 60;
+        sprintf(timer_buf, "%d:%02d.%02d", minutes, seconds, hundredths);
+
+        timer_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
+        // Position timer to the right of the "P" with a small gap
+        timer_x += 16;
+        gdl = textRenderGlow(gdl, &timer_x, &timer_y, timer_buf,
+                             ptrFontBankGothicChars, ptrFontBankGothic,
+                             0xFFFFFFFF, 0x000000FF, (s16)viGetX(),
+                             (s16)viGetY(), 0, 0);
+      }
+    }
   }
 
   if (g_LogQueueCount > 0) {

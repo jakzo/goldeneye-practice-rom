@@ -10,4 +10,5 @@ struct PracticeConfig practice = {
     TRUE,           // disable_intro_cutscenes
     TRUE,           // show_debug_logs
     TRUE,           // show_hundredths_on_timer
+    TRUE,           // show_mission_timer
 };

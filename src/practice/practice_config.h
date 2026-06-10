@@ -10,6 +10,7 @@ struct PracticeConfig {
   s32 disable_intro_cutscenes;
   s32 show_debug_logs;
   s32 show_hundredths_on_timer;
+  s32 show_mission_timer;
 };
 
 extern struct PracticeConfig practice;
