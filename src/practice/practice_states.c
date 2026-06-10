@@ -18,6 +18,29 @@
 
 extern void bondviewApplyVertaTheta(void);
 extern void chrpropDelist(PropRecord *prop);
+extern PropRecord pos_data_entry[];
+extern int bondinvAddPropToInv(PropRecord *prop);
+
+static s32 get_prop_index(PropRecord *prop) {
+    if (prop == NULL) {
+        return -1;
+    }
+    return prop - pos_data_entry;
+}
+
+static PropRecord *get_prop_by_index(s32 index) {
+    if (index < 0 || index >= POS_DATA_ENTRY_LEN) {
+        return NULL;
+    }
+    return &pos_data_entry[index];
+}
+
+typedef struct {
+    s32 type;
+    s32 weapon_right;
+    s32 weapon_left;
+    s32 prop_index;
+} SavedInvItem;
 
 typedef struct {
     // Control / Camera State
@@ -113,6 +136,28 @@ typedef struct {
     coord3d prop_pos;
     StandTile *prop_stan;
     u8 prop_rooms[PROPRECORD_STAN_ROOM_LEN];
+
+    // Inventory & Ammo state
+    s32 ammoheldarr[30];
+    s32 equipcuritem;
+    s32 equipallguns;
+    s32 hand_item[2];
+    s32 num_inv_items;
+    SavedInvItem inv_items[50];
+
+    // Hand Weapon logical state
+    s32 hands_weaponnum[2];
+    s32 hands_weaponnum_watchmenu[2];
+    s32 hands_previous_weapon[2];
+    s32 hands_weapon_firing_status[2];
+    s32 hands_weapon_hold_time[2];
+    s32 hands_when_detonating_mines_is_0[2];
+    s32 hands_weapon_current_animation[2];
+    s32 hands_weapon_ammo_in_magazine[2];
+    s32 hands_weapon_next_weapon[2];
+    s32 hands_weapon_animation_trigger[2];
+    s32 hands_field_8B8[2];
+    s32 lock_hand_model[2];
 } SavedBondState;
 
 static SavedBondState g_SavedBondState;
@@ -224,6 +269,72 @@ static void save_bond_state(void) {
         g_SavedBondState.prop_rooms[3] = g_CurrentPlayer->prop->rooms[3];
     } else {
         g_SavedBondState.has_prop = FALSE;
+    }
+
+    // Inventory & Ammo state
+    {
+        s32 i;
+        for (i = 0; i < 30; i++) {
+            g_SavedBondState.ammoheldarr[i] = g_CurrentPlayer->ammoheldarr[i];
+        }
+    }
+    g_SavedBondState.equipcuritem = g_CurrentPlayer->equipcuritem;
+    g_SavedBondState.equipallguns = g_CurrentPlayer->equipallguns;
+    g_SavedBondState.hand_item[0] = g_CurrentPlayer->hand_item[0];
+    g_SavedBondState.hand_item[1] = g_CurrentPlayer->hand_item[1];
+
+    // Clear saved inventory items
+    {
+        s32 i;
+        for (i = 0; i < 50; i++) {
+            g_SavedBondState.inv_items[i].type = -1;
+            g_SavedBondState.inv_items[i].weapon_right = -1;
+            g_SavedBondState.inv_items[i].weapon_left = -1;
+            g_SavedBondState.inv_items[i].prop_index = -1;
+        }
+    }
+    g_SavedBondState.num_inv_items = 0;
+
+    {
+        InvItem *first = g_CurrentPlayer->ptr_inventory_first_in_cycle;
+        InvItem *item = first;
+        s32 count = 0;
+        if (item != NULL) {
+            do {
+                if (count >= 50) break;
+                g_SavedBondState.inv_items[count].type = item->type;
+                if (item->type == INV_ITEM_WEAPON) {
+                    g_SavedBondState.inv_items[count].weapon_right = item->type_inv_item.type_weap.weapon;
+                } else if (item->type == INV_ITEM_DUAL) {
+                    g_SavedBondState.inv_items[count].weapon_right = item->type_inv_item.type_dual.weapon_right;
+                    g_SavedBondState.inv_items[count].weapon_left = item->type_inv_item.type_dual.weapon_left;
+                } else if (item->type == INV_ITEM_PROP) {
+                    g_SavedBondState.inv_items[count].prop_index = get_prop_index(item->type_inv_item.type_prop.prop);
+                }
+                count++;
+                item = item->next;
+            } while (item != first && item != NULL);
+        }
+        g_SavedBondState.num_inv_items = count;
+    }
+
+    // Hand Weapon logical state
+    {
+        s32 i;
+        for (i = 0; i < 2; i++) {
+            g_SavedBondState.hands_weaponnum[i] = g_CurrentPlayer->hands[i].weaponnum;
+            g_SavedBondState.hands_weaponnum_watchmenu[i] = g_CurrentPlayer->hands[i].weaponnum_watchmenu;
+            g_SavedBondState.hands_previous_weapon[i] = g_CurrentPlayer->hands[i].previous_weapon;
+            g_SavedBondState.hands_weapon_firing_status[i] = g_CurrentPlayer->hands[i].weapon_firing_status;
+            g_SavedBondState.hands_weapon_hold_time[i] = g_CurrentPlayer->hands[i].weapon_hold_time;
+            g_SavedBondState.hands_when_detonating_mines_is_0[i] = g_CurrentPlayer->hands[i].when_detonating_mines_is_0;
+            g_SavedBondState.hands_weapon_current_animation[i] = g_CurrentPlayer->hands[i].weapon_current_animation;
+            g_SavedBondState.hands_weapon_ammo_in_magazine[i] = g_CurrentPlayer->hands[i].weapon_ammo_in_magazine;
+            g_SavedBondState.hands_weapon_next_weapon[i] = g_CurrentPlayer->hands[i].weapon_next_weapon;
+            g_SavedBondState.hands_weapon_animation_trigger[i] = g_CurrentPlayer->hands[i].weapon_animation_trigger;
+            g_SavedBondState.hands_field_8B8[i] = g_CurrentPlayer->hands[i].field_8B8;
+            g_SavedBondState.lock_hand_model[i] = g_CurrentPlayer->lock_hand_model[i];
+        }
     }
 }
 
@@ -380,6 +491,74 @@ static void load_bond_state(void) {
     if (g_CurrentPlayer->ptr_char_objectinstance != NULL) {
         setsuboffset(g_CurrentPlayer->ptr_char_objectinstance, &g_CurrentPlayer->pos);
         setsubroty(g_CurrentPlayer->ptr_char_objectinstance, get_curplay_horizontal_rotation_in_degrees());
+    }
+
+    // Re-initialize player inventory, preserving text overrides
+    {
+        textoverride *saved_overrides = g_CurrentPlayer->textoverrides;
+        bondinvReinitInv();
+        g_CurrentPlayer->textoverrides = saved_overrides;
+    }
+    g_CurrentPlayer->equipallguns = g_SavedBondState.equipallguns;
+
+    // Restore saved inventory items
+    {
+        s32 i;
+        for (i = 0; i < g_SavedBondState.num_inv_items; i++) {
+            s32 type = g_SavedBondState.inv_items[i].type;
+            if (type == INV_ITEM_WEAPON) {
+                bondinvAddInvItem(g_SavedBondState.inv_items[i].weapon_right);
+            } else if (type == INV_ITEM_DUAL) {
+                bondinvAddDoublesInvItem(g_SavedBondState.inv_items[i].weapon_right, g_SavedBondState.inv_items[i].weapon_left);
+            } else if (type == INV_ITEM_PROP) {
+                PropRecord *prop = get_prop_by_index(g_SavedBondState.inv_items[i].prop_index);
+                if (prop != NULL) {
+                    bondinvAddPropToInv(prop);
+                }
+            }
+        }
+    }
+
+    // Restore ammo counts
+    {
+        s32 i;
+        for (i = 0; i < 30; i++) {
+            g_CurrentPlayer->ammoheldarr[i] = g_SavedBondState.ammoheldarr[i];
+        }
+    }
+
+    // Restore equipcuritem
+    g_CurrentPlayer->equipcuritem = g_SavedBondState.equipcuritem;
+
+    // Restore hand weapon logical state and trigger model loading directly
+    {
+        s32 hand;
+        for (hand = 0; hand < 2; hand++) {
+            ITEM_IDS saved_weapon = g_SavedBondState.hands_weaponnum[hand];
+
+            // If the hand weapon model currently loaded is different from the saved one,
+            // trigger loading the new model on the next frame.
+            if (g_CurrentPlayer->hand_item[hand] != saved_weapon) {
+                g_CurrentPlayer->hand_invisible[hand] = -3;
+                g_CurrentPlayer->field_2A44[hand] = saved_weapon;
+                g_CurrentPlayer->hand_item[hand] = ITEM_UNARMED;
+                g_CurrentPlayer->hands[hand].weapon_current_animation = 0; // force idle/aiming
+            } else {
+                g_CurrentPlayer->hands[hand].weapon_current_animation = g_SavedBondState.hands_weapon_current_animation[hand];
+            }
+
+            g_CurrentPlayer->hands[hand].weaponnum = saved_weapon;
+            g_CurrentPlayer->hands[hand].weaponnum_watchmenu = g_SavedBondState.hands_weaponnum_watchmenu[hand];
+            g_CurrentPlayer->hands[hand].previous_weapon = g_SavedBondState.hands_previous_weapon[hand];
+            g_CurrentPlayer->hands[hand].weapon_firing_status = g_SavedBondState.hands_weapon_firing_status[hand];
+            g_CurrentPlayer->hands[hand].weapon_hold_time = g_SavedBondState.hands_weapon_hold_time[hand];
+            g_CurrentPlayer->hands[hand].when_detonating_mines_is_0 = g_SavedBondState.hands_when_detonating_mines_is_0[hand];
+            g_CurrentPlayer->hands[hand].weapon_ammo_in_magazine = g_SavedBondState.hands_weapon_ammo_in_magazine[hand];
+            g_CurrentPlayer->hands[hand].weapon_next_weapon = g_SavedBondState.hands_weapon_next_weapon[hand];
+            g_CurrentPlayer->hands[hand].weapon_animation_trigger = g_SavedBondState.hands_weapon_animation_trigger[hand];
+            g_CurrentPlayer->hands[hand].field_8B8 = g_SavedBondState.hands_field_8B8[hand];
+            g_CurrentPlayer->lock_hand_model[hand] = g_SavedBondState.lock_hand_model[hand];
+        }
     }
 }
 

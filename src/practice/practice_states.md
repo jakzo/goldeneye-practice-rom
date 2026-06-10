@@ -20,11 +20,10 @@ Add any general advice helpful for future agents working on this feature here. B
 - **Stale Pointers**: Any struct member ending in `*` (e.g., `ALSoundState *`, `ObjectRecord *`, `PropRecord *`) is an absolute memory address. If the game engine deallocates or reallocates the target object, loading a saved state that retains the old pointer will cause a crash. All such pointers must either be relocated (mapped back to correct indices) or it will not affect gameplay nullified (set to `NULL`).
 - **Sound System Crashing**: Sound structures (`ALSoundState`) are allocated dynamically. Nullifying properties like `audioHandle`, `openSoundState`, and `closeSoundState` upon loading prevents the sound engine from trying to modify a defunct sound node.
 - **NULL Prop Handling (Cutscenes vs Gameplay)**: The player's world physical presence `g_CurrentPlayer->prop` is `NULL` during intro cutscenes, level loading, or death. When loading a saved state:
-  - Track whether the saved state had a valid prop using a `has_prop` boolean flag.
-  - If the saved state has a prop but the current player does not (e.g., loading gameplay into a cutscene), allocate a new prop using `chrpropAllocate()`, initialize its fields, activate it, enable it, and register it to its rooms.
-  - If the saved state does not have a prop but the current player does (e.g., loading a cutscene into active gameplay), deregister, delist, disable, and free the current player prop using `chrpropDeregisterRooms`, `chrpropDelist`, `chrpropDisable`, and `chrpropFree`.
-  - If both have a prop, update its coordinates and rooms safely using room deregistration/registration.
-
+    - Track whether the saved state had a valid prop using a `has_prop` boolean flag.
+    - If the saved state has a prop but the current player does not (e.g., loading gameplay into a cutscene), allocate a new prop using `chrpropAllocate()`, initialize its fields, activate it, enable it, and register it to its rooms.
+    - If the saved state does not have a prop but the current player does (e.g., loading a cutscene into active gameplay), deregister, delist, disable, and free the current player prop using `chrpropDeregisterRooms`, `chrpropDelist`, `chrpropDisable`, and `chrpropFree`.
+    - If both have a prop, update its coordinates and rooms safely using room deregistration/registration.
 
 ## Struct Analysis
 
@@ -225,6 +224,311 @@ struct player {
   coord3d standlook[2];
   coord3d standup[2];
   s32 standcnt;
+
+  // Saved: yes
+  // Inventory & Ammo Arrays:
+  // - ammoheldarr: current ammunition counts for each ammo type.
+  // - ptr_inventory_first_in_cycle: pointer to the first item in the inventory circular linked list. Saved address-safely as flat item definitions and reconstructed on load using inventory APIs.
+  // - equipallguns: All Guns cheat flag.
+  // - equipcuritem: current equipped weapon/item ID.
+  s32 ammoheldarr[30];
+  InvItem *ptr_inventory_first_in_cycle;
+  s32 equipallguns;
+  s32 equipcuritem;
+
+  // Saved: yes
+  // Weapons & Hands Rendering:
+  // - hand_item: weapon/item IDs currently loaded in the left and right hands.
+  // - hands: structure for each hand tracking animation status, next weapons, and weapon_ammo_in_magazine. Rebuilt address-safely; triggers model reloading via currentPlayerEquipWeaponWrapper if hand weapons change on load.
+  ITEM_IDS hand_item[2];
+  struct hand hands[2];
+
+  // TODO: Investigate, document, and determine save/load strategy for the following remaining fields:
+
+  // Uncategorized / Padding / System fields
+  s32 field_5C;
+  s32 field_60;
+  s32 field_64;
+  s32 field_68;
+  s32 field_8C;
+  s32 field_94;
+  f32 field_98;
+  f32 field_A4;
+  s32 field_AC;
+  struct rect4f collision_bounds;
+  s32 field_D0;
+  s32 damageshowtime;
+  s32 healthshowtime;
+  s32 healthshowmode;
+  s32 field_100;
+  s32 field_104;
+  s32 field_108;
+  s32 field_10C;
+  s32 movecentrerelease;
+  s32 lookaheadcentreenabled;
+  s32 automovecentreenabled;
+  s32 fastmovecentreenabled;
+  s32 automovecentre;
+
+  // Auto-aim state
+  s32 insightaimmode;
+  s32 autoyaimenabled;
+  f32 autoaimy;
+  struct PropRecord *autoaim_target_y;
+  s32 autoyaimtime60;
+  s32 autoxaimenabled;
+  f32 autoaimx;
+  struct PropRecord *autoaim_target_x;
+  s32 autoxaimtime60;
+
+  // Fade & Breathing
+  f32 bondfadetime60;
+  f32 bondfadetimemax60;
+  f32 bondfadefracold;
+  f32 bondfadefracnew;
+  f32 bondbreathing;
+  s32 field_1A0;
+  s32 field_1A4;
+  s32 field_1A8;
+  s32 field_1AC;
+  s32 field_1B0;
+  s32 field_1B4;
+  s32 field_1B8;
+  s32 field_1BC;
+
+  // Watch / Pause Menu state
+  s32 watch_pause_time;
+  s32 timer_1C4;
+  s32 watch_animation_state;
+  s32 outside_watch_menu;
+  s32 open_close_solo_watch_menu;
+  f32 field_1D4;
+  f32 field_1D8;
+  f32 pause_watch_position;
+  f32 field_1E0;
+  f32 field_1E4;
+  f32 field_1E8;
+  f32 field_1EC;
+  f32 field_1F0;
+  f32 field_1F4;
+  s32 field_1F8;
+  s32 field_1FC;
+  s32 pausing_flag;
+  f32 pause_starting_angle;
+  f32 pause_related;
+  f32 pause_target_angle;
+  f32 field_210;
+  f32 field_214;
+  s32 field_218;
+  s32 field_21C;
+  s32 step_in_view_watch_animation;
+  f32 pause_animation_counter;
+  f32 pause_watch_related;
+  f32 pause_watch_related_scaled;
+  s32 something_with_watch_object_instance;
+  s32 field_234;
+  s32 field_238;
+  s32 field_23C;
+  s32 field_240;
+  s32 watch_scale_destination;
+  s32 field_248;
+  s32 field_24C;
+  s32 field_250;
+  s32 field_254;
+  f32 pause_watch_related_adjust;
+  s32 field_25C; ... s32 field_3B0; // Watch screen vertices / states padding
+
+  // Buttons Input State
+  u16 buttons_pressed;
+  u16 prev_buttons_pressed;
+
+  // Fading Colors
+  s32 colourscreenred;
+  s32 colourscreengreen;
+  s32 colourscreenblue;
+  f32 colourscreenfrac;
+  f32 colourfadetime60;
+  f32 colourfadetimemax60;
+  s32 colourfaderedold;
+  s32 colourfaderednew;
+  s32 colourfadegreenold;
+  s32 colourfadegreennew;
+  s32 colourfadeblueold;
+  s32 colourfadebluenew;
+  f32 colourfadefracold;
+  f32 colourfadefracnew;
+
+  // Death State
+  f32 thetadie;
+  f32 vertadie;
+  s32 bondtype;
+  s32 startnewbonddie;
+  s32 redbloodfinished;
+  s32 deathanimfinished;
+  s32 field_42c;
+  s32 controldef;
+
+  // Visual model & properties
+  Model *model;
+  s32 field_59C;
+  s32 field_5A0;
+  s32 field_5A4;
+  s32 field_5A8;
+  s32 field_5AC;
+  s32 field_5B0;
+  s32 field_5B4;
+  s32 field_5B8;
+  s8 animFlipFlag;
+  s8 field_5BD;
+  s8 field_5BE;
+  s8 field_5BF;
+  f32 field_5C0;
+  s32 field_5C4; ... s32 field_6CC; // Visual layout matrices / switches padding
+
+  // Head Matrix / Viewports
+  Mtxf bondheadmatrices[4];
+  Vp viewports[2];
+  s16 viewx;
+  s16 viewy;
+  s16 viewleft;
+  s16 viewtop;
+
+  // Weapons & Hands Rendering
+  s32 hand_invisible[2];
+  ModelFileHeader *ptr_hand_weapon_buffer[2];
+  ModelFileHeader copy_of_body_obj_header[2];
+  struct texpool item_related[2];
+  f32 gunposamplitude;
+  f32 gunxamplitude;
+  s32 field_FC8;
+  s32 field_FCC;
+  s32 field_FD0;
+  s32 z_trigger_timer;
+  s32 field_FD8;
+  struct rgba_u8 tileColor;
+  s32 resetshadecol;
+  s32 aimtype;
+  coord2d crosshair_angle;
+  f32 crosshair_x_pos;
+  f32 crosshair_y_pos;
+  f32 guncrossdamp;
+  coord2d field_FFC;
+  f32 gun_azimuth_angle;
+  f32 gun_azimuth_turning;
+  f32 gunaimdamp;
+  coord3d field_1010;
+  Mtxf field_101C;
+  s32 last_z_trigger_timer;
+  s32 copiedgoldeneye;
+  s32 gunammooff;
+  s32 field_1068;
+  f32 gunsync;
+  f32 syncchange;
+  f32 synccount;
+  s32 syncoffset;
+  f32 field_107C;
+  f32 field_1080;
+  f32 sniper_zoom;
+  f32 camera_zoom;
+
+  // Rendering Matrices & Camera projection variables
+  f32 c_screenwidth;
+  f32 c_screenheight;
+  f32 c_screenleft;
+  f32 c_screentop;
+  f32 c_perspnear;
+  f32 c_perspfovy;
+  f32 c_perspaspect;
+  f32 c_halfwidth;
+  f32 c_halfheight;
+  f32 c_scalex;
+  f32 c_scaley;
+  f32 c_recipscalex;
+  f32 c_recipscaley;
+  Mtx* field_10C4;
+  Mtx* field_10C8;
+  Mtxf* field_10CC;
+  s32 field_10D0;
+  Mtxf* field_10D4;
+  Mtx* projmatrix;
+  Mtxf* projmatrixf;
+  s32 field_10E0;
+  s32 field_10E4;
+  Mtxf* field_10E8;
+  Mtxf* field_10EC;
+  f32 c_scalelod60;
+  f32 c_scalelod;
+  f32 c_lodscalez;
+  u32 c_lodscalezu32;
+  coord3d c_cameratopnorm;
+  coord3d c_cameraleftnorm;
+  f32 screenxminf;
+  f32 screenyminf;
+  f32 screenxmaxf;
+  f32 screenymaxf;
+  s32 gunsightmode;
+  s32 field_112C;
+  f32 zoomintime;
+  f32 zoomintimemax;
+  f32 zoominfovy;
+  f32 zoominfovyold;
+  f32 zoominfovynew;
+  f32 fovy;
+  f32 aspect;
+
+  // Inventory & Ammo Arrays
+  u8 *bloodImgCur;
+  u8 *bloodImgNxt;
+  u8 *bloodImgBufPtrArray[2];
+  s32 bloodImgIdx;
+  s32 hudmessoff;
+  s32 bondmesscnt;
+  InvItem *p_itemcur;
+  s32 equipmaxitems;
+  textoverride *textoverrides;
+  gunheld gunheldarr[10];
+
+  // Weapon sway & control
+  s32 magnetattracttime;
+  f32 swaytarget;
+  f32 swayoffset0;
+  f32 swayoffset2;
+  f32 field_1280;
+  s32 players_cur_animation;
+  f32 field_1288;
+
+  // Cheat text display & status
+  u16 cheat_display_text_related[20];
+  u8 something_with_cheat_text;
+  u8 can_display_cheat_text;
+  u8 bondinvincible;
+  u8 field_12B7;
+
+  // Armor & Health Damage HUD overlay caches
+  struct damage_display_parent armor_display_values[23];
+  struct damage_display_parent health_display_values[23];
+
+  // Watch vertices
+  struct WatchRectangle buffer_for_watch_greenbackdrop_vertices[WATCH_NUMBER_SCREENS];
+  struct WatchRectangle buffer_for_watch_static_vertices[1];
+  s32 watch_body_armor_bar_gdl;
+  s32 watch_health_bar_gdl;
+
+  // Padding fields (field_19FC to field_243C)
+  s32 field_19FC; ... s32 field_243C;
+
+  // Control type & viewport bounds
+  s32 lock_hand_model[2];
+  s32 cur_player_control_type_0;
+  s32 cur_player_control_type_1;
+  f32 cur_player_control_type_2;
+  s32 neg_vspacing_for_control_type_entry;
+  u32 has_set_control_type_data;
+  s32 field_2A6C;
+  struct StandTile *field_2A70;
+  s32 field_2A74;
+  s32 field_2A78;
+  s32 field_2A7C;
 }
 
 // Collision data representing player bounds, collision coordinates, and portal tracking.
@@ -361,5 +665,30 @@ struct Model {
   s16 framea;
 }
 
-// TODO: Define other relevant structs (e.g. inventory/ammo arrays) here as we implement them. If you reference a struct in a property above, you must define it here and document its properties.
+// Doubly-linked circular inventory item node.
+struct InvItem {
+  s32 type; // Item type: 1 = INV_ITEM_WEAPON, 2 = INV_ITEM_PROP, 3 = INV_ITEM_DUAL
+  union {
+    struct invitem_weap type_weap; // weapon ID
+    struct invitem_prop type_prop; // PropRecord pointer for keys/objectives
+    struct invitem_dual type_dual; // right/left hand weapon IDs for dual wielding
+  } type_inv_item;
+  struct InvItem *next; // circular pointer to next item
+  struct InvItem *prev; // circular pointer to previous item
+}
+
+// Logical status, ammo tracking, and state of each hand viewport/model.
+struct hand {
+  ITEM_IDS weaponnum; // current active logical weapon
+  ITEM_IDS weaponnum_watchmenu; // weapon selected in watch menu or -1
+  ITEM_IDS previous_weapon; // previously held weapon
+  s8 weapon_firing_status; // firing status
+  s32 weapon_hold_time; // duration weapon has been held
+  s32 when_detonating_mines_is_0; // mine detonator logic status
+  s32 weapon_current_animation; // active animation index (0 = idle, 9 = reload, 0xE = draw)
+  s32 weapon_ammo_in_magazine; // bullets currently in the magazine
+  s32 weapon_next_weapon; // weapon being equipped
+  s32 weapon_animation_trigger; // animation trigger flag
+  ALSoundState *audioHandle; // absolute audio handle pointer (nullified on load to prevent crashes)
+}
 ```
