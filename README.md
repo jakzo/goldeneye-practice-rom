@@ -4,27 +4,44 @@ This ROM provides tools for practicing speedruns of Goldeneye 007 on the Nintend
 
 ## How to install
 
-> Coming soon...
+- Download the latest `.xdelta` patch from [the releases page](https://github.com/jakzo/goldeneneye-practice-rom/releases)
+- Acquire an unmodified base ROM of the US NTSC version of Goldeneye
+- Use a ROM patcher tool such as [this one](https://www.marcrobledo.com/RomPatcher.js/) and apply the patch to the base ROM
+- Run your modified ROM on:
+    - Emulator:
+        - Any should work though I recommend [ares](https://ares-emu.net/download) for its accuracy
+    - Nintendo 64:
+        - [SummerCart64](https://summercart64.dev/)
+        - [EverDrive 64](https://krikzz.com/our-products/cartridges/ed64x7.html)
+        - Copy the ROM to either of these via the micro SD card or USB
 
 ## Features
 
-> - ⚠️ = alpha feature (many significant bugs, don't expect it to work properly)
-> - ℹ️ = beta feature (some minor bugs but should be usable)
-
-- **Save states** ⚠️
-    - During gameplay press `L + D-Down` to save current state
-    - During gameplay press `L + D-Up` to load current state
-    - Note that many bits of state do not yet get restored, like killed guards and destroyed props
-- **Grenade camera** ⚠️
-    - When throwing grenades, shows a picture-in-picture view that follows the grenade so you can see where it landed
+- **End screen timer displays hundredths**
 - **Skip level intro cutscenes**
     - Starting a level goes straight into it, rather than playing the intro cutscene
 - **Skips legal and logo screens on game startup**
-- **Time scale control** ℹ️
-    - During gameplay press `L + D-Left` to decrease game speed by 10%
-    - During gameplay press `L + D-Right` to increase game speed by 10%
 - **Save automatically fully unlocked**
     - On booting the ROM for the first time the default save will have all levels and cheats unlocked
+
+### ℹ️ Beta features
+
+These features have some minor bugs but should be usable:
+
+- **Time scale control**
+    - During gameplay press `L + D-Left` to decrease game speed by 10%
+    - During gameplay press `L + D-Right` to increase game speed by 10%
+
+### ⚠️ Alpha features
+
+These features have many significant bugs and are unfinished. You should not expect them to work properly:
+
+- **Save states**
+    - During gameplay press `L + D-Down` to save current state
+    - During gameplay press `L + D-Up` to load current state
+    - Note that many bits of state do not yet get restored, like killed guards and destroyed props
+- **Grenade camera**
+    - When throwing grenades, shows a picture-in-picture view that follows the grenade so you can see where it landed
 
 ## Development
 
