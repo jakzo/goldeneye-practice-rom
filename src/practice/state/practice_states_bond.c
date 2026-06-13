@@ -145,6 +145,7 @@ void save_bond_state(SavedBondState *dst) {
                 item = item->next;
             } while (item != first && item != NULL);
         }
+        dst->num_inv_items = count;
     }
 }
 
