@@ -574,6 +574,7 @@ typedef struct {
     f32 cur_player_control_type_2;
     s32 neg_vspacing_for_control_type_entry;
     u32 has_set_control_type_data;
+    s32 cur_item_weapon_getname;
 
     // Health/Armor Scaling Multipliers
     f32 actual_health;
@@ -1174,6 +1175,7 @@ void save_bond_state(void) {
     g_SavedBondState.cur_player_control_type_2 = g_CurrentPlayer->cur_player_control_type_2;
     g_SavedBondState.neg_vspacing_for_control_type_entry = g_CurrentPlayer->neg_vspacing_for_control_type_entry;
     g_SavedBondState.has_set_control_type_data = g_CurrentPlayer->has_set_control_type_data;
+    g_SavedBondState.cur_item_weapon_getname = g_CurrentPlayer->cur_item_weapon_getname;
 
     // Health/Armor Scaling Multipliers
     g_SavedBondState.actual_health = g_CurrentPlayer->actual_health;
@@ -1624,6 +1626,7 @@ void load_bond_state(void) {
             g_CurrentPlayer->hands[hand].weapon_animation_trigger = g_SavedBondState.hands_weapon_animation_trigger[hand];
             g_CurrentPlayer->hands[hand].field_8B8 = g_SavedBondState.hands_field_8B8[hand];
             g_CurrentPlayer->lock_hand_model[hand] = g_SavedBondState.lock_hand_model[hand];
+            g_CurrentPlayer->hands[hand].audioHandle = NULL;
         }
     }
 
@@ -1915,8 +1918,9 @@ void load_bond_state(void) {
     g_CurrentPlayer->cur_player_control_type_0 = g_SavedBondState.cur_player_control_type_0;
     g_CurrentPlayer->cur_player_control_type_1 = g_SavedBondState.cur_player_control_type_1;
     g_CurrentPlayer->cur_player_control_type_2 = g_SavedBondState.cur_player_control_type_2;
-    g_CurrentPlayer->neg_vspacing_for_control_type_entry = g_CurrentPlayer->neg_vspacing_for_control_type_entry;
+    g_CurrentPlayer->neg_vspacing_for_control_type_entry = g_SavedBondState.neg_vspacing_for_control_type_entry;
     g_CurrentPlayer->has_set_control_type_data = g_SavedBondState.has_set_control_type_data;
+    g_CurrentPlayer->cur_item_weapon_getname = g_SavedBondState.cur_item_weapon_getname;
 
     // Health/Armor Scaling Multipliers
     g_CurrentPlayer->actual_health = g_SavedBondState.actual_health;

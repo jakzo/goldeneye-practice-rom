@@ -880,11 +880,13 @@ struct player {
   // - cur_player_control_type_2: Float version of the controller layout index (cur_player_control_type_0 cast to f32). Used in watch menu rendering calculations.
   // - neg_vspacing_for_control_type_entry: Negative vertical spacing value for watch menu entries. Calculated as -(langsize * type) where langsize depends on the layout. Controls vertical spacing between weapon slots in the watch menu.
   // - has_set_control_type_data: Boolean flag (0 or 1) indicating whether the control type data has been initialized. Set to TRUE after level load or watch menu init to prevent uninitialized layout access.
+  // - cur_item_weapon_getname: Weapon/item ID representing the active item currently selected or held. Used by name and model queries (e.g. getCurrentWeaponOrItem).
   s32 cur_player_control_type_0;
   s32 cur_player_control_type_1;
   f32 cur_player_control_type_2;
   s32 neg_vspacing_for_control_type_entry;
   u32 has_set_control_type_data;
+  s32 cur_item_weapon_getname;
 
   // Saved: yes
   // Transition, Environmental, and Clipping State tracking fields:
