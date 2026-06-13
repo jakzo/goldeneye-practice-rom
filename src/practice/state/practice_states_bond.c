@@ -41,12 +41,44 @@ static void save_player_state(SavedPlayerState *dst, struct player *src) {
 static void load_player_state(struct player *dst, SavedPlayerState *src) {
     u8 *dst_bytes = (u8 *)dst;
 
+    // Backup pointers to preserve live addresses
+    s32 backup_field_5C = dst->field_5C;
+    s32 backup_field_60 = dst->field_60;
+    s32 backup_field_64 = dst->field_64;
+    s32 backup_field_68 = dst->field_68;
+    PropRecord *backup_prop = dst->prop;
+    struct Model *backup_ptr_char_objectinstance = dst->ptr_char_objectinstance;
+    Model *backup_model = dst->model;
+    ObjectRecord *backup_hand_rocket[2];
+    InvItem *backup_ptr_inventory_first_in_cycle = dst->ptr_inventory_first_in_cycle;
+    InvItem *backup_p_itemcur = dst->p_itemcur;
+    textoverride *backup_textoverrides = dst->textoverrides;
+
+    backup_hand_rocket[0] = dst->hands[0].rocket;
+    backup_hand_rocket[1] = dst->hands[1].rocket;
+
     // Copy contiguous chunks
     memcpy(dst_bytes + 0x0000, src->block1, 0x0808);
     memcpy(dst_bytes + 0x0870, src->block2, 0x0854);
     memcpy(dst_bytes + 0x10F0, src->block3, 0x00B8);
     memcpy(dst_bytes + 0x11B8, src->block4, 0x06C0);
     memcpy(dst_bytes + 0x29B8, src->block5, 0x00B8);
+
+    // Restore pointers
+    dst->field_5C = backup_field_5C;
+    dst->field_60 = backup_field_60;
+    dst->field_64 = backup_field_64;
+    dst->field_68 = backup_field_68;
+    dst->prop = backup_prop;
+    dst->ptr_char_objectinstance = backup_ptr_char_objectinstance;
+    dst->model = backup_model;
+
+    dst->hands[0].rocket = backup_hand_rocket[0];
+    dst->hands[1].rocket = backup_hand_rocket[1];
+
+    dst->ptr_inventory_first_in_cycle = backup_ptr_inventory_first_in_cycle;
+    dst->p_itemcur = backup_p_itemcur;
+    dst->textoverrides = backup_textoverrides;
 }
 
 void save_bond_state(SavedBondState *dst) {
