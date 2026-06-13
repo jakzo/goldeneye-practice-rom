@@ -143,7 +143,7 @@ RSPOBJECTS := $(foreach file,$(RSPCODE),$(BUILD_DIR)/$(file:.s=.bin))
 CODEFILES := $(foreach dir,src,$(wildcard $(dir)/*.c))
 CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 
-PRACTICEFILES_C := $(foreach dir,src/practice,$(wildcard $(dir)/*.c))
+PRACTICEFILES_C := $(foreach dir,src/practice src/practice/state,$(wildcard $(dir)/*.c))
 PRACTICEOBJECTS := $(foreach file,$(PRACTICEFILES_C),$(BUILD_DIR)/$(file:.c=.o))
 
 GAMEFILES_C := $(foreach dir,src/game,$(wildcard $(dir)/*.c))
@@ -185,7 +185,7 @@ OBJECTS := $(RSPOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(OBSEGMENT)
 
 MIPSISET := -mips2 -32
 
-INCLUDE := -I . -I include -I include/ultra64 -I include/PR -I src -I src/game -I src/inflate
+INCLUDE := -I . -I include -I include/ultra64 -I include/PR -I src -I src/game -I src/inflate -I src/practice -I src/practice/state
 
 # ignore warnings:
 # 609 : The number of arguments in the macro invocation does not match the definition - disabled because CPPLib uses "VarArgs" which wasnt invented till c99

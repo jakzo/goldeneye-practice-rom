@@ -1,6 +1,7 @@
 #include "practice_ui.h"
 #include "game/bondview.h"
 #include "game/textrelated.h"
+#include "player.h"
 #include "practice_config.h"
 #include <PR/os.h>
 #include <bondconstants.h>
@@ -8,6 +9,75 @@
 #include <fr.h>
 #include <stdarg.h>
 #include <ultra64.h>
+
+typedef struct {
+  u32 start;
+  u32 end;
+  const char *name;
+} UnknownRange;
+
+static UnknownRange g_UnknownRanges[] = {
+    {0x94, 0x9C, "field_94_to_98"},
+    {0xFC, 0x104, "field_FC_to_100"},
+    {0x108, 0x10C, "field_108"},
+    {0x1A0, 0x1C0, "field_1A0_to_1BC"},
+    {0x42C, 0x430, "field_42C"},
+    {0x1068, 0x106C, "field_1068"},
+    {0x112C, 0x1130, "field_112C"},
+    {0x1280, 0x128C, "field_1280_to_1288"},
+    {0x1B20, 0x2128, "field_1B20_to_2124"},
+    {0x2250, 0x2858, "field_2250_to_2854"},
+    {0x28E0, 0x2998, "field_28E0_to_2994"},
+    {0x29B0, 0x29B8, "field_29B0_to_29B4"},
+    {0x2A74, 0x2A80, "field_2A74_to_2A7C"},
+};
+
+static u8 g_PrevPlayerState[sizeof(struct player)];
+static u8 g_PlayerStateInitialized = 0;
+
+static void practice_monitor_unknown_fields(void) {
+  u8 *curr;
+  s32 num_ranges;
+  s32 i;
+  UnknownRange range;
+  u32 offset;
+  u32 curr_val;
+  u32 prev_val;
+
+  if (g_CurrentPlayer == NULL) {
+    g_PlayerStateInitialized = 0;
+    return;
+  }
+
+  curr = (u8 *)g_CurrentPlayer;
+  num_ranges = sizeof(g_UnknownRanges) / sizeof(UnknownRange);
+
+  if (!g_PlayerStateInitialized) {
+    for (i = 0; i < num_ranges; i++) {
+      range = g_UnknownRanges[i];
+      for (offset = range.start; offset < range.end; offset += 4) {
+        *(u32 *)(g_PrevPlayerState + offset) = *(u32 *)(curr + offset);
+      }
+    }
+    g_PlayerStateInitialized = 1;
+    return;
+  }
+
+  for (i = 0; i < num_ranges; i++) {
+    range = g_UnknownRanges[i];
+    for (offset = range.start; offset < range.end; offset += 4) {
+      curr_val = *(u32 *)(curr + offset);
+      prev_val = *(u32 *)(g_PrevPlayerState + offset);
+
+      if (curr_val != prev_val) {
+        *(u32 *)(g_PrevPlayerState + offset) = curr_val;
+        // Log warning to screen with previous and current values
+        practiceLogWarn("Field 0x%X: 0x%08X -> 0x%08X", offset, prev_val,
+                        curr_val);
+      }
+    }
+  }
+}
 
 extern int sprintf(char *dst, const char *fmt, ...);
 
@@ -27,7 +97,7 @@ extern s32 _Printf(char *(*pfn)(char *, const char *, size_t), char *,
                    const char *, va_list);
 extern void *memcpy(void *dst, const void *src, size_t count);
 
-#define MAX_LOG_MESSAGES 32
+#define MAX_LOG_MESSAGES 20
 #define LOG_MESSAGE_MAX_LEN 256
 #define LOG_MESSAGE_DISPLAY_TIME_S 2.0f
 #define SLIDE_RATE_PER_S 640.0f
@@ -173,6 +243,8 @@ Gfx *practice_ui_render(Gfx *gdl) {
   s32 right_edge;
   OSTime current_time;
 
+  // practice_monitor_unknown_fields();
+
   gdl = microcode_constructor(gdl);
 
   // Reset the scissor box to cover the entire screen so we are not clipped by
@@ -235,6 +307,11 @@ Gfx *practice_ui_render(Gfx *gdl) {
       u32 color_fg = 0xFFFFFFFF;
       u32 color_glow = 0x000000FF;
 
+      if (y_bottom < 0) {
+        cull_queue(i + 1);
+        break;
+      }
+
       if (msg->width < 0) {
         textMeasure(&msg->height, &msg->width, msg->text,
                     (struct fontchar *)LOGGER_FONT_CHARS,
@@ -242,11 +319,6 @@ Gfx *practice_ui_render(Gfx *gdl) {
       }
 
       y_top = y_bottom - msg->height;
-
-      if (y_bottom < 0) {
-        cull_queue(i + 1);
-        break;
-      }
 
       age_cycles = current_time - msg->timestamp;
       if (age_cycles > g_LogLifetimeCycles) {

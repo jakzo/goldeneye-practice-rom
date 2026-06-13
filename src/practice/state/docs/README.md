@@ -1,0 +1,1 @@
+The markdown files in this directory document the fields used by the save/load state system. Each file contains the relevant structs and variables for that particular `.h`/`.c` source file and explains what the fields and variables do and whether they should be saved or not.

@@ -87,7 +87,9 @@
       build/OUTCODE/src/game/gobjdata2.o (.bss);
       build/OUTCODE/src/game/cobjdata.o (.bss);
       build/OUTCODE/src/game/cheat_buttons.o (.bss);
-      build/OUTCODE/src/practice/practice_states.o (.bss);
+      build/OUTCODE/src/practice/state/practice_states.o (.bss);
+      build/OUTCODE/src/practice/state/practice_states_bond.o (.bss);
+      build/OUTCODE/src/practice/state/practice_states_globals.o (.bss);
       build/OUTCODE/src/practice/practice_config.o (.bss);
       build/OUTCODE/src/practice/practice_hotkeys.o (.bss);
       build/OUTCODE/src/practice/practice_timescale.o (.bss);

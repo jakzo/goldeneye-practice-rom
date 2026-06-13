@@ -1,7 +1,7 @@
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
-#include "practice_states.h"
+#include "state/practice_states.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
 #include <bondconstants.h>

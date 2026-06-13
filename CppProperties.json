@@ -14,7 +14,9 @@
             "${workspaceRoot}\\include",
             "${workspaceRoot}\\src",
             "${workspaceRoot}\\src\\game",
-            "${workspaceRoot}\\src\\inflate"
+            "${workspaceRoot}\\src\\inflate",
+            "${workspaceRoot}\\src\\practice",
+            "${workspaceRoot}\\src\\practice\\state"
         ],
         "intelliSenseMode": "linux-gcc-x86",
         "defines": [
@@ -75,7 +77,9 @@
             "${workspaceRoot}\\include",
             "${workspaceRoot}\\src",
             "${workspaceRoot}\\src\\game",
-            "${workspaceRoot}\\src\\inflate"
+            "${workspaceRoot}\\src\\inflate",
+            "${workspaceRoot}\\src\\practice",
+            "${workspaceRoot}\\src\\practice\\state"
         ],
         "intelliSenseMode": "linux-gcc-x86",
         "defines": [

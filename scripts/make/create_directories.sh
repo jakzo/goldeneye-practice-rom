@@ -17,6 +17,7 @@ dirs=(
     src/game
     src/inflate
     src/practice
+    src/practice/state
 	src/libultra
     src/libultra/audio
     src/libultra/gt
