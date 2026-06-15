@@ -237,6 +237,20 @@ void practiceLogError(const char *fmt, ...) {
   va_end(args);
 }
 
+// Note that rendering text with outline causes the text to be rendered 9x
+#define RENDER_TEXT_WITH_OUTLINE TRUE
+
+Gfx *renderText(Gfx *gdl, s32 *x, s32 *y, char *text, s32 fontChars, s32 font,
+                u32 color, s16 viewX, s16 viewY) {
+#if RENDER_TEXT_WITH_OUTLINE
+  return textRenderGlow(gdl, x, y, text, fontChars, font, (s32)color,
+                        0x000000FF, viewX, viewY, 0, 0);
+#else
+  return textRender(gdl, x, y, text, fontChars, font, (s32)color, viewX, viewY,
+                    0, 0);
+#endif
+}
+
 Gfx *practice_ui_render(Gfx *gdl) {
   s32 i;
   s32 current_y;
@@ -257,9 +271,8 @@ Gfx *practice_ui_render(Gfx *gdl) {
     struct fontchar *charP = &fontCharsZurich['P'];
     s32 p_x = MARGIN_RIGHT;
     s32 p_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
-    gdl = textRenderGlow(gdl, &p_x, &p_y, "P", fontCharsZurich,
-                         ptrFontZurichBold, 0x00FF00FF, 0x000000FF,
-                         (s16)viGetX(), (s16)viGetY(), 0, 0);
+    gdl = renderText(gdl, &p_x, &p_y, "P", fontCharsZurich, ptrFontZurichBold,
+                     0x00CC00FF, viGetX(), viGetY());
 
     // Render mission timer next to the "P" indicator
     if (practice.show_mission_timer) {
@@ -274,9 +287,9 @@ Gfx *practice_ui_render(Gfx *gdl) {
       s32 color = is_timer_active ? 0xFFFFFFFF : 0xA0A0A0FF;
 
       sprintf(timer_buf, "%d:%02d.%02d", minutes, seconds, hundredths);
-      gdl = textRenderGlow(gdl, &timer_x, &timer_y, timer_buf,
-                           ptrFontBankGothicChars, ptrFontBankGothic, color,
-                           0x000000FF, (s16)viGetX(), (s16)viGetY(), 0, 0);
+      gdl =
+          renderText(gdl, &timer_x, &timer_y, timer_buf, ptrFontBankGothicChars,
+                     ptrFontBankGothic, color, viGetX(), viGetY());
     }
   }
 
@@ -300,7 +313,6 @@ Gfx *practice_ui_render(Gfx *gdl) {
       s32 view_vert;
       s32 view_top;
       u32 color_fg = 0xFFFFFFFF;
-      u32 color_glow = 0x000000FF;
 
       if (y_bottom < 0) {
         cull_queue(i + 1);
@@ -351,10 +363,10 @@ Gfx *practice_ui_render(Gfx *gdl) {
         break;
       }
 
-      // Render text with glow
-      gdl = textRenderGlow(gdl, &view_left, &view_vert, msg->text,
-                           LOGGER_FONT_CHARS, LOGGER_FONT_TABLE, (s32)color_fg,
-                           color_glow, (s16)(s32)viGetX(), (s16)viGetY(), 0, 0);
+      // Render text
+      gdl =
+          textRender(gdl, &view_left, &view_vert, msg->text, LOGGER_FONT_CHARS,
+                     LOGGER_FONT_TABLE, color_fg, viGetX(), viGetY(), 0, 0);
 
       current_y = y_top - LINE_SPACING; // Move up for the next message
     }
