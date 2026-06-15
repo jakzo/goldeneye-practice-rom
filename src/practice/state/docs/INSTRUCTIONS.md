@@ -23,13 +23,13 @@ After the current goal we will need to handle:
 
 ## Prompt
 
-Read through this entire document and implement another prop type into the save/load system. Make sure to:
+Read through this entire document and implement a prop type into the save/load system. Make sure to:
 
-- Choose a new prop to implement
+- Choose a prop/object type to implement
 - Prioritize props that are simple (ie. not pointers or things that need to be kept in sync with other things)
 - Document their purpose, possible values, etc. in the docs files the same way as the existing fields using the same format, and move them out of the TODO section
 - Tell me what to do in the game to test that it works and doesn't crash/hang
-- No need to update the changelog or walkthrough
+- No need to update the changelog, SAVE_STATE_VERSION or walkthrough
 
 ## Key Learnings
 

@@ -6,7 +6,7 @@
 
 s32 get_prop_index(PropRecord *prop);
 PropRecord *get_prop_by_index(s32 index);
-PropRecord *get_safe_prop_by_index(s32 index);
+PropRecord *get_enabled_prop_by_index(s32 index);
 s32 get_tile_offset(StandTile *tile);
 StandTile *get_tile_by_offset(s32 offset);
 

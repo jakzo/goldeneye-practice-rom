@@ -25,10 +25,14 @@
 #define SAVE_STATE_SRAM_OFFSET 0x200
 
 typedef struct {
-  u32 magic;    // 4 bytes magic value
-  u16 version;  // 2 bytes version
-  u16 size;     // 2 bytes total size
-  s32 level_id; // 4 bytes level ID
+  u32 magic;
+  u16 version;
+  u16 size;
+  s32 level_id;
+} SaveStateHeader;
+
+typedef struct {
+  SaveStateHeader header;
   SavedGlobals global_state;
   SavedBondState bond_state;
   SavedPropsState props_state;
