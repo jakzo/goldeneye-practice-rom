@@ -76,7 +76,7 @@ jobs:
       - name: Generate BPS patch
         run: |
           npx rom-patcher create baserom.u.z64 build/u/ge007.u.z64 --format bps
-          mv build/u/ge007.u.bps "${{ steps.tag.outputs.filename }}"
+          mv ge007.u.bps "${{ steps.tag.outputs.filename }}"
           ls -lh "${{ steps.tag.outputs.filename }}"
 
       - name: Verify patch produces built ROM
