@@ -264,24 +264,19 @@ Gfx *practice_ui_render(Gfx *gdl) {
     // Render mission timer next to the "P" indicator
     if (practice.show_mission_timer) {
       char timer_buf[16];
-      s32 timer_x = MARGIN_RIGHT;
-      s32 timer_y;
+      // Position timer to the right of the "P" with a small gap
+      s32 timer_x = p_x + 16;
+      s32 timer_y = p_y;
+      s32 missionTime = getMissiontimer();
+      s32 minutes = missionTime / 60 / 60;
+      s32 seconds = missionTime / 60 % 60;
+      s32 hundredths = (missionTime % 60) * 100 / 60;
+      s32 color = is_timer_active ? 0xFFFFFFFF : 0xA0A0A0FF;
 
-      if (is_timer_active && g_CameraMode == CAMERAMODE_FP) {
-        s32 missionTime = getMissiontimer();
-        s32 minutes = missionTime / 60 / 60;
-        s32 seconds = missionTime / 60 % 60;
-        s32 hundredths = (missionTime % 60) * 100 / 60;
-        sprintf(timer_buf, "%d:%02d.%02d", minutes, seconds, hundredths);
-
-        timer_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
-        // Position timer to the right of the "P" with a small gap
-        timer_x += 16;
-        gdl = textRenderGlow(gdl, &timer_x, &timer_y, timer_buf,
-                             ptrFontBankGothicChars, ptrFontBankGothic,
-                             0xFFFFFFFF, 0x000000FF, (s16)viGetX(),
-                             (s16)viGetY(), 0, 0);
-      }
+      sprintf(timer_buf, "%d:%02d.%02d", minutes, seconds, hundredths);
+      gdl = textRenderGlow(gdl, &timer_x, &timer_y, timer_buf,
+                           ptrFontBankGothicChars, ptrFontBankGothic, color,
+                           0x000000FF, (s16)viGetX(), (s16)viGetY(), 0, 0);
     }
   }
 

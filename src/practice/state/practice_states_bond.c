@@ -300,6 +300,7 @@ void load_bond_state(SavedBondState *src) {
 
   // 10. Re-generate watch menu GDLs and backdrop segment pointers to update
   // absolute physical addresses
+  // TODO: Load crashes when trying to load into watch after level reload
   {
     extern Gfx *sub_GAME_7F0A3330(Gfx * arg0, void *arg1, s32 arg2);
     extern void sub_GAME_7F0A69A8(void);
