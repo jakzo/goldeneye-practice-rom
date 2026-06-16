@@ -35,6 +35,7 @@
 #include "cheat_buttons.h"
 #include "practice/practice_grenade_cam.h"
 #include "practice/practice_ui.h"
+#include "practice/practice_replay.h"
 #include "bg.h"
 #include "objective.h"
 #include "mp_watch.h"
@@ -507,6 +508,9 @@ void lvlStageLoad(s32 stage)
     viSetVideoMode(MD_NORMAL);
     D_80048368 = 1.0f;
     lvlSetControlsLockedFlag(0);
+#ifdef PRACTICE_ROM
+    practice_replay_on_stage_load();
+#endif
 }
 
 

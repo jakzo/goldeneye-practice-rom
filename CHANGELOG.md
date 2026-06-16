@@ -1,6 +1,7 @@
 ### Unreleased
 
 - Fixed bug with sound being disabled for the save on first boot
+- Save state support for doors
 
 # 0.2.0
 
