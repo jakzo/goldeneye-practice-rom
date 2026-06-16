@@ -85,3 +85,14 @@ The codebase heavily utilizes standard decompilation patterns to bridge C with y
     #pragma GLOBAL_ASM("asm/nonmatchings/game/some_file/some_func.s")
     ```
 - The python preprocessor `tools/asm-processor/asm_processor.py` intercepts this during compile, compiles the `.s` file, and stabs the generated object code directly into the compiled C unit to allow matching builds.
+
+---
+
+## 6. Adding New Source Files
+
+When adding a new `.c` file, Makefile will automatically pick it up but it must be added manually to the linker scripts at:
+
+- `ld/game.text.ld.inc`
+- `ld/game.data.ld.inc`
+- `ld/game.bss.ld.inc`
+- `ld/game.rodata.ld.inc`

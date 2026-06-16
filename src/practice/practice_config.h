@@ -9,9 +9,11 @@ struct PracticeConfig {
   s32 boot_level;
   s32 disable_intro_cutscenes;
   s32 show_debug_logs;
+  f32 log_message_duration;
   s32 show_hundredths_on_timer;
   s32 show_mission_timer;
   s32 grenade_cam;
+  s32 splits_enabled;
 };
 
 extern struct PracticeConfig practice;

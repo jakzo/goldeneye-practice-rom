@@ -1,5 +1,7 @@
 ### Unreleased
 
+- Added a splits system
+    - Has some initial splits for Runway
 - Fixed bug with sound being disabled for the save on first boot
 - Save state support for doors
 

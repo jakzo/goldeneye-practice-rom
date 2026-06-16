@@ -44,6 +44,7 @@
 #include "unk_0B3200.h"
 #include "practice/practice_timescale.h"
 #include "practice/practice_hotkeys.h"
+#include "practice/practice_splits.h"
 #include "practice/practice_ui.h"
 #include "practice/state/practice_states_utils.h"
 
@@ -11752,6 +11753,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 
 #if PRACTICE_ROM
     }
+    splits_tick();
 #endif
 
 #if defined(BUGFIX_R1)

@@ -99,7 +99,6 @@ extern void *memcpy(void *dst, const void *src, size_t count);
 
 #define MAX_LOG_MESSAGES 20
 #define LOG_MESSAGE_MAX_LEN 256
-#define LOG_MESSAGE_DISPLAY_TIME_S 2.0f
 #define SLIDE_RATE_PER_S 640.0f
 #define SLIDE_DURATION 1.0f
 #define MARGIN_BOTTOM 9
@@ -133,7 +132,7 @@ static f32 g_LogSlideRate = 0.0f;
 static void ensure_timing_initialized(void) {
   if (g_LogLifetimeCycles != 0)
     return;
-  g_LogLifetimeCycles = (OSTime)(osClockRate * LOG_MESSAGE_DISPLAY_TIME_S);
+  g_LogLifetimeCycles = (OSTime)(osClockRate * practice.log_message_duration);
   g_LogSlideCycles = (OSTime)(osClockRate * SLIDE_DURATION);
   g_LogSlideRate = SLIDE_RATE_PER_S / (f32)osClockRate;
 }
@@ -365,8 +364,10 @@ Gfx *practice_ui_render(Gfx *gdl) {
 
       // Render text
       gdl =
-          textRender(gdl, &view_left, &view_vert, msg->text, LOGGER_FONT_CHARS,
-                     LOGGER_FONT_TABLE, color_fg, viGetX(), viGetY(), 0, 0);
+          renderText(gdl, &view_left, &view_vert, msg->text, LOGGER_FONT_CHARS,
+                     LOGGER_FONT_TABLE, color_fg, viGetX(), viGetY());
+      // textRender(gdl, &view_left, &view_vert, msg->text, LOGGER_FONT_CHARS,
+      //            LOGGER_FONT_TABLE, color_fg, viGetX(), viGetY(), 0, 0);
 
       current_y = y_top - LINE_SPACING; // Move up for the next message
     }

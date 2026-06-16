@@ -35,6 +35,7 @@
 #include "cheat_buttons.h"
 #include "practice/practice_grenade_cam.h"
 #include "practice/practice_ui.h"
+#include "practice/practice_splits.h"
 #include "practice/practice_replay.h"
 #include "bg.h"
 #include "objective.h"
@@ -510,6 +511,7 @@ void lvlStageLoad(s32 stage)
     lvlSetControlsLockedFlag(0);
 #ifdef PRACTICE_ROM
     practice_replay_on_stage_load();
+    splits_init();
 #endif
 }
 

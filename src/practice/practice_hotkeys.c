@@ -1,6 +1,7 @@
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
+#include "practice_splits.h"
 #include "state/practice_states.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
@@ -48,6 +49,11 @@ bool practice_check_hotkeys(void) {
     f32 new_time_scale = ((s32)(g_TimeScale * 10.0f + 0.5f) + 1) * 0.1f;
     set_time_scale(new_time_scale);
     practiceLogInfo("Time scale: %.1f", g_TimeScale);
+    return TRUE;
+  }
+
+  // Splits hotkey: trigger + C-down logs Bond's position
+  if (splits_handle_hotkey()) {
     return TRUE;
   }
 

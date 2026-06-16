@@ -100,6 +100,7 @@
       build/OUTCODE/src/practice/practice_grenade_cam.o (.rodata);
       build/OUTCODE/src/practice/practice_sram.o (.rodata);
       build/OUTCODE/src/practice/practice_replay.o (.rodata);
+      build/OUTCODE/src/practice/practice_splits.o (.rodata);
       build/OUTCODE/src/game/unk_092890.o (.rodata);
       build/OUTCODE/src/game/unk_092E50.o (.rodata);
       build/OUTCODE/src/game/player.o (.rodata);
