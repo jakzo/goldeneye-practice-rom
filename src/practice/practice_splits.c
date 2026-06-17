@@ -289,22 +289,22 @@ void splits_tick(void) {
   if (!s_LevelSummaryLogged && s_SplitsTriggered > 0 &&
       g_CameraMode == CAMERAMODE_POSEND) {
     s_LevelSummaryLogged = TRUE;
-    practiceLogInfo("--- Final Splits ---");
-    prev_time = 0;
-    for (i = 0; i < s_SplitsTriggered; i++) {
-      split = &s_CurrentSplitList->splits[i];
-      delta = s_SplitCumulativeTimes[i] - prev_time;
-      format_time(s_SplitCumulativeTimes[i], time_buf, TRUE);
-      format_time(delta, delta_buf, FALSE);
-      practiceLogInfo("[%d/%d] %s = (+ %s) %s", i + 1, s_TotalSplits,
-                      split->name, delta_buf, time_buf);
-      prev_time = s_SplitCumulativeTimes[i];
-    }
-    // Log overall time
-    if (s_SplitsTriggered > 0) {
-      format_time(mission_timer, time_buf, TRUE);
-      practiceLogInfo("Final time: %s", time_buf);
-    }
+    // practiceLogInfo("--- Final Splits ---");
+    // prev_time = 0;
+    // for (i = 0; i < s_SplitsTriggered; i++) {
+    //   split = &s_CurrentSplitList->splits[i];
+    //   delta = s_SplitCumulativeTimes[i] - prev_time;
+    //   format_time(s_SplitCumulativeTimes[i], time_buf, TRUE);
+    //   format_time(delta, delta_buf, FALSE);
+    //   practiceLogInfo("[%d/%d] %s = (+ %s) %s", i + 1, s_TotalSplits,
+    //                   split->name, delta_buf, time_buf);
+    //   prev_time = s_SplitCumulativeTimes[i];
+    // }
+    // // Log overall time
+    // if (s_SplitsTriggered > 0) {
+    //   format_time(mission_timer, time_buf, TRUE);
+    //   practiceLogInfo("Final time: %s", time_buf);
+    // }
     return;
   }
 
@@ -339,8 +339,9 @@ void splits_tick(void) {
     format_time(delta, delta_buf, FALSE);
 
     // Log the split
-    practiceLogInfo("SPLIT %d/%d: %s - %s (delta: %s)", s_SplitsTriggered + 1,
-                    s_TotalSplits, next_split->name, time_buf, delta_buf);
+    // practiceLogInfo("SPLIT %d/%d: %s - %s (delta: %s)", s_SplitsTriggered +
+    // 1,
+    //                 s_TotalSplits, next_split->name, time_buf, delta_buf);
 
     s_LastMissionTimer = current_time;
     s_SplitsTriggered++;
@@ -348,36 +349,84 @@ void splits_tick(void) {
   }
 }
 
-s32 splits_handle_hotkey(void) {
-  u16 trigger;
-  u16 jgb;
-  u16 jgbptf;
-  PropRecord *prop;
+void splits_log_position(void) {
+  PropRecord *prop = get_curplayer_positiondata();
+  if (prop != NULL) {
+    practiceLogDebug("Bond pos: x=%.1f y=%.1f z=%.1f", prop->pos.x, prop->pos.y,
+                     prop->pos.z);
+  } else {
+    practiceLogDebug("Bond pos: (no player data)");
+  }
+}
 
-  if (!practice.splits_enabled) {
-    return FALSE;
+// Extern declarations for menu rendering
+extern Gfx *frontPrintText(Gfx *gdl, s32 *x, s32 *y, s8 *text, s32 second_font_table, s32 first_font_table, s32 arg6, s32 view_x, s32 view_y, s32 arg9, s32 arga);
+extern s16 viGetX(void);
+extern s16 viGetY(void);
+extern s32 ptrFontZurichBold;
+extern s32 ptrFontZurichBoldChars;
+extern int sprintf(char *dst, const char *fmt, ...);
+
+s32 splits_have_final(void) {
+  return practice.splits_enabled && s_CurrentSplitList != NULL;
+}
+
+Gfx *splits_render_final(Gfx *DL) {
+  s32 i;
+  s32 x;
+  s32 y;
+  s32 prev_time = 0;
+  s32 y_spacing;
+
+  // Title "FINAL SPLITS"
+  // x = 55;
+  // y = 204;
+  // DL = frontPrintText(DL, &x, &y, (s8 *)"FINAL SPLITS", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+
+  if (s_TotalSplits == 0) {
+    x = 55;
+    y = 220;
+    DL = frontPrintText(DL, &x, &y, (s8 *)"No splits configured", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+    return DL;
   }
 
-  trigger = practice.left_trigger_hotkeys ? L_TRIG : R_TRIG;
-  jgb = joyGetButtons(get_cur_playernum(), ANY_BUTTON);
+  // Single Column Layout
+  y_spacing = 13;
+  y = 204;
 
-  if (!(jgb & trigger)) {
-    return FALSE;
-  }
+  for (i = 0; i < s_TotalSplits; i++) {
+    const SplitArea *split = &s_CurrentSplitList->splits[i];
+    char name_buf[32];
+    char time_buf[16];
+    char delta_buf[24];
+    s32 x_pos;
 
-  jgbptf = joyGetButtonsPressedThisFrame(get_cur_playernum(), ANY_BUTTON);
+    // Print split number and name
+    sprintf(name_buf, "%d. %s", i + 1, split->name);
+    x_pos = 55;
+    DL = frontPrintText(DL, &x_pos, &y, (s8 *)name_buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
 
-  // C-down = CONT_C (0x0002)
-  if (jgbptf & CONT_C) {
-    prop = get_curplayer_positiondata();
-    if (prop != NULL) {
-      practiceLogDebug("Bond pos: x=%.1f y=%.1f z=%.1f", prop->pos.x,
-                       prop->pos.y, prop->pos.z);
+    if (i < s_SplitsTriggered) {
+      s32 cumulative = s_SplitCumulativeTimes[i];
+      s32 delta = cumulative - prev_time;
+      format_time(cumulative, time_buf, TRUE);
+      format_time(delta, delta_buf, FALSE);
+      prev_time = cumulative;
+
+      // Print cumulative time
+      x_pos = 240;
+      DL = frontPrintText(DL, &x_pos, &y, (s8 *)time_buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+
+      // Print delta
+      sprintf(name_buf, "(+%s)", delta_buf);
+      x_pos = 310;
+      DL = frontPrintText(DL, &x_pos, &y, (s8 *)name_buf, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     } else {
-      practiceLogDebug("Bond pos: (no player data)");
+      x_pos = 240;
+      DL = frontPrintText(DL, &x_pos, &y, (s8 *)"-:--.--", ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
     }
-    return TRUE;
+    y += y_spacing;
   }
 
-  return FALSE;
+  return DL;
 }

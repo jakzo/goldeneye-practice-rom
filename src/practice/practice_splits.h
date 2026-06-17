@@ -46,6 +46,9 @@ void splits_tick(void);
  * Logs Bond's current position as a debug message.
  * Returns TRUE if the hotkey was consumed.
  */
-s32 splits_handle_hotkey(void);
+void splits_log_position(void);
+
+s32 splits_have_final(void);
+Gfx *splits_render_final(Gfx *DL);
 
 #endif /* PRACTICE_SPLITS_H */

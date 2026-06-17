@@ -12,7 +12,7 @@
 .word  0x00000000 # unknown
 .word  0x0000004E # cartridge
 .ifdef PRACTICE_ROM
-.ascii "ED"       # cartridge ID (Advanced Homebrew ROM Header)
+.ascii "ZL"       # cartridge ID (Advanced Homebrew ROM Header)
 .else
 .ascii "GE"       # cartridge ID
 .endif

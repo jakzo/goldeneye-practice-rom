@@ -510,8 +510,10 @@ void lvlStageLoad(s32 stage)
     D_80048368 = 1.0f;
     lvlSetControlsLockedFlag(0);
 #ifdef PRACTICE_ROM
-    practice_replay_on_stage_load();
-    splits_init();
+    if (g_CurrentStageToLoad != LEVELID_TITLE) {
+        practice_replay_on_stage_load();
+        splits_init();
+    }
 #endif
 }
 

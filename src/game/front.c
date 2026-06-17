@@ -46,6 +46,7 @@
 
 #ifdef PRACTICE_ROM
 #include "practice/practice_config.h"
+#include "practice/practice_splits.h"
 #endif
 
 
@@ -8110,6 +8111,11 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     }
 
 
+#ifdef PRACTICE_ROM
+    if (splits_have_final()) {
+        DL = splits_render_final(DL);
+    } else {
+#endif
     text = langGet(getStringID(LTITLE, TITLE_STR_106_ACCURACY)); //Accuracy:*
     x = 0x37;
     y = 0xCC;
@@ -8200,6 +8206,9 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     x = 0x82;
     y = y2 + 0xF4;
     DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
+#ifdef PRACTICE_ROM
+    }
+#endif
 
 
     DL = frontAddNextTabText(DL);

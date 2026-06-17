@@ -1,15 +1,18 @@
+#include "game/lvl.h"
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
 #include "practice_splits.h"
-#include "state/practice_states.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
+#include "state/practice_states.h"
 #include <bondconstants.h>
 #include <bondgame.h>
 #include <joy.h>
 #include <os_extension.h>
 #include <ultra64.h>
+
+extern s32 g_CurrentStageToLoad;
 
 extern int sprintf(char *dst, const char *fmt, ...);
 
@@ -25,10 +28,10 @@ bool practice_check_hotkeys(void) {
     return FALSE;
   }
 
-  if (!g_IsTimePaused)
-    pause();
-
   jgbptf = joyGetButtonsPressedThisFrame(get_cur_playernum(), ANY_BUTTON);
+
+  if ((jgbptf & trigger) && !g_IsTimePaused)
+    pause();
 
   if (jgbptf & D_JPAD) {
     save_game_state();
@@ -52,8 +55,15 @@ bool practice_check_hotkeys(void) {
     return TRUE;
   }
 
-  // Splits hotkey: trigger + C-down logs Bond's position
-  if (splits_handle_hotkey()) {
+  if (jgbptf & D_CBUTTONS) {
+    splits_log_position();
+    return TRUE;
+  }
+
+  if (jgbptf & START_BUTTON) {
+    unpause();
+    lvlStageLoad(g_CurrentStageToLoad);
+    practiceLogInfo("Level restarted");
     return TRUE;
   }
 
