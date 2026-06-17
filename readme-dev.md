@@ -1,12 +1,17 @@
 ## Quick start
 
-- Copy the US version of the Goldeneye ROM to `baserom.u.z64` in the repo root
-- Install and run Docker
-- Run `docker build -t goldeneye .`
-- Extract assets from the ROM with `docker run --rm -v $(pwd):/home/dev goldeneye ./scripts/extract_baserom.u.sh`
-- Build with `docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 FINAL=NO`
-    - For future builds just run this command again, the others were one-off setup
-- The built ROM will be at `build/u/ge007.u.z64`
+We use a [`justfile`](https://github.com/casey/just)!
+
+```sh
+# just run `just` by itself to see all available commands
+just
+
+# only need to run this once to setup the repository
+just setup
+
+# builds the rom, and uploads it to a connected summercart64
+just sc64
+```
 
 ## Development
 
