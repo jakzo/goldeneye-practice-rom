@@ -8,7 +8,7 @@
 // TODO: This is safer but makes the memory usage huge
 // #define PROPS_STATE_BUFFER_MAX (sizeof(SavedRecordsOfProp) *
 // POS_DATA_ENTRY_LEN)
-#define PROPS_STATE_BUFFER_MAX 12000
+#define PROPS_STATE_BUFFER_MAX 60000
 
 typedef struct {
   u16 byteSize;
@@ -47,7 +47,24 @@ typedef struct {
   f32 damage;
   rgba_u8 shadecol;
   rgba_u8 nextcol;
+  // Projectile/embedment state stored separately as global array snapshots.
+  // These indices reference into the restored g_Projectiles[] / g_Embedments[].
+  s16 projectileIdx;
+  s16 embedmentIdx;
+  u32 switchStates;
 } SavedObjectRecord;
+
+// Entries for the projectile/embedment global array snapshots saved after
+// all prop records.
+typedef struct {
+  s32 index;
+  Projectile projectile;
+} SavedProjectileEntry;
+
+typedef struct {
+  s32 index;
+  Embedment embedment;
+} SavedEmbedmentEntry;
 
 typedef struct {
   SavedObjectRecord obj;
@@ -93,10 +110,193 @@ typedef struct {
 } SavedKeyRecord;
 
 typedef struct {
+  SavedObjectRecord obj;
+  s32 pad;
+  Mtxf unk84;
+  f32 unkC4;
+  f32 unkC8;
+  f32 unkCC;
+  f32 unkD0;
+  s32 unkD4;
+  f32 unkD8;
+  f32 unkDC;
+  s32 timer;
+  s32 convert_to_f32;
+  f32 unkE8;
+  s32 unkEC;
+  s32 unkF0;
+  s32 unkF4;
+  s32 unkF8;
+} SavedCCTVRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  s32 ammoType;
+} SavedAmmoCrateRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  s8 weaponnum;
+  s8 LinkedWeaponType;
+  s16 timer;
+  s16 dualweaponPropIndex;
+} SavedWeaponObjRecord;
+
+typedef struct {
+  u32 cmdlist;
+  u16 offset;
+  s16 pause60;
+  u32 tconfig;
+  f32 rot;
+  f32 xscale, xscalefrac, xscaleinc, xscaleold, xscalenew;
+  f32 yscale, yscalefrac, yscaleinc, yscaleold, yscalenew;
+  f32 xmid, xmidfrac, xmidinc, xmidold, xmidnew;
+  f32 ymid, ymidfrac, ymidinc, ymidold, ymidnew;
+  u8 red, redold, rednew;
+  u8 green, greenold, greennew;
+  u8 blue, blueold, bluenew;
+  u8 alpha, alphaold, alphanew;
+  f32 colfrac, colinc;
+} SavedMonitorRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  SavedMonitorRecord Monitor;
+  s32 OwnerOffset;
+  s32 OwnerPart;
+  s32 ImageNum;
+} SavedMonitorObjRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  SavedMonitorRecord Monitor[4];
+  u8 ImageNums[4];
+} SavedMultiMonitorObjRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  s32 padID;
+  f32 rot_related;
+  f32 unk88;
+  f32 unk8C;
+  f32 unk90;
+  f32 unk94;
+  f32 unk98;
+  f32 unk9C;
+  f32 unkA0;
+  f32 speed;
+  f32 aimdist;
+  s32 unkAC;
+  f32 unkB0;
+  f32 unkB4;
+  s32 unkB8;
+  s32 unkBC;
+  s32 unkC0;
+  s32 is_active;
+  f32 unkD4;
+  struct beam beam;
+} SavedAutogunRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  u16 unk80;
+  u16 quantities[AMMOTYPE_GLOBAL_MAX];
+} SavedMultiAmmoCrateRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  f32 initialamount;
+  f32 amount;
+} SavedBodyArmourRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  u32 ailist;
+  u16 aioffset;
+  s16 aireturnlist;
+  f32 speed;
+  f32 wheelxrot;
+  f32 wheelyrot;
+  f32 speedaim;
+  f32 speedtime60;
+  f32 turnrot60;
+  f32 roty;
+  u32 path;
+  s32 nextstep;
+} SavedVehichleRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  u32 ailist;
+  u16 aioffset;
+  s16 aireturnlist;
+  f32 rotoryrot;
+  f32 rotaryspeed;
+  f32 rotaryspeedaim;
+  f32 rotaryspeedtime;
+  f32 speed;
+  f32 speedaim;
+  f32 speedtime60;
+  f32 yrot;
+  s32 nextstep;
+  u32 path;
+} SavedAircraftRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  coord3d normal;
+} SavedGlassRecord;
+
+typedef SavedGlassRecord SavedSafeRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  s32 TintDist;
+  s32 CullDist;
+  s32 calculatedopacity;
+  s32 portalnum;
+  f32 unk90;
+} SavedTintedGlassRecord;
+
+typedef struct {
+  SavedObjectRecord obj;
+  struct rect4f rect;
+  s32 unkA4;
+  s32 unkA8;
+  s32 unkAC;
+  s32 unkB0;
+  s32 unkB4;
+  s32 unkB8;
+  s32 unkBC;
+  s32 unkC0;
+  s32 is_firing_tank;
+  f32 turret_vertical_angle;
+  f32 turret_orientation_angle;
+  f32 unkD0;
+  f32 stan_y;
+  s32 unkD8;
+  f32 tank_orientation_angle;
+} SavedTankRecord;
+
+typedef struct {
   SavedPropRecord prop;
   union {
     SavedDoorRecord door;
-    // TODO: Add future structs here
+    SavedKeyRecord key;
+    SavedCCTVRecord cctv;
+    SavedAmmoCrateRecord magazine;
+    SavedWeaponObjRecord weaponObj;
+    SavedMonitorObjRecord monitor;
+    SavedMultiMonitorObjRecord multiMonitor;
+    SavedAutogunRecord autogun;
+    SavedMultiAmmoCrateRecord ammoCrate;
+    SavedBodyArmourRecord armour;
+    SavedVehichleRecord vehicle;
+    SavedAircraftRecord aircraft;
+    SavedGlassRecord glass;
+    SavedSafeRecord safe;
+    SavedTintedGlassRecord tintedGlass;
+    SavedTankRecord tank;
   } type;
 } SavedRecordsOfProp;
 

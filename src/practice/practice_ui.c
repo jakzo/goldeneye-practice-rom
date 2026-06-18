@@ -277,7 +277,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
     if (practice.show_mission_timer) {
       char timer_buf[16];
       // Position timer to the right of the "P" with a small gap
-      s32 timer_x = p_x + 16;
+      s32 timer_x = p_x + 8;
       s32 timer_y = p_y;
       s32 missionTime = getMissiontimer();
       s32 minutes = missionTime / 60 / 60;

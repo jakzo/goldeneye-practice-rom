@@ -51,6 +51,8 @@ docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0
 
 I find I need to do this when switching between building with `FINAL=YES` and `FINAL=NO`.
 
+I also find that ares needs a restart from time and time. I've spent a lot of time ripping my hair out trying to find out why something hangs in a certain situation, only to find out it works after restarting ares!
+
 ## Release
 
 All pushes to master branch trigger Github actions to build a patch and release it as a prerelease.
