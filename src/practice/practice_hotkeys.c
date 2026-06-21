@@ -2,6 +2,7 @@
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
+#include "practice_memory.h"
 #include "practice_splits.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
@@ -57,6 +58,11 @@ bool practice_check_hotkeys(void) {
 
   if (jgbptf & D_CBUTTONS) {
     splits_log_position();
+    return TRUE;
+  }
+
+  if (jgbptf & R_CBUTTONS) {
+    practice_log_memory_usage();
     return TRUE;
   }
 

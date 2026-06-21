@@ -95,6 +95,7 @@
       build/OUTCODE/src/practice/state/practice_states_utils.o (.text);
       build/OUTCODE/src/practice/practice_config.o (.text);
       build/OUTCODE/src/practice/practice_hotkeys.o (.text);
+      build/OUTCODE/src/practice/practice_memory.o (.text);
       build/OUTCODE/src/practice/practice_timescale.o (.text);
       build/OUTCODE/src/practice/practice_ui.o (.text);
       build/OUTCODE/src/practice/practice_unlock.o (.text);
