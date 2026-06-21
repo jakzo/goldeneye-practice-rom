@@ -203,7 +203,19 @@ else
   CC := $(IRIX_ROOT)/cc
 endif
 
-CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM
+BOOT_LEVEL ?= LEVELID_TITLE
+
+CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL)
+
+# Ensure the build directory for practice files exists
+$(shell mkdir -p $(BUILD_DIR)/src/practice)
+
+# Force recompilation of practice_config.o if the BOOT_LEVEL changes
+OLD_BOOT_LEVEL := $(shell cat $(BUILD_DIR)/src/practice/boot_level.txt 2>/dev/null)
+ifneq ($(OLD_BOOT_LEVEL),$(BOOT_LEVEL))
+  $(shell echo "$(BOOT_LEVEL)" > $(BUILD_DIR)/src/practice/boot_level.txt)
+  $(shell rm -f $(BUILD_DIR)/src/practice/practice_config.o)
+endif
 
 LD := $(TOOLCHAIN)ld
 LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld

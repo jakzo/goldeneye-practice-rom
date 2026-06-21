@@ -33,7 +33,11 @@ However if you use an emulator like [ares](https://ares-emu.net/download) you ca
 docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 FINAL=NO
 ```
 
-**But this is not working right now.** For some reason it only shows a black screen on startup and I haven't figured out why yet.
+But there are some limitations:
+
+- It often compiles to a ROM which only shows a black screen on startup
+    - Need to run the full fresh build command below to fix
+- The compiler does not support DWARF debug symbols so no line breaks
 
 However if you want to run on the console this is missing optimizations and there is no need for debugging symbols so using `FINAL=YES` (default) then you can compile a more console-friendly build:
 
@@ -43,15 +47,31 @@ docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0
 
 If something goes wrong and you're getting mysterious build errors, clean and start fresh with:
 
+> **Warning:** this will delete any uncommitted or ignored files inside the repo directory!
+
 ```sh
-docker run --rm -v $(pwd):/home/dev goldeneye make nuke && \
+git clean -fdx -e '.vscode/*' -e 'baserom.u.z64' && \
+docker image rm goldeneye && \
+docker build -t goldeneye . && \
 docker run --rm -v $(pwd):/home/dev goldeneye ./scripts/extract_baserom.u.sh && \
-docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0
+docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 FINAL=YES
 ```
 
 I find I need to do this when switching between building with `FINAL=YES` and `FINAL=NO`.
 
 I also find that ares needs a restart from time and time. I've spent a lot of time ripping my hair out trying to find out why something hangs in a certain situation, only to find out it works after restarting ares!
+
+I use this on Mac to run in ares:
+
+```sh
+/Applications/ares.app/Contents/MacOS/ares --system "Nintendo 64" ./build/u/ge007.u.z64
+```
+
+You can also build it to start in a specific level:
+
+```sh
+docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 BOOT_LEVEL=LEVELID_RUNWAY
+```
 
 ## Release
 
