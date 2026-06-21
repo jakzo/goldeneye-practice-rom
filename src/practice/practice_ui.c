@@ -5,6 +5,7 @@
 #include "practice_config.h"
 #include <PR/os.h>
 #include <bondconstants.h>
+#include "emu_log.h"
 #include <bondtypes.h>
 #include <fr.h>
 #include <stdarg.h>
@@ -204,6 +205,9 @@ static void add_to_log_queue(LogLevel level, const char *fmt, va_list args) {
   msg->height = -1;
 
   g_LogQueueCount++;
+
+  // Also forward to emulator log (ISViewer protocol)
+  emu_log_write(msg->text);
 }
 
 void practiceLogDebug(const char *fmt, ...) {

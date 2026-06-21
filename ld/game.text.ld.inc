@@ -87,6 +87,7 @@
       build/OUTCODE/src/game/gobjdata2.o (.text);
       build/OUTCODE/src/game/cobjdata.o (.text);
       build/OUTCODE/src/game/cheat_buttons.o (.text);
+      build/OUTCODE/src/practice/emu_log.o (.text);
       build/OUTCODE/src/practice/state/practice_states.o (.text);
       build/OUTCODE/src/practice/state/practice_states_bond.o (.text);
       build/OUTCODE/src/practice/state/practice_states_globals.o (.text);
