@@ -334,6 +334,9 @@
  * _VA_ARGS_ for c89
  * Allows up to 32 Args on the stack
  */
+#ifdef __GNUC__
+#define EXPAND_ARGS_STACK(...) __VA_ARGS__
+#else
 #define EXPAND_ARGS_STACK(A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,AA,AB,AC,AD,AE,AF,ERROR) \
 IF_VA(NOT(IS_EMPTY(A)))/*
 */(/*
@@ -436,6 +439,7 @@ IF_VA(NOT(IS_EMPTY(A)))/*
 																																	*/COMMA() undefinedlocal = 1/0 "_VA_ARGS Stack full"/*
 																																*/)/*
 */)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)	)
+#endif
 /**
  * Push/Pop VA Args arrays
  */

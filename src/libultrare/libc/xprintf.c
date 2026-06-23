@@ -34,16 +34,16 @@
 static char spaces[] = "                                ";
 static char zeroes[] = "00000000000000000000000000000000";
 
-static void _Putfld(printf_struct *pf, va_list *pap, char code, char *ac);
-int _Printf(outfun prout, char *arg, const char *fmt, va_list args)
+static void _Putfld(printf_struct *pf, va_list *pap, char code, u8 *ac);
+int _Printf(outfun prout, u8 *arg, const u8 *fmt, va_list args)
 {
     printf_struct x;
-    const char *s;
+    const u8 *s;
     char c;
     const char *t;
     static const char fchar[6] = " +-#0";
     static const int fbit[6] = {FLAGS_SPACE, FLAGS_PLUS, FLAGS_MINUS, FLAGS_HASH, FLAGS_ZERO, 0};
-    char ac[32];
+    u8 ac[32];
     x.size = 0;
     for (;;)
     {
@@ -113,7 +113,7 @@ int _Printf(outfun prout, char *arg, const char *fmt, va_list args)
     return 0;
 }
 
-static void _Putfld(printf_struct *x, va_list *args, char type, char *buff)
+static void _Putfld(printf_struct *x, va_list *args, char type, u8 *buff)
 {
     x->n0 = x->num_leading_zeros = x->part2_len = x->num_mid_zeros = x->part3_len =
         x->num_trailing_zeros = 0;
@@ -151,7 +151,7 @@ static void _Putfld(printf_struct *x, va_list *args, char type, char *buff)
             buff[x->n0++] = ' ';
         }
 
-        x->buff = (char *)&buff[x->n0];
+        x->buff = (u8 *)&buff[x->n0];
 
         _Litob(x, type);
         break;
@@ -191,7 +191,7 @@ static void _Putfld(printf_struct *x, va_list *args, char type, char *buff)
                 buff[x->n0++] = type;
             }
         }
-        x->buff = (char *)&buff[x->n0];
+        x->buff = (u8 *)&buff[x->n0];
         _Litob(x, type);
         break;
 
@@ -210,7 +210,7 @@ static void _Putfld(printf_struct *x, va_list *args, char type, char *buff)
         else if (x->flags & FLAGS_SPACE)
             buff[x->n0++] = ' ';
 
-        x->buff = (char *)&buff[x->n0];
+        x->buff = (u8 *)&buff[x->n0];
         _Ldtob(x, type);
         break;
 
@@ -227,13 +227,13 @@ static void _Putfld(printf_struct *x, va_list *args, char type, char *buff)
 
     case 'p':
         x->value.s64 = (long)va_arg(*args, void *);
-        x->buff = (char *)&buff[x->n0];
+        x->buff = (u8 *)&buff[x->n0];
         _Litob(x, 'x');
         break;
 
     case 's':
-        x->buff = va_arg(*args, char *);
-        x->part2_len = strlen(x->buff);
+        x->buff = (u8 *)va_arg(*args, char *);
+        x->part2_len = strlen((const char *)x->buff);
         if (x->precision >= 0 && x->part2_len > x->precision)
             x->part2_len = x->precision;
         break;

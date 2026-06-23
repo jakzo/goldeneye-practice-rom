@@ -14,7 +14,11 @@ $(BUILD_DIR)/$(OBSEG_DIR)/stan/%.elf: $(BUILD_DIR)/$(OBSEG_DIR)/stan/%.o
 # suppress warning 807 for variable length array declarations
 # cfe: Warning 807: src/game/stan.h, line 136: member cannot be of function or incomplete type.
 $(BUILD_DIR)/$(OBSEG_DIR)/stan/%.o: $(OBSEG_DIR)/stan/%.c
+ifeq ($(GCC), YES)
+	$(CC) -c $(CFLAGS) -o $@ -O2 $<
+else
 	$(CC) -c $(CFLAGS) -woff 807 -o $@ -O2 $<
+endif
 
 STAN_NAMES := \
     Tbg_ame_all_p_stanZ \

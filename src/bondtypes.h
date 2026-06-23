@@ -27,7 +27,6 @@
 #include <ultra64.h>
 #include <bondconstants.h>
 #include "snd.h"
-#include "game/chrobjdata.h"
 
 /**
  * Syntax Sugar for clarification of intent
@@ -241,6 +240,9 @@ typedef union
             f32 f[3];
         };
     } coord3d;
+#ifdef __GNUC__
+#define New_Coord3d(...) { 0.0f, 0.0f, 0.0f }
+#else
 #define New_Coord3d(x, y, z)            \
     {                                   \
         IF_ELSE(IS_EMPTY(x))            \
@@ -248,13 +250,18 @@ typedef union
             IF_ELSE(IS_EMPTY(y))(0)(y), \
             IF_ELSE(IS_EMPTY(z))(0)(z)  \
     }
+#endif
     typedef coord3d vec3d; //canononical name
+#ifdef __GNUC__
+#define New_Vector(...) { 0.0f, 0.0f, 0.0f }
+#else
 #define New_Vector(x, y, z)        \
     {                              \
         IF_ELSE(IS_EMPTY(x))(0)(x),\
         IF_ELSE(IS_EMPTY(y))(0)(y),\
         IF_ELSE(IS_EMPTY(z))(0)(z) \
     }
+#endif
 
     /**
      16bit Co-Ordinate used for Integer co-ordinates eg, pumping straight to RSP.
@@ -3028,7 +3035,7 @@ typedef union
     typedef struct CCTVRecord
     {
         struct ObjectRecord;
-        s32 pad;
+        s32 pad_cctv;
         Mtxf unk84;
         f32 unkC4;
         f32 unkC8;

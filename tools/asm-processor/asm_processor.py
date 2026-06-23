@@ -735,7 +735,7 @@ class GlobalAsmBlock:
                         line = "case 0 of " + cases + " otherwise end;"
                     else:
                         cases = " ".join("case {}:".format(case) for case in range(size - i))
-                        line = "switch (*(volatile int*)0) { " + cases + " ; }"
+                        line = "switch (*(volatile int*)4) { " + cases + " ; }"
                     late_rodata_fn_output.append(line)
                     late_rodata_fn_output.extend([""] * (jtbl_size - 1))
                     jtbl_rodata_size = (size - i) * 4
@@ -750,7 +750,7 @@ class GlobalAsmBlock:
                     if state.pascal:
                         line = state.pascal_assignment('d', fval)
                     else:
-                        line = '*(volatile double*)0 = {};'.format(fval)
+                        line = '*(volatile double*)4 = {};'.format(fval)
                     late_rodata_fn_output.append(line)
                     skip_next = True
                     needs_double = False
@@ -764,7 +764,7 @@ class GlobalAsmBlock:
                     if state.pascal:
                         line = state.pascal_assignment('f', fval)
                     else:
-                        line = '*(volatile float*)0 = {}f;'.format(fval)
+                        line = '*(volatile float*)4 = {}f;'.format(fval)
                     late_rodata_fn_output.append(line)
                     extra_mips1_nop = True
                 late_rodata_fn_output.append('')
@@ -814,7 +814,7 @@ class GlobalAsmBlock:
                         elif state.pascal:
                             src[line] += state.pascal_assignment('i', '0')
                         else:
-                            src[line] += '*(volatile int*)0 = 0;'
+                            src[line] += '*(volatile int*)4 = 0;'
                     tot_emitted += 1
                     fn_emitted += 1
             if rodata_stack:
@@ -1101,7 +1101,7 @@ def fixup_objfile(objfile_name, functions, asm_prelude, assembler, output_enc, d
                 # On the other hand, if it generates too much, we don't have
                 # a good way of discovering that error: it's indistinguishable
                 # from a static symbol occurring after the GLOBAL_ASM block.
-                raise Failure("Wrongly computed size for section {} (diff {}). This is an asm-processor bug!".format(sectype, prev_loc- loc))
+                raise Failure("Wrongly computed size for section {} (diff {}, temp_name {}, loc {}, prev_loc {}). This is an asm-processor bug!".format(sectype, prev_loc- loc, temp_name, loc, prev_loc))
             if loc != prev_loc:
                 asm.append('.section ' + sectype)
                 if sectype == '.text':

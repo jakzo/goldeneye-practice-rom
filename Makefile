@@ -12,6 +12,9 @@ VERBOSE := 2
 # If COMPARE is 1, check the output sha1sum when building 'all', and if fail to match
 # then compare ELF sections to known md5 checksums.
 COMPARE := 1
+# Use GCC instead of IDO (experimental, enables debug symbols)
+# Automatically sets COMPARE=0 since output won't be byte-identical
+GCC := NO
 
 # Include Terminal Codes for colourising text.
 include include/make/VT100Codes.make
@@ -24,6 +27,20 @@ else ifeq ($(shell type mips64-linux-gnu-ld >/dev/null 2>/dev/null; echo $$?), 0
   TOOLCHAIN := mips64-linux-gnu-
 else
   TOOLCHAIN := mips64-elf-
+endif
+
+# --- GCC mode: use mips64-elf-gcc instead of IDO compiler ---
+ifeq ($(GCC), YES)
+  # GCC mode forces COMPARE=0 since code generation differs from IDO
+  COMPARE := 0
+  # Auto-generate .ld.inc files from source directory listing
+  GEN_LD_INC := YES
+  # Debug symbols for non-final builds
+  ifneq ($(FINAL), YES)
+    GCC_DEBUG := -g
+  else
+    GCC_DEBUG :=
+  endif
 endif
 
 # Use IDO Recomp UNLESS specified otherwise
@@ -202,6 +219,35 @@ endif
 
 CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64
 
+# --- GCC compiler setup (alternative to IDO) ---
+ifeq ($(GCC), YES)
+  GCC_BASE := $(TOOLCHAIN)gcc
+  # Map IDO flags to GCC equivalents:
+  #   -mips2 -32  → -march=vr4300 -mabi=32
+  #   -G 0        → -G0 (same)
+  #   -non_shared → -mno-abicalls -fno-pic
+  #   -Wab,-r4300_mul → not needed in GCC (correct by default)
+  #   -Xcpluscomm → not needed (GCC supports // natively)
+  GCC_CFLAGS := -march=vr4300 -mabi=32 -mgp32 -mlong32 -G0 -fms-extensions -fomit-frame-pointer
+  GCC_CFLAGS += -falign-functions=4 -falign-labels=4 -falign-loops=4 -falign-jumps=4
+  GCC_CFLAGS += -mno-abicalls -fno-pic -mno-gpopt
+  GCC_CFLAGS += -mno-check-zero-division -mbranch-likely
+  GCC_CFLAGS += -fno-strict-aliasing -fno-builtin
+  GCC_CFLAGS += -ffreestanding -fno-delete-null-pointer-checks
+  GCC_CFLAGS += -fno-toplevel-reorder -fno-merge-constants -fno-ipa-icf
+  GCC_CFLAGS += $(GCC_DEBUG)
+
+  # Map IDO warning suppressions to GCC equivalents
+  GCC_WOFF := -Wno-deprecated -Wno-incompatible-pointer-types
+  GCC_WOFF += -Wno-int-to-pointer-cast -Wno-pointer-to-int-cast
+  GCC_WOFF += -Wno-unused-function -Wno-unused-variable -Wno-unused-label
+  GCC_WOFF += -Wno-implicit-function-declaration
+  GCC_WOFF += -Wno-int-conversion
+
+  CC := $(GCC_BASE)
+  CFLAGS := $(GCC_CFLAGS) $(GCC_WOFF) $(INCLUDE) $(LCDEFS) -DTARGET_N64
+endif
+
 LD := $(TOOLCHAIN)ld
 LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld
 
@@ -278,8 +324,21 @@ $(BUILD_DIR)/$(OBSEGMENT): $(OBSEG_RZ) $(IMAGE_OBJS)
 
 
 #Build C files in src/
+# For GCC, use GCC compiler with proper flag mapping
 # convert AI_PRINT commands from readable to byte-array
 $(BUILD_DIR)/src/%.o: src/%.c
+ifeq ($(GCC), YES)
+	echo "CC: $(CC) -c $(CFLAGS) $(OPTIMIZATION)"
+	if echo "$<" | grep -q "chraidata.c"; then \
+		$(ConvertAIPRINT) $< | $(CC) -c $(CFLAGS) $(OPTIMIZATION) -x c -o $@ -; \
+	elif grep -q 'GLOBAL_ASM(' $<; then \
+		echo "ASM_PREPROC: $(ASM_PREPROC) $(OPTIMIZATION) $< --post-process $@" ; \
+		$(ASM_PREPROC) $(OPTIMIZATION) $< | $(CC) -c $(CFLAGS) $(OPTIMIZATION) -x c $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@; \
+		$(ASM_PREPROC) $(OPTIMIZATION) $< --post-process $@ --assembler "$(AS) $(ASFLAGS)" --asm-prelude $(ASM_PROCESSOR_DIR)/prelude.inc; \
+	else \
+		$(CC) -c $(CFLAGS) $(OPTIMIZATION) -o $@ $<; \
+	fi
+else
 	@if grep -q 'GLOBAL_ASM(' $<; then \
 		$(ASM_PREPROC) $(OPTIMIZATION) $< | $(CC) -c $(CFLAGS) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(OPTIMIZATION); \
 		$(ASM_PREPROC) $(OPTIMIZATION) $< --post-process $@ --assembler "$(AS) $(ASFLAGS)" --asm-prelude $(ASM_PROCESSOR_DIR)/prelude.inc; \
@@ -288,6 +347,7 @@ $(BUILD_DIR)/src/%.o: src/%.c
 	else \
 		$(CC) -c $(CFLAGS) -o $@ $(OPTIMIZATION) $<; \
 	fi
+endif
 
 
 #Build RamRom
@@ -296,7 +356,11 @@ $(BUILD_DIR)/assets/ramrom/%.o: assets/ramrom/%.s
 
 #Build fonts
 $(BUILD_DIR)/assets/font/%.o: assets/font/%.c
+ifeq ($(GCC), YES)
+	$(CC) -c $(CFLAGS) $(OPTIMIZATION) -o $@ $<
+else
 	$(CC) -c $(CFLAGS) -o $@ $(OPTIMIZATION) $<
+endif
 
 #Build asm files in assets/
 $(BUILD_DIR)/assets/%.o: assets/%.s
@@ -308,10 +372,18 @@ $(BUILD_DIR)/assets/obseg/%.o: assets/obseg/%.s $(OBSEG_RZ)
 
 #Build C files in assets/
 $(BUILD_DIR)/assets/%.o: assets/%.c
+ifeq ($(GCC), YES)
+ifeq ($(filter-out %setup%,$<),)
+	$(ConvertAIPRINT) $< | $(CC) -c $(CFLAGS) $(OPTIMIZATION) -x c -o $@ -
+else
+	$(CC) -c $(CFLAGS) $(OPTIMIZATION) -o $@ $<
+endif
+else
 ifeq ($(filter-out %setup%,$<),)
 	$(ConvertAIPRINT) $< | $(CC) -c $(CFLAGS) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(OPTIMIZATION)
 else
 	$(CC) -c $(CFLAGS) -o $@ $(OPTIMIZATION) $<
+endif
 endif
 
 #$(BUILD_DIR)/src/random.o: OPTIMIZATION := -O3
@@ -320,8 +392,34 @@ endif
 #$(BUILD_DIR)/src/random.o: src/random.c
 #	$(CC) -c -Wab,-r4300_mul -non_shared -G 0 -Xcpluscomm $(CFLAGWARNING) -woff 819,820,852,821,838,649 -signed $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 $(OPTIMIZATION) -o $@ $<
 
+# GCC build target (convenience)
+.PHONY: gcc-us gcc-eu gcc-jp
+gcc-us:
+	$(MAKE) VERSION=US GCC=YES COMPARE=0
+gcc-eu:
+	$(MAKE) VERSION=EU GCC=YES COMPARE=0
+gcc-jp:
+	$(MAKE) VERSION=JP GCC=YES COMPARE=0
+
+# Regenerate .ld.inc files from current source tree
+.PHONY: update-ld-inc
+update-ld-inc:
+	@scripts/gen_ld_inc.sh "$(BUILD_DIR)" "$(OUTCODE)" --force
+
+# Auto-generate .ld.inc files from source tree when using GCC
+ifeq ($(GEN_LD_INC), YES)
+LD_INC_FILES := ld/lib.text.ld.inc ld/lib.data.ld.inc ld/lib.rodata.ld.inc ld/lib.bss.ld.inc
+LD_INC_FILES += ld/game.text.ld.inc ld/game.data.ld.inc ld/game.rodata.ld.inc ld/game.bss.ld.inc
+
+# Auto-generate .ld.inc files from current source tree
+$(LD_INC_FILES): FORCE
+	@scripts/gen_ld_inc.sh "$(BUILD_DIR)" "$(OUTCODE)" --force
+
+FORCE:
+endif
+
 #Link Files
-$(APPELF): $(RSPOBJECTS) $(ULTRAOBJECTS) $(HEADEROBJECTS) $(OBSEG_RZ) $(BUILD_DIR)/$(OBSEGMENT) $(MUSIC_RZ_FILES) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) ge007.ld
+$(APPELF): $(RSPOBJECTS) $(ULTRAOBJECTS) $(HEADEROBJECTS) $(OBSEG_RZ) $(BUILD_DIR)/$(OBSEGMENT) $(MUSIC_RZ_FILES) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) ge007.ld $(LD_INC_FILES)
 	cpp $(LDFILEOPTS) -P ge007.ld -o $(BUILD_DIR)/ge007.$(OUTCODE).ld
 	@echo "Linking Files into ELF"
 	$(LD) $(LDFLAGS) -o $@
@@ -413,6 +511,13 @@ help:
 	@echo "                                    Supported values: ${ALLOWED_VERSIONS}\n"
 
 include include/make/cmd.make
+
+# Inject GCC variables into libultra makefile when using GCC
+ifeq ($(GCC), YES)
+  # Override libultra makefile variables for GCC
+  CFLAGS_LIBULTRA = $(GCC_CFLAGS) $(GCC_WOFF) $(LIBULTRA_INCLUDE) $(LCDEFS) -DNDEBUG -DTARGET_N64
+  ASFLAGS_LIBULTRA = -march=vr4300 -mabi=32 $(INCLUDE) $(ASMDEFS) -O1
+endif
 
 
 test: checksum

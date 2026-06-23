@@ -71,7 +71,7 @@ u8 m_AimAtBond[] = {
     @return No Return - AI List can only be changed by a 3rd party via SetChrAiList
 */
 u8 m_DeadAI[] = {
-    /*PRINT("dyeng")*/
+    /*AI_PRINT,'d','y','e','n','g','\0',*/
     YIELD_FOREVER(lblDead)
     EndList()
 };
@@ -133,7 +133,7 @@ u8 m_StandardGuard[] = {
         JumpTo(GAILIST_TRY_CLONE_SEND_OR_RUN_TO_BOND)
 
     Label(lblDead) /* guard has died, end routine */
-        /*PRINT("DIE INSCAN\n")*/
+        /*AI_PRINT,'D','I','E',' ','I','N','S','C','A','N','\n','\0',*/
         JumpTo( GAILIST_DEAD_AI)
     EndList()
 
@@ -553,7 +553,7 @@ u8 m_RunToBondPersistent[] = {
     /*DO*/
     Label(lblRun)
         TRYRunToBond(lblRunning)                                               /* goto loop if bond position is reachable */
-        PRINT("no go!\n")                                                      /* guard can't reach bond */
+        AI_PRINT,'n','o',' ','g','o','!','\n','\0',                                                      /* guard can't reach bond */
 
         DO(lblRunning)
             IFICouldSeeBond(lblStoppedMoving)
@@ -663,7 +663,7 @@ u8 m_RunToBondPersistent[] = {
 
         Label(lblNext)
             Stop()
-            PRINT("wait\n")
+            AI_PRINT,'w','a','i','t','\n','\0',
             UnsetMyFlags2(FLAGS2_04)
             IFNewRandomGreaterThan(160, lblNext)
             SetMyFlags2(FLAGS2_04)

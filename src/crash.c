@@ -728,8 +728,15 @@ u32 * crashIndyGetReadBufferResourceId(void)
  */
 void * crashGetStackEnd(u32 sp, u32 tid)
 {
+#ifdef __GNUC__
+    void *localStackPointers1[STACK_POINTER_COUNT];
+    void *localStackPointers2[STACK_POINTER_COUNT];
+    bcopy(g_StackPtrs1, localStackPointers1, sizeof(localStackPointers1));
+    bcopy(g_StackPtrs2, localStackPointers2, sizeof(localStackPointers2));
+#else
     void *localStackPointers1[STACK_POINTER_COUNT] = g_StackPtrs1;
     void *localStackPointers2[STACK_POINTER_COUNT] = g_StackPtrs2;
+#endif
     void *p2;
     void *p1;
 
@@ -766,7 +773,12 @@ void * crashGetStackEnd(u32 sp, u32 tid)
  */
 void * crashGetStackStart(u32 sp, u32 tid)
 {
+#ifdef __GNUC__
+    void *localStackPointers3[STACK_POINTER_COUNT];
+    bcopy(g_StackPtrs3, localStackPointers3, sizeof(localStackPointers3));
+#else
     void *localStackPointers3[STACK_POINTER_COUNT] = g_StackPtrs3;
+#endif
     void *p;
 
     if ((s32)tid <= (s32)0 || (u32)tid > (u32)STACK_POINTER_COUNT)

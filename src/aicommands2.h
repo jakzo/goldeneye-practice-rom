@@ -292,7 +292,7 @@
               THIS must be defined for this function to be able to return
 ******************************************************************************/
 #define CALL(AI_LIST_ID)  \
-                                  IF_ELSE (  DEFINED (  THIS )                     )  (  AI_ERR_NO_THIS   )  (  (                    SetReturnAiList(THIS)SetChrAiList(CHR_SELF, (!isBGAIListID(AI_LIST_ID) && isSubroutine(AI_LIST_ID) ? AI_LIST_ID : AI_ERR_NOTSUB)) )  )  ,
+                                  IF_ELSE (  DEFINED (  THIS )                     )  (  ( AI_ERR_NO_THIS , )  )  (  (                    SetReturnAiList(THIS)SetChrAiList(CHR_SELF, (!isBGAIListID(AI_LIST_ID) && isSubroutine(AI_LIST_ID) ? AI_LIST_ID : AI_ERR_NOTSUB)) )  )
 
 
 

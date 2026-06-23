@@ -1,0 +1,144 @@
+# syntax=docker/dockerfile:1
+#
+# Dockerfile for 007 Goldeneye N64 build with GCC toolchain
+#
+# Build:
+#   docker build -t 007-gcc -f Dockerfile.gcc .
+#
+# Run:
+#   docker run -it --rm -v $(pwd):/workspace 007-gcc
+#   # Inside container:
+#   make VERSION=US GCC=YES COMPARE=0
+#
+
+# Stage 1: Build the mips64-elf GCC cross-compiler from source
+FROM ubuntu:22.04 AS toolchain-builder
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install build dependencies for the toolchain
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bzip2 \
+    ca-certificates \
+    file \
+    g++ \
+    gcc \
+    git \
+    libmpc-dev \
+    libmpfr-dev \
+    libgmp-dev \
+    make \
+    texinfo \
+    wget \
+    xz-utils \
+    zlib1g-dev \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build the GCC cross-compiler toolchain
+# Uses same approach as libdragon: binutils + GCC + newlib for mips64-elf
+ARG N64_INST=/opt/n64
+ENV N64_INST=${N64_INST}
+ENV PATH="${N64_INST}/bin:${PATH}"
+
+# Toolchain versions (same as libdragon stable)
+ARG BINUTILS_V=2.44
+ARG GCC_V=14.2.0
+ARG NEWLIB_V=4.4.0.20231231
+
+WORKDIR /tmp/toolchain-build
+
+# Download all sources
+RUN wget -q "https://ftp.gnu.org/gnu/binutils/binutils-${BINUTILS_V}.tar.gz" && \
+    wget -q "https://ftp.gnu.org/gnu/gcc/gcc-${GCC_V}/gcc-${GCC_V}.tar.gz" && \
+    wget -q "https://sourceware.org/pub/newlib/newlib-${NEWLIB_V}.tar.gz"
+
+RUN tar -xf "binutils-${BINUTILS_V}.tar.gz" && \
+    tar -xf "gcc-${GCC_V}.tar.gz" && \
+    tar -xf "newlib-${NEWLIB_V}.tar.gz"
+
+# Build binutils
+RUN mkdir binutils-build && cd binutils-build && \
+    ../binutils-${BINUTILS_V}/configure \
+    --prefix="${N64_INST}" \
+    --target=mips64-elf \
+    --with-cpu=mips64vr4300 \
+    --disable-werror \
+    --enable-64-bit-bfd \
+    --disable-gold \
+    --disable-nls && \
+    make -j$(nproc) && \
+    make install-strip
+
+# Build GCC pass 1 (C compiler only, no newlib yet)
+RUN mkdir gcc-build && cd gcc-build && \
+    ../gcc-${GCC_V}/configure \
+    --prefix="${N64_INST}" \
+    --target=mips64-elf \
+    --with-arch=vr4300 \
+    --with-tune=vr4300 \
+    --enable-languages=c \
+    --without-headers \
+    --with-newlib \
+    --disable-libssp \
+    --enable-multilib \
+    --disable-shared \
+    --disable-nls \
+    --disable-werror && \
+    make -j$(nproc) all-gcc && \
+    make install-gcc && \
+    make -j$(nproc) all-target-libgcc && \
+    make install-target-libgcc
+
+# Build newlib
+RUN mkdir newlib-build && cd newlib-build && \
+    CC_FOR_TARGET=mips64-elf-gcc \
+    CFLAGS_FOR_TARGET="-DHAVE_ASSERT_FUNC -O2 -fpermissive" \
+    ../newlib-${NEWLIB_V}/configure \
+    --prefix="${N64_INST}" \
+    --target=mips64-elf \
+    --with-cpu=mips64vr4300 \
+    --disable-libssp \
+    --disable-werror \
+    --enable-newlib-multithread \
+    --enable-newlib-retargetable-locking && \
+    make -j$(nproc) && \
+    make install
+
+# Build GCC pass 2 (finish remaining target libs)
+RUN cd gcc-build && \
+    make -j$(nproc) all && \
+    make install-strip
+
+# Clean up build artifacts
+RUN rm -rf /tmp/toolchain-build
+
+###############################################################################
+
+# Stage 2: Runtime image for building 007
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    make \
+    git \
+    python3 \
+    g++ \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the built toolchain from stage 1
+COPY --from=toolchain-builder /opt/n64 /opt/n64
+
+# Set up toolchain in PATH
+ENV N64_INST=/opt/n64
+ENV PATH="${N64_INST}/bin:${PATH}"
+
+# Create and set working directory
+WORKDIR /workspace
+
+# Default command
+CMD ["/bin/bash"]

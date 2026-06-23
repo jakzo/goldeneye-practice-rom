@@ -3,6 +3,7 @@
 
 #include <ultra64.h>
 #include <bondtypes.h>
+#include <bondconstants.h>
 #include "chr.h"
 #include "matrixmath.h"
 #include "watch.h"

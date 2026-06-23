@@ -122,7 +122,46 @@ typedef enum NAME \
   */IF(NOT(IS_EMPTY(af)))(NAME ## _ ## af = 1 << 31)                   /*\
 */} NAME;
 #else
-#    define BITFLAG(...)
+#define BITFLAG_1(NAME, i, a) NAME##_##a = 1 << i
+#define BITFLAG_2(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_1(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_3(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_2(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_4(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_3(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_5(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_4(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_6(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_5(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_7(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_6(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_8(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_7(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_9(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_8(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_10(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_9(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_11(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_10(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_12(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_11(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_13(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_12(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_14(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_13(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_15(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_14(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_16(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_15(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_17(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_16(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_18(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_17(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_19(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_18(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_20(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_19(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_21(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_20(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_22(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_21(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_23(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_22(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_24(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_23(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_25(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_24(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_26(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_25(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_27(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_26(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_28(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_27(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_29(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_28(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_30(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_29(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_31(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_30(NAME, i+1, __VA_ARGS__)
+#define BITFLAG_32(NAME, i, a, ...) NAME##_##a = 1 << i, BITFLAG_31(NAME, i+1, __VA_ARGS__)
+
+#define BITFLAG_CHOOSER(NAME, _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, N, ...) BITFLAG_##N
+
+#define BITFLAG(NAME, ...) \
+    typedef enum NAME { \
+        NAME##_NONE, \
+        BITFLAG_CHOOSER(NAME, __VA_ARGS__, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1)(NAME, 0, __VA_ARGS__) \
+    } NAME;
 #endif
 
 #pragma endregion
@@ -3676,7 +3715,7 @@ typedef enum PROJECTILES
     )                                                      \
     };
 
-#define MODELSKELETON(NAME, NUMJOINTS, SKELSIZE) ModelSkeleton SKELETON( ## NAME ## ) = {NUMJOINTS, 0, JOINTLIST( ## NAME ## ), SKELSIZE, 0};
+#define MODELSKELETON(NAME, NUMJOINTS, SKELSIZE) ModelSkeleton SKELETON(NAME) = {NUMJOINTS, 0, JOINTLIST(NAME), SKELSIZE, 0};
 
 
 /**
@@ -3756,13 +3795,13 @@ typedef enum PROJECTILES
 #endif
 
 #define CHRFILERECORD(NAME, SCALE, OFFSET, HASHEAD, ISMALE) \
-    {&##NAME##_header, STR(C##NAME##Z), SCALE, OFFSET, HASHEAD, ISMALE},
+    {& NAME ## _header, STR(C ## NAME ## Z), SCALE, OFFSET, HASHEAD, ISMALE},
 
-#define GUNSTATS(NAME) & ## NAME ## _stats
+#define GUNSTATS(NAME) & NAME ## _stats
 #define GUNFILERECORD(NAME, NOMODEL, STATS, UPPERTEXTID, LOWERTEXTID, POSX, POSY, POSZ, XROT, YROT, WOCTEXT, EQUIPTEXT, EQUIPX, EQUIPY, EQUIPZ) \
-    { & ## NAME ## _header,STR(G## NAME ##Z), NOMODEL, STATS, UPPERTEXTID, LOWERTEXTID, POSX, POSY, POSZ, XROT, YROT, WOCTEXT, EQUIPTEXT, EQUIPX, EQUIPY, EQUIPZ},
+    { & NAME ## _header, STR(G ## NAME ## Z), NOMODEL, STATS, UPPERTEXTID, LOWERTEXTID, POSX, POSY, POSZ, XROT, YROT, WOCTEXT, EQUIPTEXT, EQUIPX, EQUIPY, EQUIPZ},
 #define SUIT_LFRECORD(NAME, NOMODEL, STATS, UPPERTEXTID, LOWERTEXTID, POSX, POSY, POSZ, XROT, YROT, WOCTEXT, EQUIPTEXT, EQUIPX, EQUIPY, EQUIPZ) \
-    { & ## NAME ## _header,STR(C## NAME ##Z), NOMODEL, STATS, UPPERTEXTID, LOWERTEXTID, POSX, POSY, POSZ, XROT, YROT, WOCTEXT, EQUIPTEXT, EQUIPX, EQUIPY, EQUIPZ},
+    { & NAME ## _header, STR(C ## NAME ## Z), NOMODEL, STATS, UPPERTEXTID, LOWERTEXTID, POSX, POSY, POSZ, XROT, YROT, WOCTEXT, EQUIPTEXT, EQUIPX, EQUIPY, EQUIPZ},
 /**
  * Define a New Item Record
  * @param NAME:  Name of Model

@@ -2230,7 +2230,8 @@ enum chrAIListIDs
     chrai_17,
     chrai_18
 };
-#define SETUPSUBROUTINES(ID) (getChrAIListID(ID) == 8) \
+#define SETUPSUBROUTINES_PRESENT 1
+#define SETUPSUBROUTINES(ID) (getChrAIListID(ID) == 8)
 
 u8 chrAI_0[] = {
 #define THIS chrai_0
