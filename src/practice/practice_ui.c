@@ -1,11 +1,11 @@
 #include "practice_ui.h"
+#include "emu_log.h"
 #include "game/bondview.h"
 #include "game/textrelated.h"
 #include "player.h"
 #include "practice_config.h"
 #include <PR/os.h>
 #include <bondconstants.h>
-#include "emu_log.h"
 #include <bondtypes.h>
 #include <fr.h>
 #include <stdarg.h>
@@ -133,7 +133,8 @@ static f32 g_LogSlideRate = 0.0f;
 static void ensure_timing_initialized(void) {
   if (g_LogLifetimeCycles != 0)
     return;
-  g_LogLifetimeCycles = (OSTime)(s32)((f32)(s32)osClockRate * practice.log_message_duration);
+  g_LogLifetimeCycles =
+      (OSTime)(s32)((f32)(s32)osClockRate * practice.log_message_duration);
   g_LogSlideCycles = (OSTime)(s32)((f32)(s32)osClockRate * SLIDE_DURATION);
   g_LogSlideRate = SLIDE_RATE_PER_S / (f32)(s32)osClockRate;
 }
@@ -212,10 +213,8 @@ static void add_to_log_queue(LogLevel level, const char *fmt, va_list args) {
 
 void practiceLogDebug(const char *fmt, ...) {
   va_list args;
-  if (!practice.show_debug_logs)
-    return;
   va_start(args, fmt);
-  add_to_log_queue(LOG_LEVEL_DEBUG, fmt, args);
+  emu_log(fmt, args);
   va_end(args);
 }
 
@@ -270,12 +269,13 @@ Gfx *practice_ui_render(Gfx *gdl) {
 
   // Render green "P" indicator at bottom-left of the visible area
   {
-    struct fontchar *fontCharsZurich = (struct fontchar *)ptrFontZurichBoldChars;
+    struct fontchar *fontCharsZurich =
+        (struct fontchar *)ptrFontZurichBoldChars;
     struct fontchar *charP = &fontCharsZurich['P'];
     s32 p_x = MARGIN_RIGHT;
     s32 p_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
-    gdl = renderText(gdl, &p_x, &p_y, "P", (s32)fontCharsZurich, ptrFontZurichBold,
-                     0x00CC00FF, viGetX(), viGetY());
+    gdl = renderText(gdl, &p_x, &p_y, "P", (s32)fontCharsZurich,
+                     ptrFontZurichBold, 0x00CC00FF, viGetX(), viGetY());
 
     // Render mission timer next to the "P" indicator
     if (practice.show_mission_timer) {

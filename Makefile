@@ -71,9 +71,9 @@ ifeq ($(VERSION), US)
  COUNTRYCODE := u
  OUTCODE := $(COUNTRYCODE)
  LANG := US
- LCDEFS := -DVERSION_US -DLANG_US -DREFRESH_NTSC -DLEFTOVERDEBUG -DLEFTOVERSPECTRUM -DBUGFIX_R0 -DBYTEMATCH
- ASMDEFS := --defsym VERSION_US=1 --defsym LANG_US=1 --defsym REFRESH_NTSC=1 --defsym LEFTOVERDEBUG=1 --defsym LEFTOVERSPECTRUM=1 --defsym BUGFIX_R0=1 --defsym BYTEMATCH=1
- LDFILEOPTS := -DVERSION_$(LANG) -DOUTCODE=$(OUTCODE)
+ LCDEFS := -DVERSION_US -DLANG_US -DREFRESH_NTSC -DLEFTOVERDEBUG -DLEFTOVERSPECTRUM -DBUGFIX_R0 -DBYTEMATCH -DENABLE_USB
+ ASMDEFS := --defsym VERSION_US=1 --defsym LANG_US=1 --defsym REFRESH_NTSC=1 --defsym LEFTOVERDEBUG=1 --defsym LEFTOVERSPECTRUM=1 --defsym BUGFIX_R0=1 --defsym BYTEMATCH=1 --defsym ENABLE_USB=1
+ LDFILEOPTS := -DVERSION_$(LANG) -DOUTCODE=$(OUTCODE) -DENABLE_USB
 endif
 
 ifeq ($(VERSION), EU)
@@ -203,12 +203,13 @@ else
   CC := $(IRIX_ROOT)/cc
 endif
 
-BOOT_LEVEL ?= LEVELID_TITLE
+BOOT_LEVEL ?= TITLE
+BOOT_LEVELID := LEVELID_$(BOOT_LEVEL)
 
-CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL)
+CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL) -DBOOT_LEVELID=$(BOOT_LEVELID)
 
 CC_GCC := $(TOOLCHAIN)gcc
-CFLAGS_GCC := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -fms-extensions -fno-stack-protector -G 0 -g $(OPTIMIZATION) $(INCLUDE) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL)
+CFLAGS_GCC := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -fms-extensions -fno-stack-protector -G 0 -g $(OPTIMIZATION) $(INCLUDE) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL) -DBOOT_LEVELID=$(BOOT_LEVELID)
 LIBGCC := $(shell $(CC_GCC) -print-libgcc-file-name)
 
 # Ensure the build directory for practice files exists
@@ -219,6 +220,7 @@ OLD_BOOT_LEVEL := $(shell cat $(BUILD_DIR)/src/practice/boot_level.txt 2>/dev/nu
 ifneq ($(OLD_BOOT_LEVEL),$(BOOT_LEVEL))
   $(shell echo "$(BOOT_LEVEL)" > $(BUILD_DIR)/src/practice/boot_level.txt)
   $(shell rm -f $(BUILD_DIR)/src/practice/practice_config.o)
+  $(shell rm -f $(APPELF) $(APPROM) $(APPBIN))
 endif
 
 LD := $(TOOLCHAIN)ld

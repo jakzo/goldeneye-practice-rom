@@ -1,22 +1,24 @@
 /**
  * emu_log.c
  *
- * Implements emulator logging via the ISViewer protocol, which is supported
- * by several N64 emulators (cen64, ares, simple64, dgb-n64).
+ * Implements logging via USB (real hardware) or ISViewer (emulators).
  *
- * ISViewer memory layout (physical addresses):
- *   0x13FF0000 - Magic register (presence check)
- *   0x13FF0014 - Write pointer / length register
- *   0x13FF0020 - Circular buffer
+ * Detection order at init:
+ *   1. USB: probes for SummerCart64, 64Drive, or EverDrive via PI-bus
+ *      register checks. If found, logs are sent over USB using the UNFLoader
+ *      protocol (compatible with UNFLoader, g64drive, etc.).
+ *   2. ISViewer: if no USB cart is detected, probes for an emulated ISViewer
+ *      at 0x13FF0000 (cen64 -is-viewer, ares, simple64, dgb-n64).
  *
- * The implementation mirrors libdragon's approach: data is written in 32-bit
- * big-endian chunks to the buffer region, then flushed by writing the byte
- * count to the write pointer register. Emulators intercept these writes and
- * display the output in a debug console.
+ * This mirrors libdragon's approach where both channels can be active
+ * simultaneously.
  */
 
 #include "emu_log.h"
-#include <PR/rcp.h> // IO_WRITE, IO_READ, PHYS_TO_K1
+#include "../usb.h" /* usb_initialize, usb_write, DATATYPE_TEXT */
+#include <PR/rcp.h> /* IO_WRITE, IO_READ, PHYS_TO_K1 */
+#include <stdarg.h>
+#include <string.h>
 #include <ultra64.h>
 
 /* ------------------------------------------------------------------ */
@@ -26,11 +28,6 @@
 #define ISVIEWER_PHYS_WRITE_PTR 0x13FF0014
 #define ISVIEWER_PHYS_BUFFER 0x13FF0020
 #define ISVIEWER_BUFFER_LEN 512 /* typical emulated buffer size */
-
-/* KSEG1 (uncached) virtual addresses */
-#define ISVIEWER_MAGIC PHYS_TO_K1(ISVIEWER_PHYS_MAGIC)
-#define ISVIEWER_WRITE_PTR PHYS_TO_K1(ISVIEWER_PHYS_WRITE_PTR)
-#define ISVIEWER_BUFFER PHYS_TO_K1(ISVIEWER_PHYS_BUFFER)
 
 /* Magic value written to ISVIEWER_PHYS_MAGIC to detect presence.
  * Using a value different from the real ISViewer's default to avoid
@@ -42,10 +39,11 @@
 /* State                                                              */
 /* ------------------------------------------------------------------ */
 static int g_emu_log_initialized = 0;
-static int g_emu_log_available = 0;
+static int g_usb_available = 0; /* non-zero if USB cart detected */
+static int g_isv_available = 0; /* non-zero if ISViewer detected */
 
 /* ------------------------------------------------------------------ */
-/* Probe ISViewer                                                     */
+/* ISViewer probe                                                     */
 /* ------------------------------------------------------------------ */
 static int isviewer_probe(void) {
   u32 test;
@@ -73,27 +71,13 @@ static int isviewer_probe(void) {
 }
 
 /* ------------------------------------------------------------------ */
-/* Public API                                                         */
+/* ISViewer writer                                                    */
 /* ------------------------------------------------------------------ */
-void emu_log_init(void) {
-  if (g_emu_log_initialized)
-    return;
-  g_emu_log_initialized = 1;
-  g_emu_log_available = isviewer_probe();
-}
-
-void emu_log_write(const char *text) {
+static void isviewer_write(const char *text) {
   int len;
   int offset;
 
   if (!text || text[0] == '\0')
-    return;
-
-  /* Auto-init on first use */
-  if (!g_emu_log_initialized)
-    emu_log_init();
-
-  if (!g_emu_log_available)
     return;
 
   len = 0;
@@ -127,4 +111,112 @@ void emu_log_write(const char *text) {
     offset += chunk;
     len -= chunk;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* USB writer — delegates to the existing src/usb.c stack             */
+/* ------------------------------------------------------------------ */
+static void usb_log_write(const char *text) {
+  int len;
+
+  if (!text || text[0] == '\0')
+    return;
+
+  len = 0;
+  while (text[len] != '\0')
+    len++;
+
+  /* Use the existing UNFLoader-compatible USB write with DATATYPE_TEXT.
+   * The underlying usb_sc64_write / usb_64drive_write / usb_everdrive_write
+   * handles DMA'ing the data to SDRAM and issuing the cart's USB command. */
+  usb_write(DATATYPE_TEXT, text, len);
+}
+
+/* ------------------------------------------------------------------ */
+/* Public API                                                         */
+/* ------------------------------------------------------------------ */
+void emu_log_init(void) {
+  if (g_emu_log_initialized)
+    return;
+  g_emu_log_initialized = 1;
+
+  /* 1. Try USB cart detection first (real hardware) */
+  if (usb_initialize()) {
+    g_usb_available = 1;
+    /* Don't return yet — also probe ISViewer so both channels can
+     * work (though on real hardware ISViewer won't be present). */
+  }
+
+  /* 2. Try ISViewer probe (emulators) */
+  if (isviewer_probe()) {
+    g_isv_available = 1;
+  }
+}
+
+void emu_log_write(const char *text) {
+  if (!text || text[0] == '\0')
+    return;
+
+  /* Auto-init on first use */
+  if (!g_emu_log_initialized)
+    emu_log_init();
+
+  /* Send via USB if a flashcart is present */
+  if (g_usb_available)
+    usb_log_write(text);
+
+  /* Send via ISViewer if available (emulators) */
+  if (g_isv_available)
+    isviewer_write(text);
+}
+
+/*
+ * The IDO compiler used for this project does not support variadic macros
+ * or the C99 standard printf family.  We use _Printf (the IDO internal
+ * printf engine) through a custom writer callback, which is already done
+ * elsewhere in the codebase.
+ */
+extern s32 _Printf(char *(*pfn)(char *, const char *, size_t), char *,
+                   const char *, va_list);
+extern void *memcpy(void *dst, const void *src, size_t count);
+
+typedef struct {
+  char *dest;
+  size_t remaining;
+} BufWriter;
+
+static char *proutBufWriter(char *dst_ptr, const char *src, size_t count) {
+  BufWriter *buf = (BufWriter *)dst_ptr;
+  if (buf->remaining > 0) {
+    size_t copy_count = count;
+    if (copy_count > buf->remaining) {
+      copy_count = buf->remaining;
+    }
+    memcpy(buf->dest, src, copy_count);
+    buf->dest += copy_count;
+    buf->remaining -= copy_count;
+  }
+  return dst_ptr;
+}
+
+void emu_log(const char *fmt, ...) {
+  char buf[512];
+  va_list args;
+  BufWriter bw;
+
+  if (!g_usb_available && !g_isv_available)
+    return;
+
+  bw.dest = buf;
+  bw.remaining = sizeof(buf) - 2;
+
+  va_start(args, fmt);
+  _Printf(proutBufWriter, (char *)&bw, fmt, args);
+  va_end(args);
+
+  bw.dest--;
+  *bw.dest = '\n';
+  bw.dest++;
+  *bw.dest = '\0';
+  emu_log_write(buf);
 }

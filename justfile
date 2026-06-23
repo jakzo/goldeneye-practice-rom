@@ -1,4 +1,5 @@
 image := "goldeneye"
+ares := "/Applications/ares.app/Contents/MacOS/ares"
 
 _default:
     just -l
@@ -33,12 +34,22 @@ make-debug:
     if [ -f baserom.j.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j$(nproc) COMPARE=0 FINAL=NO VERSION=JP; fi
 
 make-clean:
-    git clean -fdx -e '.vscode/*' -e 'baserom.u.z64' -e '**/*.c' -e '**/*.h'
+    git clean -fdx -e '.vscode' -e 'baserom.u.z64' -e '**/*.c' -e '**/*.h'
     docker image rm {{ image }}
     docker build -t {{ image }} .
     docker run --rm -v $(pwd):/home/dev {{ image }} ./scripts/extract_baserom.u.sh
-    sleep 3
-    docker run --rm -v $(pwd):/home/dev {{ image }} make -j8 COMPARE=0 FINAL=NO
+    # Sometimes this fails to generate bin/aspboot so try again I guess?
+    docker run --rm -v $(pwd):/home/dev {{ image }} ./scripts/extract_baserom.u.sh
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j8 COMPARE=0 FINAL=YES
+
+ares BOOT_LEVEL="TITLE":
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j8 COMPARE=0 FINAL=NO {{ BOOT_LEVEL }}
+    {{ ares }} ./build/u/ge007.u.z64
+
+sc64-debug BOOT_LEVEL="TITLE":
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j8 COMPARE=0 FINAL=NO {{ BOOT_LEVEL }}
+    sc64deployer upload build/u/ge007.u.z64
+    sc64deployer debug
 
 # builds the rom and uploads it to a connected summercart64
 sc64: make

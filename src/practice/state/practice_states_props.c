@@ -1,6 +1,7 @@
 #include "practice_states_props.h"
 #include "chrai.h"
 #include "chrobjhandler.h"
+#include "emu_log.h"
 #include "memp.h"
 #include "practice_states.h"
 #include "practice_states_utils.h"
@@ -570,7 +571,8 @@ bool save_props_state(StorageCursor *cur, SaveWorkMem *work) {
 /* ------------------------------------------------------------------ */
 
 static bool load_saved_object(const char *typeName, ObjectRecord *obj,
-                              const SavedObjectRecord *savedObj, PropRecord *prop) {
+                              const SavedObjectRecord *savedObj,
+                              PropRecord *prop) {
   PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
   s32 destroyedLvl;
 
@@ -741,7 +743,7 @@ bool load_props_state(StorageCursor *cur, SaveWorkMem *work) {
       // TODO: Would it be simpler and faster to just memcpy all this?
       // door->linkedDoorOffset should never change
       // TODO: Figure out why maxFrac is always set to 0xFFFFFFFF!?!?
-      // door->maxFrac = savedDoor->maxFrac;
+      door->maxFrac = savedDoor->maxFrac;
       door->perimFrac = savedDoor->perimFrac;
       door->accel = savedDoor->accel;
       door->decel = savedDoor->decel;

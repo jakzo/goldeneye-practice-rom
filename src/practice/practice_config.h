@@ -8,7 +8,6 @@ struct PracticeConfig {
   s32 left_trigger_hotkeys;
   s32 boot_level;
   s32 disable_intro_cutscenes;
-  s32 show_debug_logs;
   f32 log_message_duration;
   s32 show_hundredths_on_timer;
   s32 show_mission_timer;

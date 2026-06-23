@@ -8,6 +8,8 @@
 #include <snd.h>
 #include <str.h>
 #include <watch.h>
+#include "../practice/emu_log.h"
+#include "../practice/practice_debug.h"
 #include "bg.h"
 #include "bondview.h"
 #include "bondinv.h"
@@ -11743,6 +11745,10 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
         {
             mission_timer += g_ClockTimer;
         }
+
+#ifdef PRACTICE_ROM
+        practice_debug_tick();
+#endif
 
         MoveBond(stick_x, stick_y, buttons, (u16) g_CurrentPlayer->buttons_pressed);
     }

@@ -2,7 +2,7 @@
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
-#include "practice_memory.h"
+#include "practice_debug.h"
 #include "practice_splits.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"

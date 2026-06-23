@@ -96,7 +96,7 @@
       build/OUTCODE/src/practice/state/practice_storage.o (.rodata);
       build/OUTCODE/src/practice/practice_config.o (.rodata);
       build/OUTCODE/src/practice/practice_hotkeys.o (.rodata);
-      build/OUTCODE/src/practice/practice_memory.o (.rodata);
+      build/OUTCODE/src/practice/practice_debug.o (.rodata);
       build/OUTCODE/src/practice/practice_timescale.o (.rodata);
       build/OUTCODE/src/practice/practice_ui.o (.rodata);
       build/OUTCODE/src/practice/practice_unlock.o (.rodata);
