@@ -22,139 +22,106 @@ extern s32 copy_1stfonttable;
 extern s32 copy_2ndfonttable;
 #endif
 
-extern void *memcpy(void *dst, const void *src, size_t count);
+void save_global_state(StateStream *stream) {
+  // HUD
+  write_u32(stream, status_bar_text_buffer_index);
+  write_u32(stream, display_statusbar);
+  write_bytes(stream, stringbuffer_lowerleft, sizeof(stringbuffer_lowerleft));
 
-void save_tank_state(SavedTankState *dst) {
-  dst->in_tank_flag = in_tank_flag;
-  dst->g_PlayerTankProp_index = get_prop_index(g_PlayerTankProp);
-  dst->g_WorldTankProp_index = get_prop_index(g_WorldTankProp);
-  dst->g_PlayerTankYOffset = g_PlayerTankYOffset;
-  dst->g_TankTurnSpeed = g_TankTurnSpeed;
-  dst->g_TankOrientationAngle = g_TankOrientationAngle;
-  dst->tank_turret_unused_angle = tank_turret_unused_angle;
-  dst->g_TankTurretVerticalAngle = g_TankTurretVerticalAngle;
-  dst->g_TankTurretVerticalAngleRelated = g_TankTurretVerticalAngleRelated;
-  dst->g_TankTurretOrientationAngleRad = g_TankTurretOrientationAngleRad;
-  dst->g_TankTurretOrientationAngleDeg = g_TankTurretOrientationAngleDeg;
-  dst->tank_turret_turn_speed = tank_turret_turn_speed;
-  dst->g_BondCanEnterTank = g_BondCanEnterTank;
-  dst->g_TankTurretAngle = g_TankTurretAngle;
-  dst->g_TankTurretTurn = g_TankTurretTurn;
-  dst->g_ExplodeTankOnDeathFlag = g_ExplodeTankOnDeathFlag;
-  dst->g_TankDamagePenaltyTicks = g_TankDamagePenaltyTicks;
-  dst->g_EnterTankAudioState = g_EnterTankAudioState;
-}
-
-void load_tank_state(SavedTankState *src) {
-  in_tank_flag = src->in_tank_flag;
-  g_PlayerTankProp = get_enabled_prop_by_index(src->g_PlayerTankProp_index);
-  g_WorldTankProp = get_enabled_prop_by_index(src->g_WorldTankProp_index);
-  g_PlayerTankYOffset = src->g_PlayerTankYOffset;
-  g_TankTurnSpeed = src->g_TankTurnSpeed;
-  g_TankOrientationAngle = src->g_TankOrientationAngle;
-  tank_turret_unused_angle = src->tank_turret_unused_angle;
-  g_TankTurretVerticalAngle = src->g_TankTurretVerticalAngle;
-  g_TankTurretVerticalAngleRelated = src->g_TankTurretVerticalAngleRelated;
-  g_TankTurretOrientationAngleRad = src->g_TankTurretOrientationAngleRad;
-  g_TankTurretOrientationAngleDeg = src->g_TankTurretOrientationAngleDeg;
-  tank_turret_turn_speed = src->tank_turret_turn_speed;
-  g_BondCanEnterTank = src->g_BondCanEnterTank;
-  g_TankTurretAngle = src->g_TankTurretAngle;
-  g_TankTurretTurn = src->g_TankTurretTurn;
-  g_ExplodeTankOnDeathFlag = src->g_ExplodeTankOnDeathFlag;
-  g_TankDamagePenaltyTicks = src->g_TankDamagePenaltyTicks;
-  g_EnterTankAudioState = src->g_EnterTankAudioState;
-}
-
-void save_camera_state(SavedCameraState *dst) {
-  dst->g_CameraMode = g_CameraMode;
-  dst->camera_mode = camera_mode;
-  dst->g_CameraAfterCinema = g_CameraAfterCinema;
-  dst->camera_transition_timer = camera_transition_timer;
-  dst->camera_fade_active = camera_fade_active;
-  dst->intro_camera_index = intro_camera_index;
-  dst->is_timer_active = is_timer_active;
-  dst->g_PlayerInvincible = g_PlayerInvincible;
-}
-
-void load_camera_state(SavedCameraState *src) {
-  g_CameraMode = src->g_CameraMode;
-  camera_mode = src->camera_mode;
-  g_CameraAfterCinema = src->g_CameraAfterCinema;
-  camera_transition_timer = src->camera_transition_timer;
-  camera_fade_active = src->camera_fade_active;
-  intro_camera_index = src->intro_camera_index;
-  is_timer_active = src->is_timer_active;
-  g_PlayerInvincible = src->g_PlayerInvincible;
-}
-void save_hud_state(SavedHudState *dst) {
-  dst->status_bar_text_buffer_index = status_bar_text_buffer_index;
-  dst->display_statusbar = display_statusbar;
-  memcpy(dst->stringbuffer_lowerleft, stringbuffer_lowerleft,
-         sizeof(stringbuffer_lowerleft));
-}
-
-void load_hud_state(SavedHudState *src) {
-  status_bar_text_buffer_index = src->status_bar_text_buffer_index;
-  display_statusbar = src->display_statusbar;
-  memcpy(stringbuffer_lowerleft, src->stringbuffer_lowerleft,
-         sizeof(stringbuffer_lowerleft));
-}
-
-void save_font_state(SavedFontState *dst) {
+  // Font
 #if defined(VERSION_JP) || defined(VERSION_EU)
-  memcpy(dst->dword_CODE_bss_jp80079CEC, dword_CODE_bss_jp80079CEC,
-         sizeof(dword_CODE_bss_jp80079CEC));
-  memcpy(dst->dword_CODE_bss_jp80079Cd8, dword_CODE_bss_jp80079Cd8,
-         sizeof(dword_CODE_bss_jp80079Cd8));
+  write_bytes(stream, dword_CODE_bss_jp80079CEC, sizeof(dword_CODE_bss_jp80079CEC));
+  write_bytes(stream, dword_CODE_bss_jp80079Cd8, sizeof(dword_CODE_bss_jp80079Cd8));
 #else
-  dst->copy_1stfonttable = copy_1stfonttable;
-  dst->copy_2ndfonttable = copy_2ndfonttable;
+  write_u32(stream, copy_1stfonttable);
+  write_u32(stream, copy_2ndfonttable);
 #endif
+
+  // Tank
+  write_u32(stream, in_tank_flag);
+  write_u32(stream, get_prop_index(g_PlayerTankProp));
+  write_u32(stream, get_prop_index(g_WorldTankProp));
+  write_f32(stream, g_PlayerTankYOffset);
+  write_f32(stream, g_TankTurnSpeed);
+  write_f32(stream, g_TankOrientationAngle);
+  write_f32(stream, tank_turret_unused_angle);
+  write_f32(stream, g_TankTurretVerticalAngle);
+  write_f32(stream, g_TankTurretVerticalAngleRelated);
+  write_f32(stream, g_TankTurretOrientationAngleRad);
+  write_f32(stream, g_TankTurretOrientationAngleDeg);
+  write_f32(stream, tank_turret_turn_speed);
+  write_u32(stream, g_BondCanEnterTank);
+  write_f32(stream, g_TankTurretAngle);
+  write_f32(stream, g_TankTurretTurn);
+  write_u32(stream, g_ExplodeTankOnDeathFlag);
+  write_u32(stream, g_TankDamagePenaltyTicks);
+  write_u32(stream, g_EnterTankAudioState);
+
+  // Camera
+  write_u32(stream, g_CameraMode);
+  write_u32(stream, camera_mode);
+  write_u32(stream, g_CameraAfterCinema);
+  write_f32(stream, camera_transition_timer);
+  write_u32(stream, camera_fade_active);
+  write_u32(stream, intro_camera_index);
+  write_u32(stream, is_timer_active);
+  write_u32(stream, g_PlayerInvincible);
+
+  // Values
+  write_u32(stream, g_GlobalTimer);
+  write_u32(stream, mission_timer);
+  write_bytes(stream, &g_randomSeed, sizeof(g_randomSeed));
+  write_bytes(stream, &g_chrObjRandomSeed, sizeof(g_chrObjRandomSeed));
 }
 
-void load_font_state(SavedFontState *src) {
+void load_global_state(StateStream *stream) {
+  // HUD
+  status_bar_text_buffer_index = read_u32(stream);
+  display_statusbar = read_u32(stream);
+  read_bytes(stream, stringbuffer_lowerleft, sizeof(stringbuffer_lowerleft));
+
+  // Font
 #if defined(VERSION_JP) || defined(VERSION_EU)
-  memcpy(dword_CODE_bss_jp80079CEC, src->dword_CODE_bss_jp80079CEC,
-         sizeof(dword_CODE_bss_jp80079CEC));
-  memcpy(dword_CODE_bss_jp80079Cd8, src->dword_CODE_bss_jp80079Cd8,
-         sizeof(dword_CODE_bss_jp80079Cd8));
+  read_bytes(stream, dword_CODE_bss_jp80079CEC, sizeof(dword_CODE_bss_jp80079CEC));
+  read_bytes(stream, dword_CODE_bss_jp80079Cd8, sizeof(dword_CODE_bss_jp80079Cd8));
 #else
-  copy_1stfonttable = src->copy_1stfonttable;
-  copy_2ndfonttable = src->copy_2ndfonttable;
+  copy_1stfonttable = read_u32(stream);
+  copy_2ndfonttable = read_u32(stream);
 #endif
-}
 
-void save_values_state(SavedValuesState *dst) {
-  dst->g_GlobalTimer = g_GlobalTimer;
-  dst->mission_timer = mission_timer;
-  dst->g_randomSeed = g_randomSeed;
-  dst->g_chrObjRandomSeed = g_chrObjRandomSeed;
-}
+  // Tank
+  in_tank_flag = read_u32(stream);
+  g_PlayerTankProp = get_enabled_prop_by_index(read_u32(stream));
+  g_WorldTankProp = get_enabled_prop_by_index(read_u32(stream));
+  g_PlayerTankYOffset = read_f32(stream);
+  g_TankTurnSpeed = read_f32(stream);
+  g_TankOrientationAngle = read_f32(stream);
+  tank_turret_unused_angle = read_f32(stream);
+  g_TankTurretVerticalAngle = read_f32(stream);
+  g_TankTurretVerticalAngleRelated = read_f32(stream);
+  g_TankTurretOrientationAngleRad = read_f32(stream);
+  g_TankTurretOrientationAngleDeg = read_f32(stream);
+  tank_turret_turn_speed = read_f32(stream);
+  g_BondCanEnterTank = read_u32(stream);
+  g_TankTurretAngle = read_f32(stream);
+  g_TankTurretTurn = read_f32(stream);
+  g_ExplodeTankOnDeathFlag = read_u32(stream);
+  g_TankDamagePenaltyTicks = read_u32(stream);
+  g_EnterTankAudioState = read_u32(stream);
 
-void load_values_state(SavedValuesState *src) {
-  g_GlobalTimer = src->g_GlobalTimer;
-  mission_timer = src->mission_timer;
-  g_randomSeed = src->g_randomSeed;
-  g_chrObjRandomSeed = src->g_chrObjRandomSeed;
-}
+  // Camera
+  g_CameraMode = read_u32(stream);
+  camera_mode = read_u32(stream);
+  g_CameraAfterCinema = read_u32(stream);
+  camera_transition_timer = read_f32(stream);
+  camera_fade_active = read_u32(stream);
+  intro_camera_index = read_u32(stream);
+  is_timer_active = read_u32(stream);
+  g_PlayerInvincible = read_u32(stream);
 
-void save_global_state(SramStream *stream) {
-  SavedGlobals globals;
-  save_hud_state(&globals.hud);
-  save_font_state(&globals.font);
-  save_tank_state(&globals.tank);
-  save_camera_state(&globals.camera);
-  save_values_state(&globals.values);
-  sram_stream_write_bytes(stream, &globals, sizeof(globals));
-}
-
-void load_global_state(SramStream *stream) {
-  SavedGlobals globals;
-  sram_stream_read_bytes(stream, &globals, sizeof(globals));
-  load_hud_state(&globals.hud);
-  load_font_state(&globals.font);
-  load_tank_state(&globals.tank);
-  load_camera_state(&globals.camera);
-  load_values_state(&globals.values);
+  // Values
+  g_GlobalTimer = read_u32(stream);
+  mission_timer = read_u32(stream);
+  read_bytes(stream, &g_randomSeed, sizeof(g_randomSeed));
+  read_bytes(stream, &g_chrObjRandomSeed, sizeof(g_chrObjRandomSeed));
 }

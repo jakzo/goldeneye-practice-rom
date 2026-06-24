@@ -1,3 +1,5 @@
+--target=mips-linux-gnu
+-mabi=32
 -std=gnu89
 -include
 .vscode/clangd_pre_helper.h
@@ -12,6 +14,9 @@ src/bondtypes.h
 -Isrc
 -Isrc/game
 -Isrc/inflate
+-Isrc/practice
+-Isrc/practice/state
+-DNON_FINAL
 -DVERSION_US
 -DLANG_US
 -DREFRESH_NTSC

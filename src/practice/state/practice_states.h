@@ -1,11 +1,8 @@
 #ifndef PRACTICE_STATES_H
 #define PRACTICE_STATES_H
 
-#include "practice_states_bond.h"
-#include "practice_states_globals.h"
-#include "practice_states_props.h"
 #include "practice_states_stream.h"
-#include "practice_storage.h"
+#include <bondtypes.h>
 #include <ultra64.h>
 
 #define SAVE_STATE_MAGIC 0x47455353 // "GESS"
@@ -15,15 +12,15 @@
  * a breaking change to the save format.
  *
  * Safe changes:
- * - Adding extra fields/structs to the very end of SaveState.
+ * - Adding extra fields/structs to the very end of the save state.
  * - Changing the data being stored inside an existing field (as long as
  * type/size is unchanged).
  *
  * Breaking changes:
- * - Modifying the size or layout of structs in the middle of SaveState (which
- * alters offsets of all subsequent fields).
+ * - Modifying the size or layout of fields in the middle of the save state
+ * (which alters offsets of all subsequent fields).
  */
-#define SAVE_STATE_VERSION 3
+#define SAVE_STATE_VERSION 4
 #define SAVE_STATE_SRAM_OFFSET 0x200
 
 typedef struct {
@@ -33,43 +30,12 @@ typedef struct {
   s32 level_id;
 } SaveStateHeader;
 
-/* ------------------------------------------------------------------ */
-/* Section types — each is a unit of data written/read atomically.     */
-/* The working memory is a union of all of these so that only enough   */
-/* stack space for the largest single section is needed.               */
-/* ------------------------------------------------------------------ */
-
-/* Sparse bond helper fields (pointer offsets, prop state). */
-typedef struct {
-  s32 room_pointer_offset;
-  s32 field_488_current_tile_ptr_offset;
-  s32 field_488_current_tile_ptr_for_portals_offset;
-  s32 previous_collision_info_current_tile_ptr_offset;
-  s32 previous_collision_info_current_tile_ptr_for_portals_offset;
-  s32 field_2A70_offset;
-  s32 autoaim_target_y_index;
-  s32 autoaim_target_x_index;
-  bool has_prop;
-  coord3d prop_pos;
-  s32 prop_stan_offset;
-  u8 prop_rooms[4];
-} BondHelperSection;
-
-/* Flattened inventory linked list. */
-typedef struct {
-  s32 num_inv_items;
-  SavedInvItem inv_items[50];
-} BondInventorySection;
-
-/* A single prop record (prop header + type-specific union). */
-typedef SavedRecordsOfProp PropRecordSection;
-
-void save_global_state(SramStream *stream);
-void load_global_state(SramStream *stream);
-void save_bond_state(SramStream *stream);
-void load_bond_state(SramStream *stream);
-bool save_props_state(SramStream *stream);
-bool load_props_state(SramStream *stream);
+void save_global_state(StateStream *stream);
+void load_global_state(StateStream *stream);
+void save_bond_state(StateStream *stream);
+void load_bond_state(StateStream *stream);
+bool save_props_state(StateStream *stream);
+bool load_props_state(StateStream *stream);
 
 extern bool g_HasSavedState;
 

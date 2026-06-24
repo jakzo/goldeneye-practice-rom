@@ -1,158 +1,124 @@
 #include "practice_states_stream.h"
 #include "../practice_sram.h"
+#include "../practice_ui.h"
 #include <ultra64.h>
+#include <string.h>
 
-extern void *memcpy(void *dst, const void *src, size_t count);
-
-SramStream *g_ActiveSramStream = NULL;
-
-void sram_stream_init_write(SramStream *stream, u32 sram_base) {
-  stream->sram_base = sram_base;
-  stream->sram_offset = sram_base;
-  stream->page_offset = 0;
-  stream->total_processed = 0;
-  bzero(stream->page, SRAM_PAGE_SIZE);
-}
-
-void sram_stream_init_read(SramStream *stream, u32 sram_base) {
-  stream->sram_base = sram_base;
-  stream->sram_offset = sram_base;
-  stream->page_offset = 0;
-  stream->total_processed = 0;
-  // Eagerly read first page
-  sram_read(stream->sram_offset, stream->page, SRAM_PAGE_SIZE);
-  stream->sram_offset += SRAM_PAGE_SIZE;
-}
-
-void sram_stream_flush(SramStream *stream) {
-  if (stream->page_offset > 0) {
-    // Write full page to SRAM (partially filled, padded with zeros)
-    sram_write(stream->sram_offset, stream->page, SRAM_PAGE_SIZE);
-    stream->sram_offset += SRAM_PAGE_SIZE;
-    stream->page_offset = 0;
+static void sram_stream_flush_impl(StateStream *stream) {
+  SramStream *sram = (SramStream *)stream;
+  if (sram->is_write && sram->is_dirty) {
+    sram_write(sram->current_page_addr, sram->page, SRAM_PAGE_SIZE);
+    sram->is_dirty = FALSE;
   }
 }
 
-void sram_stream_seek(SramStream *stream, u32 absolute_sram_offset) {
-  u32 page_start = (absolute_sram_offset / SRAM_PAGE_SIZE) * SRAM_PAGE_SIZE;
-  u32 intra_page = absolute_sram_offset % SRAM_PAGE_SIZE;
-
-  if (stream->sram_offset >= SRAM_PAGE_SIZE && (stream->sram_offset - SRAM_PAGE_SIZE) == page_start) {
-    stream->page_offset = intra_page;
-  } else {
-    stream->sram_offset = page_start;
-    sram_read(stream->sram_offset, stream->page, SRAM_PAGE_SIZE);
-    stream->sram_offset += SRAM_PAGE_SIZE;
-    stream->page_offset = intra_page;
+static void sram_stream_write_bytes_impl(StateStream *stream, const void *src,
+                                         u32 size) {
+  SramStream *sram = (SramStream *)stream;
+  if (sram->current_page_addr + sram->page_offset + size > 0x8000) {
+    practiceLogDebug("SRAM write out of bounds: offset %d, size %d",
+                     sram->current_page_addr + sram->page_offset, size);
+    return;
   }
-}
-
-void sram_stream_write_bytes(SramStream *stream, const void *src, u32 size) {
   const u8 *src_bytes = (const u8 *)src;
   u32 bytes_written = 0;
   while (bytes_written < size) {
-    u32 space_left = SRAM_PAGE_SIZE - stream->page_offset;
+    u32 space_left = SRAM_PAGE_SIZE - sram->page_offset;
     u32 chunk_size = size - bytes_written;
     if (chunk_size > space_left) {
       chunk_size = space_left;
     }
 
-    memcpy(stream->page + stream->page_offset, src_bytes + bytes_written, chunk_size);
-    stream->page_offset += chunk_size;
+    memcpy(sram->page + sram->page_offset, src_bytes + bytes_written,
+           chunk_size);
+    sram->page_offset += chunk_size;
     bytes_written += chunk_size;
     stream->total_processed += chunk_size;
+    sram->is_dirty = TRUE;
 
-    if (stream->page_offset == SRAM_PAGE_SIZE) {
-      sram_write(stream->sram_offset, stream->page, SRAM_PAGE_SIZE);
-      stream->sram_offset += SRAM_PAGE_SIZE;
-      stream->page_offset = 0;
-      bzero(stream->page, SRAM_PAGE_SIZE);
+    if (sram->page_offset == SRAM_PAGE_SIZE) {
+      sram_stream_flush_impl(stream);
+      sram->current_page_addr += SRAM_PAGE_SIZE;
+      sram->page_offset = 0;
     }
   }
 }
 
-void sram_stream_read_bytes(SramStream *stream, void *dst, u32 size) {
+static void sram_stream_read_bytes_impl(StateStream *stream, void *dst,
+                                        u32 size) {
+  SramStream *sram = (SramStream *)stream;
+  if (sram->current_page_addr + sram->page_offset + size > 0x8000) {
+    practiceLogDebug("SRAM read out of bounds: offset %d, size %d",
+                     sram->current_page_addr + sram->page_offset, size);
+    return;
+  }
   u8 *dst_bytes = (u8 *)dst;
   u32 bytes_read = 0;
   while (bytes_read < size) {
-    u32 available = SRAM_PAGE_SIZE - stream->page_offset;
+    u32 available = SRAM_PAGE_SIZE - sram->page_offset;
     u32 chunk_size = size - bytes_read;
     if (chunk_size > available) {
       chunk_size = available;
     }
 
-    memcpy(dst_bytes + bytes_read, stream->page + stream->page_offset, chunk_size);
-    stream->page_offset += chunk_size;
+    memcpy(dst_bytes + bytes_read, sram->page + sram->page_offset, chunk_size);
+    sram->page_offset += chunk_size;
     bytes_read += chunk_size;
     stream->total_processed += chunk_size;
 
-    if (stream->page_offset == SRAM_PAGE_SIZE) {
-      sram_read(stream->sram_offset, stream->page, SRAM_PAGE_SIZE);
-      stream->sram_offset += SRAM_PAGE_SIZE;
-      stream->page_offset = 0;
+    if (sram->page_offset == SRAM_PAGE_SIZE) {
+      sram->current_page_addr += SRAM_PAGE_SIZE;
+      sram_read(sram->current_page_addr, sram->page, SRAM_PAGE_SIZE);
+      sram->page_offset = 0;
     }
   }
 }
 
-void sram_stream_write_u32(SramStream *stream, u32 val) {
-  sram_stream_write_bytes(stream, &val, sizeof(u32));
+static void sram_stream_seek_impl(StateStream *stream, u32 absolute_offset) {
+  SramStream *sram = (SramStream *)stream;
+  u32 intra_page = absolute_offset % SRAM_PAGE_SIZE;
+  u32 page_start = absolute_offset - intra_page;
+
+  if (sram->current_page_addr == page_start) {
+    sram->page_offset = intra_page;
+  } else {
+    // Evict current page if dirty
+    sram_stream_flush_impl(stream);
+
+    // Load new page from SRAM (so partial edits in write mode don't corrupt the
+    // rest of the page)
+    sram->current_page_addr = page_start;
+    sram_read(sram->current_page_addr, sram->page, SRAM_PAGE_SIZE);
+    sram->page_offset = intra_page;
+  }
+  stream->total_processed = absolute_offset - stream->base_address;
 }
 
-void sram_stream_write_u16(SramStream *stream, u16 val) {
-  sram_stream_write_bytes(stream, &val, sizeof(u16));
+void sram_stream_init_write(SramStream *stream, u32 sram_base) {
+  stream->base.write_bytes = sram_stream_write_bytes_impl;
+  stream->base.read_bytes = sram_stream_read_bytes_impl;
+  stream->base.seek = sram_stream_seek_impl;
+  stream->base.flush = sram_stream_flush_impl;
+  stream->base.total_processed = 0;
+  stream->base.base_address = sram_base;
+
+  stream->current_page_addr = sram_base;
+  stream->page_offset = 0;
+  stream->is_write = TRUE;
+  stream->is_dirty = FALSE;
 }
 
-void sram_stream_write_u8(SramStream *stream, u8 val) {
-  sram_stream_write_bytes(stream, &val, sizeof(u8));
-}
+void sram_stream_init_read(SramStream *stream, u32 sram_base) {
+  stream->base.write_bytes = sram_stream_write_bytes_impl;
+  stream->base.read_bytes = sram_stream_read_bytes_impl;
+  stream->base.seek = sram_stream_seek_impl;
+  stream->base.flush = sram_stream_flush_impl;
+  stream->base.total_processed = 0;
+  stream->base.base_address = sram_base;
 
-u32 sram_stream_read_u32(SramStream *stream) {
-  u32 val;
-  sram_stream_read_bytes(stream, &val, sizeof(u32));
-  return val;
-}
-
-u16 sram_stream_read_u16(SramStream *stream) {
-  u16 val;
-  sram_stream_read_bytes(stream, &val, sizeof(u16));
-  return val;
-}
-
-u8 sram_stream_read_u8(SramStream *stream) {
-  u8 val;
-  sram_stream_read_bytes(stream, &val, sizeof(u8));
-  return val;
-}
-
-// Global active wrappers
-void write32(u32 val) {
-  sram_stream_write_u32(g_ActiveSramStream, val);
-}
-
-void write16(u16 val) {
-  sram_stream_write_u16(g_ActiveSramStream, val);
-}
-
-void write8(u8 val) {
-  sram_stream_write_u8(g_ActiveSramStream, val);
-}
-
-void write_bytes(const void *src, u32 size) {
-  sram_stream_write_bytes(g_ActiveSramStream, src, size);
-}
-
-u32 read32(void) {
-  return sram_stream_read_u32(g_ActiveSramStream);
-}
-
-u16 read16(void) {
-  return sram_stream_read_u16(g_ActiveSramStream);
-}
-
-u8 read8(void) {
-  return sram_stream_read_u8(g_ActiveSramStream);
-}
-
-void read_bytes(void *dst, u32 size) {
-  sram_stream_read_bytes(g_ActiveSramStream, dst, size);
+  stream->current_page_addr = sram_base;
+  stream->page_offset = 0;
+  stream->is_write = FALSE;
+  stream->is_dirty = FALSE;
+  sram_read(stream->current_page_addr, stream->page, SRAM_PAGE_SIZE);
 }

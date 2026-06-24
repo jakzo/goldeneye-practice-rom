@@ -1,14 +1,11 @@
 #include "practice_states_props.h"
-#include "../practice_sram.h"
 #include "chrai.h"
 #include "chrobjhandler.h"
-#include "emu_log.h"
-#include "memp.h"
 #include "practice_states.h"
 #include "practice_states_utils.h"
-#include "practice_storage.h"
 #include "practice_ui.h"
 #include <bondconstants.h>
+#include <string.h>
 #include <ultra64.h>
 
 // TODO: Set to true and remove this once all prop types are supported and
@@ -25,6 +22,28 @@ extern void sub_GAME_7F06EFC4(Model *model);
 extern void objDeform(ObjectRecord *obj, s32 arg1);
 extern PathRecord *pathFindById(s32 ID);
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
+extern AIRecord *ailistFindById(s32 ID);
+extern void projectileFree(Projectile *projectile);
+extern void embedmentFree(Embedment *embedment);
+extern void projectileReset(Projectile *projectile);
+
+typedef union {
+  ObjectRecord base;
+  KeyRecord key;
+  CCTVRecord cctv;
+  AmmoCrateRecord mag;
+  WeaponObjRecord wpn;
+  MonitorObjRecord mon;
+  MultiMonitorObjRecord mmon;
+  AutogunRecord agun;
+  MultiAmmoCrateRecord ammo;
+  BodyArmourRecord arm;
+  VehichleRecord veh;
+  AircraftRecord air;
+  GlassRecord gl;
+  TintedGlassRecord tgl;
+  TankRecord tank;
+} TempObjectRecord;
 
 static void removePropAtIndex(s16 index) {
   PropRecord *toClear = get_prop_by_index(index);
@@ -37,38 +56,138 @@ static void removePropAtIndex(s16 index) {
   // removing them from global variable lists?
 }
 
-static void save_object_base(SavedObjectRecord *savedObj, ObjectRecord *obj) {
-  PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
-  savedObj->extrascale = pdhr->extrascale;
-  savedObj->state = pdhr->state;
-  savedObj->type = pdhr->type;
-  savedObj->obj = obj->obj;
-  savedObj->pad = obj->pad;
-  savedObj->flags = obj->flags;
-  savedObj->flags2 = obj->flags2;
-  savedObj->mtx = obj->mtx;
-  savedObj->runtime_pos = obj->runtime_pos;
-  savedObj->runtime_bitflags = obj->runtime_bitflags;
-  savedObj->maxdamage = obj->maxdamage;
-  savedObj->damage = obj->damage;
-  savedObj->shadecol = obj->shadecol;
-  savedObj->nextcol = obj->nextcol;
+static void save_projectile(StateStream *stream, Projectile *proj) {
+  write_u32(stream, proj->flags);
+  write_bytes(stream, &proj->speed, sizeof(coord3d));
+  write_bytes(stream, &proj->unk10, sizeof(coord3d));
+  write_f32(stream, proj->unk1C);
+  write_bytes(stream, &proj->mtx, sizeof(Mtxf));
+  write_f32(stream, proj->unk60);
+  write_f32(stream, proj->unk64);
+  write_bytes(stream, proj->unk68, sizeof(proj->unk68));
+  write_bytes(stream, proj->unk78, sizeof(proj->unk78));
+  write_u16(stream, get_prop_index(proj->ownerprop));
+  write_f32(stream, proj->unk8C);
+  write_u32(stream, proj->unk90);
+  write_f32(stream, proj->unk94);
+  write_u32(stream, proj->unkA0);
+  write_u32(stream, proj->unkA4);
+  write_u32(stream, proj->unkA8);
+  write_u32(stream, proj->unkAC);
+  write_f32(stream, proj->unkB0);
+  write_f32(stream, proj->unkB4);
+  write_u32(stream, proj->droptype);
+  write_u32(stream, proj->refreshrate);
+  write_f32(stream, proj->unkC0);
+  write_f32(stream, proj->unkC4);
+  write_f32(stream, proj->unkC8);
+  write_u8(stream, proj->unkCC);
+  write_u8(stream, proj->unkCD);
+  write_u8(stream, proj->unkCE);
+  write_u8(stream, proj->unkCF);
+  write_u32(stream, proj->unkD0);
+  write_f32(stream, proj->unkd4);
+  write_u32(stream, proj->unkD8);
+  write_u32(stream, proj->unkDC);
+  write_u32(stream, proj->unkE0);
+  write_u16(stream, proj->obj ? get_prop_index(proj->obj->prop) : -1);
+  write_u32(stream, proj->unkE8);
+}
 
-  if (obj->runtime_bitflags & RUNTIMEBITFLAG_DEPOSIT &&
+static void load_projectile(StateStream *stream, Projectile *proj) {
+  proj->flags = read_u32(stream);
+  read_bytes(stream, &proj->speed, sizeof(coord3d));
+  read_bytes(stream, &proj->unk10, sizeof(coord3d));
+  proj->unk1C = read_f32(stream);
+  read_bytes(stream, &proj->mtx, sizeof(Mtxf));
+  proj->unk60 = read_f32(stream);
+  proj->unk64 = read_f32(stream);
+  read_bytes(stream, proj->unk68, sizeof(proj->unk68));
+  read_bytes(stream, proj->unk78, sizeof(proj->unk78));
+  {
+    s16 ownerprop_idx = (s16)read_u16(stream);
+    proj->ownerprop = (PropRecord *)(s32)ownerprop_idx;
+  }
+  proj->unk8C = read_f32(stream);
+  proj->unk90 = read_u32(stream);
+  proj->unk94 = read_f32(stream);
+  proj->sound1 = NULL;
+  proj->sound2 = NULL;
+  proj->unkA0 = read_u32(stream);
+  proj->unkA4 = read_u32(stream);
+  proj->unkA8 = read_u32(stream);
+  proj->unkAC = read_u32(stream);
+  proj->unkB0 = read_f32(stream);
+  proj->unkB4 = read_f32(stream);
+  proj->droptype = read_u32(stream);
+  proj->refreshrate = read_u32(stream);
+  proj->unkC0 = read_f32(stream);
+  proj->unkC4 = read_f32(stream);
+  proj->unkC8 = read_f32(stream);
+  proj->unkCC = read_u8(stream);
+  proj->unkCD = read_u8(stream);
+  proj->unkCE = read_u8(stream);
+  proj->unkCF = read_u8(stream);
+  proj->unkD0 = read_u32(stream);
+  proj->unkd4 = read_f32(stream);
+  proj->unkD8 = read_u32(stream);
+  proj->unkDC = read_u32(stream);
+  proj->unkE0 = read_u32(stream);
+  {
+    s16 obj_idx = (s16)read_u16(stream);
+    proj->obj = (ObjectRecord *)(s32)obj_idx;
+  }
+  proj->unkE8 = read_u32(stream);
+}
+
+static void save_embedment(StateStream *stream, Embedment *emb) {
+  write_u32(stream, emb->flags);
+  write_bytes(stream, &emb->matrix, sizeof(Mtxf));
+  write_u16(stream,
+            emb->projectile ? (u16)(emb->projectile - g_Projectiles) : -1);
+}
+
+static void load_embedment(StateStream *stream, Embedment *emb) {
+  emb->flags = read_u32(stream);
+  read_bytes(stream, &emb->matrix, sizeof(Mtxf));
+  {
+    s16 proj_idx = (s16)read_u16(stream);
+    emb->projectile = (proj_idx != -1) ? &g_Projectiles[proj_idx] : NULL;
+  }
+}
+
+static void save_object_base(StateStream *stream, ObjectRecord *obj) {
+  s16 projIdx = -1;
+  s16 embIdx = -1;
+  u32 switchStates = 0;
+
+  write_u16(stream, obj->extrascale);
+  write_u8(stream, obj->state);
+  write_u8(stream, obj->type);
+  write_u16(stream, obj->obj);
+  write_u16(stream, obj->pad);
+  write_u32(stream, obj->flags);
+  write_u32(stream, obj->flags2);
+  write_bytes(stream, &obj->mtx, sizeof(Mtxf));
+  write_bytes(stream, &obj->runtime_pos, sizeof(coord3d));
+  write_u32(stream, obj->runtime_bitflags);
+  write_f32(stream, obj->maxdamage);
+  write_f32(stream, obj->damage);
+  write_u32(stream, *(u32 *)&obj->shadecol);
+  write_u32(stream, *(u32 *)&obj->nextcol);
+
+  if ((obj->runtime_bitflags & RUNTIMEBITFLAG_DEPOSIT) &&
       obj->projectile != NULL) {
-    savedObj->projectileIdx = (s16)(obj->projectile - g_Projectiles);
-  } else {
-    savedObj->projectileIdx = -1;
+    projIdx = (s16)(obj->projectile - g_Projectiles);
   }
+  write_u16(stream, projIdx);
 
-  if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED &&
+  if ((obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED) &&
       obj->embedment != NULL) {
-    savedObj->embedmentIdx = (s16)(obj->embedment - g_Embedments);
-  } else {
-    savedObj->embedmentIdx = -1;
+    embIdx = (s16)(obj->embedment - g_Embedments);
   }
+  write_u16(stream, embIdx);
 
-  savedObj->switchStates = 0;
   if (obj->model != NULL && obj->model->obj != NULL) {
     s32 i;
     s32 numSw = obj->model->obj->numSwitches;
@@ -81,433 +200,731 @@ static void save_object_base(SavedObjectRecord *savedObj, ObjectRecord *obj) {
           (switchNode->Opcode & 0xFF) == MODELNODE_OPCODE_SWITCH) {
         union ModelRwData *rwdata = modelGetNodeRwData(obj->model, switchNode);
         if (rwdata != NULL && rwdata->Switch.visible) {
-          savedObj->switchStates |= (1 << i);
+          switchStates |= (1 << i);
         }
       }
     }
   }
+  write_u32(stream, switchStates);
 }
 
-/* ------------------------------------------------------------------ */
-/* Save — streams each prop record to storage via the working memory.  */
-/* ------------------------------------------------------------------ */
-bool save_props_state(SramStream *stream) {
+static bool load_object_base(StateStream *stream, ObjectRecord *obj,
+                             PropRecord *prop) {
+  PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
+  s32 destroyedLvl;
+  s16 projectileIdx;
+  s16 embedmentIdx;
+  u32 switchStates;
+
+  pdhr->extrascale = read_u16(stream);
+  pdhr->state = read_u8(stream);
+  pdhr->type = read_u8(stream);
+  obj->obj = read_u16(stream);
+  obj->pad = read_u16(stream);
+  obj->flags = read_u32(stream);
+  obj->flags2 = read_u32(stream);
+  read_bytes(stream, &obj->mtx, sizeof(Mtxf));
+  read_bytes(stream, &obj->runtime_pos, sizeof(coord3d));
+  obj->runtime_bitflags = read_u32(stream);
+  obj->maxdamage = read_f32(stream);
+  obj->damage = read_f32(stream);
+  *(u32 *)&obj->shadecol = read_u32(stream);
+  *(u32 *)&obj->nextcol = read_u32(stream);
+
+  projectileIdx = (s16)read_u16(stream);
+  embedmentIdx = (s16)read_u16(stream);
+  switchStates = read_u32(stream);
+
+  // Restore projectile pointer
+  if (projectileIdx != -1 && prop != NULL) {
+    obj->projectile = &g_Projectiles[projectileIdx];
+    obj->projectile->obj = obj;
+    obj->projectile->ownerprop = prop;
+  } else {
+    obj->projectile = NULL;
+  }
+
+  // Restore embedment pointer
+  if (embedmentIdx != -1 && prop != NULL) {
+    obj->embedment = &g_Embedments[embedmentIdx];
+  } else {
+    obj->embedment = NULL;
+  }
+
+  // Apply model switch states
+  if (obj->model != NULL && obj->model->obj != NULL) {
+    s32 i;
+    s32 numSw = obj->model->obj->numSwitches;
+    if (numSw > 32) {
+      numSw = 32;
+    }
+    for (i = 0; i < numSw; i++) {
+      ModelNode *switchNode = obj->model->obj->Switches[i];
+      if (switchNode != NULL &&
+          (switchNode->Opcode & 0xFF) == MODELNODE_OPCODE_SWITCH) {
+        union ModelRwData *rwdata = modelGetNodeRwData(obj->model, switchNode);
+        if (rwdata != NULL) {
+          rwdata->Switch.visible = (switchStates & (1 << i)) != 0;
+        }
+      }
+    }
+    sub_GAME_7F06EFC4(obj->model);
+  }
+
+  destroyedLvl = objGetDestroyedLevel(obj);
+  if (destroyedLvl > 0) {
+    objDeform(obj, destroyedLvl);
+  }
+
+  return TRUE;
+}
+
+static void save_monitor_record(StateStream *stream,
+                                struct MonitorRecord *mon) {
+  write_u32(stream, (u32)mon->cmdlist);
+  write_u16(stream, mon->offset);
+  write_u16(stream, mon->pause60);
+  write_u32(stream, (u32)mon->tconfig);
+  write_f32(stream, mon->rot);
+  write_f32(stream, mon->xscale);
+  write_f32(stream, mon->xscalefrac);
+  write_f32(stream, mon->xscaleinc);
+  write_f32(stream, mon->xscaleold);
+  write_f32(stream, mon->xscalenew);
+  write_f32(stream, mon->yscale);
+  write_f32(stream, mon->yscalefrac);
+  write_f32(stream, mon->yscaleinc);
+  write_f32(stream, mon->yscaleold);
+  write_f32(stream, mon->yscalenew);
+  write_f32(stream, mon->xmid);
+  write_f32(stream, mon->xmidfrac);
+  write_f32(stream, mon->xmidinc);
+  write_f32(stream, mon->xmidold);
+  write_f32(stream, mon->xmidnew);
+  write_f32(stream, mon->ymid);
+  write_f32(stream, mon->ymidfrac);
+  write_f32(stream, mon->ymidinc);
+  write_f32(stream, mon->ymidold);
+  write_f32(stream, mon->ymidnew);
+  write_u8(stream, mon->red);
+  write_u8(stream, mon->redold);
+  write_u8(stream, mon->rednew);
+  write_u8(stream, mon->green);
+  write_u8(stream, mon->greenold);
+  write_u8(stream, mon->greennew);
+  write_u8(stream, mon->blue);
+  write_u8(stream, mon->blueold);
+  write_u8(stream, mon->bluenew);
+  write_u8(stream, mon->alpha);
+  write_u8(stream, mon->alphaold);
+  write_u8(stream, mon->alphanew);
+  write_f32(stream, mon->colfrac);
+  write_f32(stream, mon->colinc);
+}
+
+static void load_monitor_record(StateStream *stream,
+                                struct MonitorRecord *mon) {
+  mon->cmdlist = (u32 *)read_u32(stream);
+  mon->offset = read_u16(stream);
+  mon->pause60 = read_u16(stream);
+  mon->tconfig = (void *)read_u32(stream);
+  mon->rot = read_f32(stream);
+  mon->xscale = read_f32(stream);
+  mon->xscalefrac = read_f32(stream);
+  mon->xscaleinc = read_f32(stream);
+  mon->xscaleold = read_f32(stream);
+  mon->xscalenew = read_f32(stream);
+  mon->yscale = read_f32(stream);
+  mon->yscalefrac = read_f32(stream);
+  mon->yscaleinc = read_f32(stream);
+  mon->yscaleold = read_f32(stream);
+  mon->yscalenew = read_f32(stream);
+  mon->xmid = read_f32(stream);
+  mon->xmidfrac = read_f32(stream);
+  mon->xmidinc = read_f32(stream);
+  mon->xmidold = read_f32(stream);
+  mon->xmidnew = read_f32(stream);
+  mon->ymid = read_f32(stream);
+  mon->ymidfrac = read_f32(stream);
+  mon->ymidinc = read_f32(stream);
+  mon->ymidold = read_f32(stream);
+  mon->ymidnew = read_f32(stream);
+  mon->red = read_u8(stream);
+  mon->redold = read_u8(stream);
+  mon->rednew = read_u8(stream);
+  mon->green = read_u8(stream);
+  mon->greenold = read_u8(stream);
+  mon->greennew = read_u8(stream);
+  mon->blue = read_u8(stream);
+  mon->blueold = read_u8(stream);
+  mon->bluenew = read_u8(stream);
+  mon->alpha = read_u8(stream);
+  mon->alphaold = read_u8(stream);
+  mon->alphanew = read_u8(stream);
+  mon->colfrac = read_f32(stream);
+  mon->colinc = read_f32(stream);
+}
+
+static void load_door_record(StateStream *stream, DoorRecord *door) {
+  door->maxFrac = read_f32(stream);
+  door->perimFrac = read_f32(stream);
+  door->accel = read_f32(stream);
+  door->decel = read_f32(stream);
+  door->maxSpeed = read_f32(stream);
+  door->doorFlags = read_u16(stream);
+  door->doorType = read_u16(stream);
+  door->keyflags = read_u32(stream);
+  door->autoCloseFrames = read_u32(stream);
+  door->doorOpenSound = read_u32(stream);
+  door->frac = read_f32(stream);
+  door->unkac = read_f32(stream);
+  door->unkb0 = read_f32(stream);
+  door->openPosition = read_f32(stream);
+  door->speed = read_f32(stream);
+  door->openstate = read_u8(stream);
+  door->unkbd = read_u8(stream);
+  door->calculatedopacity = read_u16(stream);
+  door->TintDist = read_u32(stream);
+  door->CullDist = read_u16(stream);
+  door->soundType = read_u8(stream);
+  door->fadeTime60 = read_u8(stream);
+  read_bytes(stream, &door->bbox, sizeof(struct ModelRoData_BoundingBoxRecord));
+  door->openedTime = read_u32(stream);
+  door->portalNumber = read_u32(stream);
+  door->openSoundState = NULL;
+  door->closeSoundState = NULL;
+  door->lastcalc60i = read_u32(stream);
+}
+
+static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
+  switch (obj->type) {
+  case PROPDEF_PROP:
+  case PROPDEF_ALARM:
+  case PROPDEF_RACK:
+  case PROPDEF_HAT:
+  case PROPDEF_UNK41:
+  case PROPDEF_GAS_RELEASING:
+    break;
+  case PROPDEF_KEY: {
+    KeyRecord *key = (KeyRecord *)obj;
+    key->keyflags = read_u32(stream);
+    break;
+  }
+  case PROPDEF_CCTV: {
+    CCTVRecord *cctv = (CCTVRecord *)obj;
+    cctv->cctv_pad = read_u32(stream);
+    read_bytes(stream, &cctv->unk84, sizeof(Mtxf));
+    cctv->unkC4 = read_f32(stream);
+    cctv->unkC8 = read_f32(stream);
+    cctv->unkCC = read_f32(stream);
+    cctv->unkD0 = read_f32(stream);
+    cctv->unkD4 = read_u32(stream);
+    cctv->unkD8 = read_f32(stream);
+    cctv->unkDC = read_f32(stream);
+    cctv->timer = read_u32(stream);
+    cctv->convert_to_f32 = read_u32(stream);
+    cctv->unkE8 = read_f32(stream);
+    cctv->unkEC = read_u32(stream);
+    cctv->unkF0 = read_u32(stream);
+    cctv->unkF4 = read_u32(stream);
+    cctv->unkF8 = read_u32(stream);
+    break;
+  }
+  case PROPDEF_MAGAZINE: {
+    AmmoCrateRecord *mag = (AmmoCrateRecord *)obj;
+    mag->ammoType = read_u32(stream);
+    break;
+  }
+  case PROPDEF_COLLECTABLE: {
+    WeaponObjRecord *wpn = (WeaponObjRecord *)obj;
+    wpn->weaponnum = read_u8(stream);
+    wpn->LinkedWeaponType = read_u8(stream);
+    wpn->timer = read_u16(stream);
+    s16 dualIdx = read_u16(stream);
+    wpn->dualweapon = (dualIdx != -1)
+                          ? (WeaponObjRecord *)get_prop_by_index(dualIdx)->obj
+                          : NULL;
+    break;
+  }
+  case PROPDEF_MONITOR: {
+    MonitorObjRecord *mon = (MonitorObjRecord *)obj;
+    load_monitor_record(stream, &mon->Monitor);
+    mon->OwnerOffset = read_u32(stream);
+    mon->OwnerPart = read_u32(stream);
+    mon->ImageNum = read_u32(stream);
+    break;
+  }
+  case PROPDEF_MULTI_MONITOR: {
+    MultiMonitorObjRecord *mmon = (MultiMonitorObjRecord *)obj;
+    s32 m;
+    for (m = 0; m < 4; m++) {
+      load_monitor_record(stream, &mmon->Monitor[m]);
+    }
+    mmon->ImageNums[0] = read_u8(stream);
+    mmon->ImageNums[1] = read_u8(stream);
+    mmon->ImageNums[2] = read_u8(stream);
+    mmon->ImageNums[3] = read_u8(stream);
+    break;
+  }
+  case PROPDEF_AUTOGUN: {
+    AutogunRecord *agun = (AutogunRecord *)obj;
+    agun->padID = read_u32(stream);
+    agun->rot_related = read_f32(stream);
+    agun->unk88 = read_f32(stream);
+    agun->unk8C = read_f32(stream);
+    agun->unk90 = read_f32(stream);
+    agun->unk94 = read_f32(stream);
+    agun->unk98 = read_f32(stream);
+    agun->unk9C = read_f32(stream);
+    agun->unkA0 = read_f32(stream);
+    agun->speed = read_f32(stream);
+    agun->aimdist = read_f32(stream);
+    agun->unkAC = read_u32(stream);
+    agun->unkB0 = read_f32(stream);
+    agun->unkB4 = read_f32(stream);
+    agun->unkB8 = read_u32(stream);
+    agun->unkBC = read_u32(stream);
+    agun->unkC0 = read_u32(stream);
+
+    struct beam b;
+    read_bytes(stream, &b, sizeof(struct beam));
+    agun->unkC4 = NULL;
+    agun->unkC8 = NULL;
+    if (agun->beam != NULL) {
+      *agun->beam = b;
+    }
+
+    agun->is_active = read_u32(stream);
+    agun->unkD4 = read_f32(stream);
+    break;
+  }
+  case PROPDEF_AMMO: {
+    MultiAmmoCrateRecord *ammo = (MultiAmmoCrateRecord *)obj;
+    ammo->unk80 = read_u16(stream);
+    s32 a;
+    for (a = 0; a < AMMOTYPE_GLOBAL_MAX; a++) {
+      ammo->quantities[a] = read_u16(stream);
+    }
+    break;
+  }
+  case PROPDEF_ARMOUR: {
+    BodyArmourRecord *arm = (BodyArmourRecord *)obj;
+    arm->initialamount = read_f32(stream);
+    arm->amount = read_f32(stream);
+    break;
+  }
+  case PROPDEF_VEHICHLE: {
+    VehichleRecord *veh = (VehichleRecord *)obj;
+    u32 ailistID = read_u32(stream);
+    veh->ailist = (ailistID != 0) ? ailistFindById(ailistID) : NULL;
+    veh->aioffset = read_u16(stream);
+    veh->aireturnlist = read_u16(stream);
+    veh->speed = read_f32(stream);
+    veh->wheelxrot = read_f32(stream);
+    veh->wheelyrot = read_f32(stream);
+    veh->speedaim = read_f32(stream);
+    veh->speedtime60 = read_f32(stream);
+    veh->turnrot60 = read_f32(stream);
+    veh->roty = read_f32(stream);
+    u32 pathID = read_u32(stream);
+    veh->path = (pathID != 0) ? pathFindById(pathID) : NULL;
+    veh->nextstep = read_u32(stream);
+    break;
+  }
+  case PROPDEF_AIRCRAFT: {
+    AircraftRecord *air = (AircraftRecord *)obj;
+    u32 ailistID = read_u32(stream);
+    air->ailist = (ailistID != 0) ? ailistFindById(ailistID) : NULL;
+    air->aioffset = read_u16(stream);
+    air->aireturnlist = read_u16(stream);
+    air->rotoryrot = read_f32(stream);
+    air->rotaryspeed = read_f32(stream);
+    air->rotaryspeedaim = read_f32(stream);
+    air->rotaryspeedtime = read_f32(stream);
+    air->speed = read_f32(stream);
+    air->speedaim = read_f32(stream);
+    air->speedtime60 = read_f32(stream);
+    air->yrot = read_f32(stream);
+    air->nextstep = read_u32(stream);
+    u32 pathID = read_u32(stream);
+    air->path = (pathID != 0) ? pathFindById(pathID) : NULL;
+    break;
+  }
+  case PROPDEF_GLASS:
+  case PROPDEF_SAFE: {
+    GlassRecord *gl = (GlassRecord *)obj;
+    read_bytes(stream, &gl->normal, sizeof(coord3d));
+    break;
+  }
+  case PROPDEF_TINTED_GLASS: {
+    TintedGlassRecord *tgl = (TintedGlassRecord *)obj;
+    tgl->TintDist = read_u32(stream);
+    tgl->CullDist = read_u32(stream);
+    tgl->calculatedopacity = read_u32(stream);
+    tgl->portalnum = read_u32(stream);
+    tgl->unk90 = read_f32(stream);
+    break;
+  }
+  case PROPDEF_TANK: {
+    TankRecord *tank = (TankRecord *)obj;
+    read_bytes(stream, &tank->rect, sizeof(rect4f));
+    tank->unkA4 = read_u32(stream);
+    tank->unkA8 = read_u32(stream);
+    tank->unkAC = read_u32(stream);
+    tank->unkB0 = read_u32(stream);
+    tank->unkB4 = read_u32(stream);
+    tank->unkB8 = read_u32(stream);
+    tank->unkBC = read_u32(stream);
+    tank->unkC0 = read_u32(stream);
+    tank->is_firing_tank = read_u32(stream);
+    tank->turret_vertical_angle = read_f32(stream);
+    tank->turret_orientation_angle = read_f32(stream);
+    tank->unkD0 = read_f32(stream);
+    tank->stan_y = read_f32(stream);
+    tank->unkD8 = read_u32(stream);
+    tank->tank_orientation_angle = read_f32(stream);
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+static void skip_prop_data(StateStream *stream, u8 type) {
+  if (type == PROP_TYPE_DOOR) {
+    ObjectRecord temp_obj;
+    DoorRecord temp_door;
+    load_object_base(stream, &temp_obj, NULL);
+    load_door_record(stream, &temp_door);
+  } else if (type == PROP_TYPE_OBJ) {
+    TempObjectRecord temp_obj;
+    if (load_object_base(stream, &temp_obj.base, NULL)) {
+      load_object_subtype(stream, &temp_obj.base);
+    }
+  }
+}
+
+bool save_props_state(StateStream *stream) {
   u32 headerOffset;
   u32 dataStart;
-  PropsHeaderSection hdr;
+  u16 recordCount = 0;
   s32 i;
   u32 pi;
-  SavedRecordsOfProp propRecord;
 
-  headerOffset = stream->sram_base + stream->total_processed;
-  hdr.recordCount = 0;
-  hdr.size = 0;
-  hdr.indexOfFirstEntry = get_prop_index(ptr_obj_pos_list_first_entry);
-  hdr.indexOfCurrentEntry = get_prop_index(ptr_obj_pos_list_current_entry);
-  hdr.indexOfFinalEntry = get_prop_index(ptr_obj_pos_list_final_entry);
+  headerOffset = stream->base_address + stream->total_processed;
 
-  /* Write placeholder header (patched at the end). */
-  sram_stream_write_bytes(stream, &hdr, sizeof(hdr));
-  dataStart = stream->sram_base + stream->total_processed;
+  // Placeholder header fields
+  write_u32(stream, 0); // size
+  write_u16(stream, 0); // recordCount
+  write_u16(stream, get_prop_index(ptr_obj_pos_list_first_entry));
+  write_u16(stream, get_prop_index(ptr_obj_pos_list_current_entry));
+  write_u16(stream, get_prop_index(ptr_obj_pos_list_final_entry));
+
+  dataStart = stream->base_address + stream->total_processed;
+
+  /* Save active projectiles. */
+  {
+    u16 activeProjCount = 0;
+    for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
+      if (!(g_Projectiles[pi].flags & PROJECTILEFLAG_FREE)) {
+        activeProjCount++;
+      }
+    }
+    write_u16(stream, activeProjCount);
+    for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
+      if (!(g_Projectiles[pi].flags & PROJECTILEFLAG_FREE)) {
+        write_u16(stream, pi);
+        save_projectile(stream, &g_Projectiles[pi]);
+      }
+    }
+  }
+
+  /* Save active embedments. */
+  {
+    u16 activeEmbCount = 0;
+    for (pi = 0; pi < EMBEDMENT_ARR_MAX; pi++) {
+      if (!(g_Embedments[pi].flags & EMBEDMENTFLAG_FREE)) {
+        activeEmbCount++;
+      }
+    }
+    write_u16(stream, activeEmbCount);
+    for (pi = 0; pi < EMBEDMENT_ARR_MAX; pi++) {
+      if (!(g_Embedments[pi].flags & EMBEDMENTFLAG_FREE)) {
+        write_u16(stream, pi);
+        save_embedment(stream, &g_Embedments[pi]);
+      }
+    }
+  }
 
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
     PropRecord *prop = get_prop_by_index(i);
-    SavedPropRecord *savedProp = &propRecord.prop;
-    u32 typeSize = 0;
 
     if (prop == NULL || !(prop->flags & PROPFLAG_ENABLED)) {
       continue;
     }
 
-    savedProp->index = i;
-    savedProp->type = prop->type;
-    savedProp->flags = prop->flags;
-    savedProp->timetoregen = prop->timetoregen;
-    savedProp->pos = prop->pos;
-    savedProp->stanOffset = get_tile_offset(prop->stan);
-    savedProp->zDepth = prop->zDepth;
-    savedProp->parentIndex = get_prop_index(prop->parent);
-    savedProp->childIndex = get_prop_index(prop->child);
-    savedProp->prevIndex = get_prop_index(prop->prev);
-    savedProp->nextIndex = get_prop_index(prop->next);
-    savedProp->rooms[0] = prop->rooms[0];
-    savedProp->rooms[1] = prop->rooms[1];
-    savedProp->rooms[2] = prop->rooms[2];
-    savedProp->rooms[3] = prop->rooms[3];
-    savedProp->unk30 = prop->unk30;
+    // Write base prop record fields
+    write_u16(stream, i);
+    write_u8(stream, prop->type);
+    write_u8(stream, prop->flags);
+    write_u16(stream, prop->timetoregen);
+    write_bytes(stream, &prop->pos, sizeof(coord3d));
+    write_u32(stream, get_tile_offset(prop->stan));
+    write_f32(stream, prop->zDepth);
+    write_u16(stream, get_prop_index(prop->parent));
+    write_u16(stream, get_prop_index(prop->child));
+    write_u16(stream, get_prop_index(prop->prev));
+    write_u16(stream, get_prop_index(prop->next));
+    write_u8(stream, prop->rooms[0]);
+    write_u8(stream, prop->rooms[1]);
+    write_u8(stream, prop->rooms[2]);
+    write_u8(stream, prop->rooms[3]);
+    write_u32(stream, prop->unk30);
 
     switch ((PROP_TYPE)prop->type) {
     case PROP_TYPE_DOOR: {
       DoorRecord *door = prop->door;
-      SavedDoorRecord *savedDoor = &propRecord.type.door;
+      if (door != NULL) {
+        save_object_base(stream, (ObjectRecord *)door);
 
-      if (door == NULL) {
-        break;
+        write_f32(stream, door->maxFrac);
+        write_f32(stream, door->perimFrac);
+        write_f32(stream, door->accel);
+        write_f32(stream, door->decel);
+        write_f32(stream, door->maxSpeed);
+        write_u16(stream, door->doorFlags);
+        write_u16(stream, door->doorType);
+        write_u32(stream, door->keyflags);
+        write_u32(stream, door->autoCloseFrames);
+        write_u32(stream, door->doorOpenSound);
+        write_f32(stream, door->frac);
+        write_f32(stream, door->unkac);
+        write_f32(stream, door->unkb0);
+        write_f32(stream, door->openPosition);
+        write_f32(stream, door->speed);
+        write_u8(stream, door->openstate);
+        write_u8(stream, door->unkbd);
+        write_u16(stream, door->calculatedopacity);
+        write_u32(stream, door->TintDist);
+        write_u16(stream, door->CullDist);
+        write_u8(stream, door->soundType);
+        write_u8(stream, door->fadeTime60);
+        write_bytes(stream, &door->bbox,
+                    sizeof(struct ModelRoData_BoundingBoxRecord));
+        write_u32(stream, door->openedTime);
+        write_u32(stream, door->portalNumber);
+        write_u32(stream, door->lastcalc60i);
       }
-
-      save_object_base(&savedDoor->obj, (ObjectRecord *)door);
-
-      savedDoor->maxFrac = door->maxFrac;
-      savedDoor->perimFrac = door->perimFrac;
-      savedDoor->accel = door->accel;
-      savedDoor->decel = door->decel;
-      savedDoor->maxSpeed = door->maxSpeed;
-      savedDoor->doorFlags = door->doorFlags;
-      savedDoor->doorType = door->doorType;
-      savedDoor->keyflags = door->keyflags;
-      savedDoor->autoCloseFrames = door->autoCloseFrames;
-      savedDoor->doorOpenSound = door->doorOpenSound;
-      savedDoor->frac = door->frac;
-      savedDoor->unkac = door->unkac;
-      savedDoor->unkb0 = door->unkb0;
-      savedDoor->openPosition = door->openPosition;
-      savedDoor->speed = door->speed;
-      savedDoor->openstate = door->openstate;
-      savedDoor->unkbd = door->unkbd;
-      savedDoor->calculatedopacity = door->calculatedopacity;
-      savedDoor->TintDist = door->TintDist;
-      savedDoor->CullDist = door->CullDist;
-      savedDoor->soundType = door->soundType;
-      savedDoor->fadeTime60 = door->fadeTime60;
-      savedDoor->bbox = door->bbox;
-      savedDoor->openedTime = door->openedTime;
-      savedDoor->portalNumber = door->portalNumber;
-      savedDoor->lastcalc60i = door->lastcalc60i;
-
-      typeSize = sizeof(SavedDoorRecord);
       break;
     }
 
     case PROP_TYPE_OBJ: {
       ObjectRecord *obj = prop->obj;
+      if (obj != NULL) {
+        save_object_base(stream, obj);
 
-      if (obj == NULL) {
-        break;
-      }
-
-      switch (obj->type) {
-      case PROPDEF_PROP:
-      case PROPDEF_ALARM:
-      case PROPDEF_RACK:
-      case PROPDEF_HAT:
-      case PROPDEF_UNK41:
-      case PROPDEF_GAS_RELEASING: {
-        SavedObjectRecord *savedObj = &propRecord.type.door.obj;
-        save_object_base(savedObj, obj);
-        typeSize = sizeof(SavedObjectRecord);
-        break;
-      }
-      case PROPDEF_KEY: {
-        KeyRecord *key = (KeyRecord *)obj;
-        SavedKeyRecord *savedKey = &propRecord.type.key;
-        save_object_base(&savedKey->obj, obj);
-        savedKey->keyflags = key->keyflags;
-        typeSize = sizeof(SavedKeyRecord);
-        break;
-      }
-      case PROPDEF_CCTV: {
-        CCTVRecord *cctv = (CCTVRecord *)obj;
-        SavedCCTVRecord *savedCCTV = &propRecord.type.cctv;
-        save_object_base(&savedCCTV->obj, obj);
-        savedCCTV->pad = cctv->cctv_pad;
-        savedCCTV->unk84 = cctv->unk84;
-        savedCCTV->unkC4 = cctv->unkC4;
-        savedCCTV->unkC8 = cctv->unkC8;
-        savedCCTV->unkCC = cctv->unkCC;
-        savedCCTV->unkD0 = cctv->unkD0;
-        savedCCTV->unkD4 = cctv->unkD4;
-        savedCCTV->unkD8 = cctv->unkD8;
-        savedCCTV->unkDC = cctv->unkDC;
-        savedCCTV->timer = cctv->timer;
-        savedCCTV->convert_to_f32 = cctv->convert_to_f32;
-        savedCCTV->unkE8 = cctv->unkE8;
-        savedCCTV->unkEC = cctv->unkEC;
-        savedCCTV->unkF0 = cctv->unkF0;
-        savedCCTV->unkF4 = cctv->unkF4;
-        savedCCTV->unkF8 = cctv->unkF8;
-        typeSize = sizeof(SavedCCTVRecord);
-        break;
-      }
-      case PROPDEF_MAGAZINE: {
-        AmmoCrateRecord *mag = (AmmoCrateRecord *)obj;
-        SavedAmmoCrateRecord *savedMag = &propRecord.type.magazine;
-        save_object_base(&savedMag->obj, obj);
-        savedMag->ammoType = mag->ammoType;
-        typeSize = sizeof(SavedAmmoCrateRecord);
-        break;
-      }
-      case PROPDEF_COLLECTABLE: {
-        WeaponObjRecord *wpn = (WeaponObjRecord *)obj;
-        SavedWeaponObjRecord *savedWpn = &propRecord.type.weaponObj;
-        save_object_base(&savedWpn->obj, obj);
-        savedWpn->weaponnum = wpn->weaponnum;
-        savedWpn->LinkedWeaponType = wpn->LinkedWeaponType;
-        savedWpn->timer = wpn->timer;
-        savedWpn->dualweaponPropIndex =
-            (wpn->dualweapon && wpn->dualweapon->prop)
-                ? get_prop_index(wpn->dualweapon->prop)
-                : -1;
-        typeSize = sizeof(SavedWeaponObjRecord);
-        break;
-      }
-      case PROPDEF_MONITOR: {
-        MonitorObjRecord *mon = (MonitorObjRecord *)obj;
-        SavedMonitorObjRecord *savedMon = &propRecord.type.monitor;
-        save_object_base(&savedMon->obj, obj);
-
-        savedMon->Monitor.cmdlist = (u32)mon->Monitor.cmdlist;
-        savedMon->Monitor.offset = mon->Monitor.offset;
-        savedMon->Monitor.pause60 = mon->Monitor.pause60;
-        savedMon->Monitor.tconfig = (u32)mon->Monitor.tconfig;
-        savedMon->Monitor.rot = mon->Monitor.rot;
-        savedMon->Monitor.xscale = mon->Monitor.xscale;
-        savedMon->Monitor.xscalefrac = mon->Monitor.xscalefrac;
-        savedMon->Monitor.xscaleinc = mon->Monitor.xscaleinc;
-        savedMon->Monitor.xscaleold = mon->Monitor.xscaleold;
-        savedMon->Monitor.xscalenew = mon->Monitor.xscalenew;
-        savedMon->Monitor.yscale = mon->Monitor.yscale;
-        savedMon->Monitor.yscalefrac = mon->Monitor.yscalefrac;
-        savedMon->Monitor.yscaleinc = mon->Monitor.yscaleinc;
-        savedMon->Monitor.yscaleold = mon->Monitor.yscaleold;
-        savedMon->Monitor.yscalenew = mon->Monitor.yscalenew;
-        savedMon->Monitor.xmid = mon->Monitor.xmid;
-        savedMon->Monitor.xmidfrac = mon->Monitor.xmidfrac;
-        savedMon->Monitor.xmidinc = mon->Monitor.xmidinc;
-        savedMon->Monitor.xmidold = mon->Monitor.xmidold;
-        savedMon->Monitor.xmidnew = mon->Monitor.xmidnew;
-        savedMon->Monitor.ymid = mon->Monitor.ymid;
-        savedMon->Monitor.ymidfrac = mon->Monitor.ymidfrac;
-        savedMon->Monitor.ymidinc = mon->Monitor.ymidinc;
-        savedMon->Monitor.ymidold = mon->Monitor.ymidold;
-        savedMon->Monitor.ymidnew = mon->Monitor.ymidnew;
-        savedMon->Monitor.red = mon->Monitor.red;
-        savedMon->Monitor.redold = mon->Monitor.redold;
-        savedMon->Monitor.rednew = mon->Monitor.rednew;
-        savedMon->Monitor.green = mon->Monitor.green;
-        savedMon->Monitor.greenold = mon->Monitor.greenold;
-        savedMon->Monitor.greennew = mon->Monitor.greennew;
-        savedMon->Monitor.blue = mon->Monitor.blue;
-        savedMon->Monitor.blueold = mon->Monitor.blueold;
-        savedMon->Monitor.bluenew = mon->Monitor.bluenew;
-        savedMon->Monitor.alpha = mon->Monitor.alpha;
-        savedMon->Monitor.alphaold = mon->Monitor.alphaold;
-        savedMon->Monitor.alphanew = mon->Monitor.alphanew;
-        savedMon->Monitor.colfrac = mon->Monitor.colfrac;
-        savedMon->Monitor.colinc = mon->Monitor.colinc;
-
-        savedMon->OwnerOffset = mon->OwnerOffset;
-        savedMon->OwnerPart = mon->OwnerPart;
-        savedMon->ImageNum = mon->ImageNum;
-        typeSize = sizeof(SavedMonitorObjRecord);
-        break;
-      }
-      case PROPDEF_MULTI_MONITOR: {
-        MultiMonitorObjRecord *mmon = (MultiMonitorObjRecord *)obj;
-        SavedMultiMonitorObjRecord *savedMmon = &propRecord.type.multiMonitor;
-        s32 m;
-        save_object_base(&savedMmon->obj, obj);
-
-        for (m = 0; m < 4; m++) {
-          savedMmon->Monitor[m].cmdlist = (u32)mmon->Monitor[m].cmdlist;
-          savedMmon->Monitor[m].offset = mmon->Monitor[m].offset;
-          savedMmon->Monitor[m].pause60 = mmon->Monitor[m].pause60;
-          savedMmon->Monitor[m].tconfig = (u32)mmon->Monitor[m].tconfig;
-          savedMmon->Monitor[m].rot = mmon->Monitor[m].rot;
-          savedMmon->Monitor[m].xscale = mmon->Monitor[m].xscale;
-          savedMmon->Monitor[m].xscalefrac = mmon->Monitor[m].xscalefrac;
-          savedMmon->Monitor[m].xscaleinc = mmon->Monitor[m].xscaleinc;
-          savedMmon->Monitor[m].xscaleold = mmon->Monitor[m].xscaleold;
-          savedMmon->Monitor[m].xscalenew = mmon->Monitor[m].xscalenew;
-          savedMmon->Monitor[m].yscale = mmon->Monitor[m].yscale;
-          savedMmon->Monitor[m].yscalefrac = mmon->Monitor[m].yscalefrac;
-          savedMmon->Monitor[m].yscaleinc = mmon->Monitor[m].yscaleinc;
-          savedMmon->Monitor[m].yscaleold = mmon->Monitor[m].yscaleold;
-          savedMmon->Monitor[m].yscalenew = mmon->Monitor[m].yscalenew;
-          savedMmon->Monitor[m].xmid = mmon->Monitor[m].xmid;
-          savedMmon->Monitor[m].xmidfrac = mmon->Monitor[m].xmidfrac;
-          savedMmon->Monitor[m].xmidinc = mmon->Monitor[m].xmidinc;
-          savedMmon->Monitor[m].xmidold = mmon->Monitor[m].xmidold;
-          savedMmon->Monitor[m].xmidnew = mmon->Monitor[m].xmidnew;
-          savedMmon->Monitor[m].ymid = mmon->Monitor[m].ymid;
-          savedMmon->Monitor[m].ymidfrac = mmon->Monitor[m].ymidfrac;
-          savedMmon->Monitor[m].ymidinc = mmon->Monitor[m].ymidinc;
-          savedMmon->Monitor[m].ymidold = mmon->Monitor[m].ymidold;
-          savedMmon->Monitor[m].ymidnew = mmon->Monitor[m].ymidnew;
-          savedMmon->Monitor[m].red = mmon->Monitor[m].red;
-          savedMmon->Monitor[m].redold = mmon->Monitor[m].redold;
-          savedMmon->Monitor[m].rednew = mmon->Monitor[m].rednew;
-          savedMmon->Monitor[m].green = mmon->Monitor[m].green;
-          savedMmon->Monitor[m].greenold = mmon->Monitor[m].greenold;
-          savedMmon->Monitor[m].greennew = mmon->Monitor[m].greennew;
-          savedMmon->Monitor[m].blue = mmon->Monitor[m].blue;
-          savedMmon->Monitor[m].blueold = mmon->Monitor[m].blueold;
-          savedMmon->Monitor[m].bluenew = mmon->Monitor[m].bluenew;
-          savedMmon->Monitor[m].alpha = mmon->Monitor[m].alpha;
-          savedMmon->Monitor[m].alphaold = mmon->Monitor[m].alphaold;
-          savedMmon->Monitor[m].alphanew = mmon->Monitor[m].alphanew;
-          savedMmon->Monitor[m].colfrac = mmon->Monitor[m].colfrac;
-          savedMmon->Monitor[m].colinc = mmon->Monitor[m].colinc;
+        switch (obj->type) {
+        case PROPDEF_PROP:
+        case PROPDEF_ALARM:
+        case PROPDEF_RACK:
+        case PROPDEF_HAT:
+        case PROPDEF_UNK41:
+        case PROPDEF_GAS_RELEASING:
+          break;
+        case PROPDEF_KEY: {
+          KeyRecord *key = (KeyRecord *)obj;
+          write_u32(stream, key->keyflags);
+          break;
         }
+        case PROPDEF_CCTV: {
+          CCTVRecord *cctv = (CCTVRecord *)obj;
+          write_u32(stream, cctv->cctv_pad);
+          write_bytes(stream, &cctv->unk84, sizeof(Mtxf));
+          write_f32(stream, cctv->unkC4);
+          write_f32(stream, cctv->unkC8);
+          write_f32(stream, cctv->unkCC);
+          write_f32(stream, cctv->unkD0);
+          write_u32(stream, cctv->unkD4);
+          write_f32(stream, cctv->unkD8);
+          write_f32(stream, cctv->unkDC);
+          write_u32(stream, cctv->timer);
+          write_u32(stream, cctv->convert_to_f32);
+          write_f32(stream, cctv->unkE8);
+          write_u32(stream, cctv->unkEC);
+          write_u32(stream, cctv->unkF0);
+          write_u32(stream, cctv->unkF4);
+          write_u32(stream, cctv->unkF8);
+          break;
+        }
+        case PROPDEF_MAGAZINE: {
+          AmmoCrateRecord *mag = (AmmoCrateRecord *)obj;
+          write_u32(stream, mag->ammoType);
+          break;
+        }
+        case PROPDEF_COLLECTABLE: {
+          WeaponObjRecord *wpn = (WeaponObjRecord *)obj;
+          write_u8(stream, wpn->weaponnum);
+          write_u8(stream, wpn->LinkedWeaponType);
+          write_u16(stream, wpn->timer);
+          s16 dualIdx = (wpn->dualweapon && wpn->dualweapon->prop)
+                            ? (s16)get_prop_index(wpn->dualweapon->prop)
+                            : -1;
+          write_u16(stream, dualIdx);
+          break;
+        }
+        case PROPDEF_MONITOR: {
+          MonitorObjRecord *mon = (MonitorObjRecord *)obj;
+          save_monitor_record(stream, &mon->Monitor);
+          write_u32(stream, mon->OwnerOffset);
+          write_u32(stream, mon->OwnerPart);
+          write_u32(stream, mon->ImageNum);
+          break;
+        }
+        case PROPDEF_MULTI_MONITOR: {
+          MultiMonitorObjRecord *mmon = (MultiMonitorObjRecord *)obj;
+          s32 m;
+          for (m = 0; m < 4; m++) {
+            save_monitor_record(stream, &mmon->Monitor[m]);
+          }
+          write_u8(stream, mmon->ImageNums[0]);
+          write_u8(stream, mmon->ImageNums[1]);
+          write_u8(stream, mmon->ImageNums[2]);
+          write_u8(stream, mmon->ImageNums[3]);
+          break;
+        }
+        case PROPDEF_AUTOGUN: {
+          AutogunRecord *agun = (AutogunRecord *)obj;
+          write_u32(stream, agun->padID);
+          write_f32(stream, agun->rot_related);
+          write_f32(stream, agun->unk88);
+          write_f32(stream, agun->unk8C);
+          write_f32(stream, agun->unk90);
+          write_f32(stream, agun->unk94);
+          write_f32(stream, agun->unk98);
+          write_f32(stream, agun->unk9C);
+          write_f32(stream, agun->unkA0);
+          write_f32(stream, agun->speed);
+          write_f32(stream, agun->aimdist);
+          write_u32(stream, agun->unkAC);
+          write_f32(stream, agun->unkB0);
+          write_f32(stream, agun->unkB4);
+          write_u32(stream, agun->unkB8);
+          write_u32(stream, agun->unkBC);
+          write_u32(stream, agun->unkC0);
 
-        savedMmon->ImageNums[0] = mmon->ImageNums[0];
-        savedMmon->ImageNums[1] = mmon->ImageNums[1];
-        savedMmon->ImageNums[2] = mmon->ImageNums[2];
-        savedMmon->ImageNums[3] = mmon->ImageNums[3];
-        typeSize = sizeof(SavedMultiMonitorObjRecord);
-        break;
-      }
-      case PROPDEF_AUTOGUN: {
-        AutogunRecord *agun = (AutogunRecord *)obj;
-        SavedAutogunRecord *savedAgun = &propRecord.type.autogun;
-        save_object_base(&savedAgun->obj, obj);
-        savedAgun->padID = agun->padID;
-        savedAgun->rot_related = agun->rot_related;
-        savedAgun->unk88 = agun->unk88;
-        savedAgun->unk8C = agun->unk8C;
-        savedAgun->unk90 = agun->unk90;
-        savedAgun->unk94 = agun->unk94;
-        savedAgun->unk98 = agun->unk98;
-        savedAgun->unk9C = agun->unk9C;
-        savedAgun->unkA0 = agun->unkA0;
-        savedAgun->speed = agun->speed;
-        savedAgun->aimdist = agun->aimdist;
-        savedAgun->unkAC = agun->unkAC;
-        savedAgun->unkB0 = agun->unkB0;
-        savedAgun->unkB4 = agun->unkB4;
-        savedAgun->unkB8 = agun->unkB8;
-        savedAgun->unkBC = agun->unkBC;
-        savedAgun->unkC0 = agun->unkC0;
-        if (agun->beam != NULL) {
-          savedAgun->beam = *agun->beam;
-        } else {
-          savedAgun->beam.age = -1;
-          savedAgun->beam.weaponnum = 0;
-          savedAgun->beam.from.x = 0.0f;
-          savedAgun->beam.from.y = 0.0f;
-          savedAgun->beam.from.z = 0.0f;
-          savedAgun->beam.dir.x = 0.0f;
-          savedAgun->beam.dir.y = 0.0f;
-          savedAgun->beam.dir.z = 0.0f;
-          savedAgun->beam.maxdist = 0.0f;
-          savedAgun->beam.speed = 0.0f;
-          savedAgun->beam.mindist = 0.0f;
-          savedAgun->beam.dist = 0.0f;
+          struct beam b;
+          if (agun->beam != NULL) {
+            b = *agun->beam;
+          } else {
+            b.age = -1;
+            b.weaponnum = 0;
+            b.from.x = 0.0f;
+            b.from.y = 0.0f;
+            b.from.z = 0.0f;
+            b.dir.x = 0.0f;
+            b.dir.y = 0.0f;
+            b.dir.z = 0.0f;
+            b.maxdist = 0.0f;
+            b.speed = 0.0f;
+            b.mindist = 0.0f;
+            b.dist = 0.0f;
+          }
+          write_bytes(stream, &b, sizeof(struct beam));
+
+          write_u32(stream, agun->is_active);
+          write_f32(stream, agun->unkD4);
+          break;
         }
-        savedAgun->is_active = agun->is_active;
-        savedAgun->unkD4 = agun->unkD4;
-        typeSize = sizeof(SavedAutogunRecord);
-        break;
-      }
-      case PROPDEF_AMMO: {
-        MultiAmmoCrateRecord *ammo = (MultiAmmoCrateRecord *)obj;
-        SavedMultiAmmoCrateRecord *savedAmmo = &propRecord.type.ammoCrate;
-        s32 a;
-        save_object_base(&savedAmmo->obj, obj);
-        savedAmmo->unk80 = ammo->unk80;
-        for (a = 0; a < AMMOTYPE_GLOBAL_MAX; a++) {
-          savedAmmo->quantities[a] = ammo->quantities[a];
+        case PROPDEF_AMMO: {
+          MultiAmmoCrateRecord *ammo = (MultiAmmoCrateRecord *)obj;
+          write_u16(stream, ammo->unk80);
+          s32 a;
+          for (a = 0; a < AMMOTYPE_GLOBAL_MAX; a++) {
+            write_u16(stream, ammo->quantities[a]);
+          }
+          break;
         }
-        typeSize = sizeof(SavedMultiAmmoCrateRecord);
-        break;
-      }
-      case PROPDEF_ARMOUR: {
-        BodyArmourRecord *arm = (BodyArmourRecord *)obj;
-        SavedBodyArmourRecord *savedArm = &propRecord.type.armour;
-        save_object_base(&savedArm->obj, obj);
-        savedArm->initialamount = arm->initialamount;
-        savedArm->amount = arm->amount;
-        typeSize = sizeof(SavedBodyArmourRecord);
-        break;
-      }
-      case PROPDEF_VEHICHLE: {
-        VehichleRecord *veh = (VehichleRecord *)obj;
-        SavedVehichleRecord *savedVeh = &propRecord.type.vehicle;
-        bool isGlobal;
-        save_object_base(&savedVeh->obj, obj);
-        savedVeh->ailist =
-            veh->ailist ? chraiGetAIListID(veh->ailist, &isGlobal) : 0;
-        savedVeh->aioffset = veh->aioffset;
-        savedVeh->aireturnlist = veh->aireturnlist;
-        savedVeh->speed = veh->speed;
-        savedVeh->wheelxrot = veh->wheelxrot;
-        savedVeh->wheelyrot = veh->wheelyrot;
-        savedVeh->speedaim = veh->speedaim;
-        savedVeh->speedtime60 = veh->speedtime60;
-        savedVeh->turnrot60 = veh->turnrot60;
-        savedVeh->roty = veh->roty;
-        savedVeh->path = veh->path ? veh->path->ID : 0;
-        savedVeh->nextstep = veh->nextstep;
-        typeSize = sizeof(SavedVehichleRecord);
-        break;
-      }
-      case PROPDEF_AIRCRAFT: {
-        AircraftRecord *air = (AircraftRecord *)obj;
-        SavedAircraftRecord *savedAir = &propRecord.type.aircraft;
-        bool isGlobal;
-        save_object_base(&savedAir->obj, obj);
-        savedAir->ailist =
-            air->ailist ? chraiGetAIListID(air->ailist, &isGlobal) : 0;
-        savedAir->aioffset = air->aioffset;
-        savedAir->aireturnlist = air->aireturnlist;
-        savedAir->rotoryrot = air->rotoryrot;
-        savedAir->rotaryspeed = air->rotaryspeed;
-        savedAir->rotaryspeedaim = air->rotaryspeedaim;
-        savedAir->rotaryspeedtime = air->rotaryspeedtime;
-        savedAir->speed = air->speed;
-        savedAir->speedaim = air->speedaim;
-        savedAir->speedtime60 = air->speedtime60;
-        savedAir->yrot = air->yrot;
-        savedAir->nextstep = air->nextstep;
-        savedAir->path = air->path ? air->path->ID : 0;
-        typeSize = sizeof(SavedAircraftRecord);
-        break;
-      }
-      case PROPDEF_GLASS:
-      case PROPDEF_SAFE: {
-        GlassRecord *gl = (GlassRecord *)obj;
-        SavedGlassRecord *savedGl = &propRecord.type.glass;
-        save_object_base(&savedGl->obj, obj);
-        savedGl->normal = gl->normal;
-        typeSize = sizeof(SavedGlassRecord);
-        break;
-      }
-      case PROPDEF_TINTED_GLASS: {
-        TintedGlassRecord *tgl = (TintedGlassRecord *)obj;
-        SavedTintedGlassRecord *savedTgl = &propRecord.type.tintedGlass;
-        save_object_base(&savedTgl->obj, obj);
-        savedTgl->TintDist = tgl->TintDist;
-        savedTgl->CullDist = tgl->CullDist;
-        savedTgl->calculatedopacity = tgl->calculatedopacity;
-        savedTgl->portalnum = tgl->portalnum;
-        savedTgl->unk90 = tgl->unk90;
-        typeSize = sizeof(SavedTintedGlassRecord);
-        break;
-      }
-      case PROPDEF_TANK: {
-        TankRecord *tank = (TankRecord *)obj;
-        SavedTankRecord *savedTank = &propRecord.type.tank;
-        save_object_base(&savedTank->obj, obj);
-        savedTank->rect = tank->rect;
-        savedTank->unkA4 = tank->unkA4;
-        savedTank->unkA8 = tank->unkA8;
-        savedTank->unkAC = tank->unkAC;
-        savedTank->unkB0 = tank->unkB0;
-        savedTank->unkB4 = tank->unkB4;
-        savedTank->unkB8 = tank->unkB8;
-        savedTank->unkBC = tank->unkBC;
-        savedTank->unkC0 = tank->unkC0;
-        savedTank->is_firing_tank = tank->is_firing_tank;
-        savedTank->turret_vertical_angle = tank->turret_vertical_angle;
-        savedTank->turret_orientation_angle = tank->turret_orientation_angle;
-        savedTank->unkD0 = tank->unkD0;
-        savedTank->stan_y = tank->stan_y;
-        savedTank->unkD8 = tank->unkD8;
-        savedTank->tank_orientation_angle = tank->tank_orientation_angle;
-        typeSize = sizeof(SavedTankRecord);
-        break;
-      }
-      default:
-        break;
+        case PROPDEF_ARMOUR: {
+          BodyArmourRecord *arm = (BodyArmourRecord *)obj;
+          write_f32(stream, arm->initialamount);
+          write_f32(stream, arm->amount);
+          break;
+        }
+        case PROPDEF_VEHICHLE: {
+          VehichleRecord *veh = (VehichleRecord *)obj;
+          bool isGlobal;
+          write_u32(stream,
+                    veh->ailist ? chraiGetAIListID(veh->ailist, &isGlobal) : 0);
+          write_u16(stream, veh->aioffset);
+          write_u16(stream, veh->aireturnlist);
+          write_f32(stream, veh->speed);
+          write_f32(stream, veh->wheelxrot);
+          write_f32(stream, veh->wheelyrot);
+          write_f32(stream, veh->speedaim);
+          write_f32(stream, veh->speedtime60);
+          write_f32(stream, veh->turnrot60);
+          write_f32(stream, veh->roty);
+          write_u32(stream, veh->path ? veh->path->ID : 0);
+          write_u32(stream, veh->nextstep);
+          break;
+        }
+        case PROPDEF_AIRCRAFT: {
+          AircraftRecord *air = (AircraftRecord *)obj;
+          bool isGlobal;
+          write_u32(stream,
+                    air->ailist ? chraiGetAIListID(air->ailist, &isGlobal) : 0);
+          write_u16(stream, air->aioffset);
+          write_u16(stream, air->aireturnlist);
+          write_f32(stream, air->rotoryrot);
+          write_f32(stream, air->rotaryspeed);
+          write_f32(stream, air->rotaryspeedaim);
+          write_f32(stream, air->rotaryspeedtime);
+          write_f32(stream, air->speed);
+          write_f32(stream, air->speedaim);
+          write_f32(stream, air->speedtime60);
+          write_f32(stream, air->yrot);
+          write_u32(stream, air->nextstep);
+          write_u32(stream, air->path ? air->path->ID : 0);
+          break;
+        }
+        case PROPDEF_GLASS:
+        case PROPDEF_SAFE: {
+          GlassRecord *gl = (GlassRecord *)obj;
+          write_bytes(stream, &gl->normal, sizeof(coord3d));
+          break;
+        }
+        case PROPDEF_TINTED_GLASS: {
+          TintedGlassRecord *tgl = (TintedGlassRecord *)obj;
+          write_u32(stream, tgl->TintDist);
+          write_u32(stream, tgl->CullDist);
+          write_u32(stream, tgl->calculatedopacity);
+          write_u32(stream, tgl->portalnum);
+          write_f32(stream, tgl->unk90);
+          break;
+        }
+        case PROPDEF_TANK: {
+          TankRecord *tank = (TankRecord *)obj;
+          write_bytes(stream, &tank->rect, sizeof(rect4f));
+          write_u32(stream, tank->unkA4);
+          write_u32(stream, tank->unkA8);
+          write_u32(stream, tank->unkAC);
+          write_u32(stream, tank->unkB0);
+          write_u32(stream, tank->unkB4);
+          write_u32(stream, tank->unkB8);
+          write_u32(stream, tank->unkBC);
+          write_u32(stream, tank->unkC0);
+          write_u32(stream, tank->is_firing_tank);
+          write_f32(stream, tank->turret_vertical_angle);
+          write_f32(stream, tank->turret_orientation_angle);
+          write_f32(stream, tank->unkD0);
+          write_f32(stream, tank->stan_y);
+          write_u32(stream, tank->unkD8);
+          write_f32(stream, tank->tank_orientation_angle);
+          break;
+        }
+        default:
+          break;
+        }
       }
       break;
     }
@@ -523,199 +940,108 @@ bool save_props_state(SramStream *stream) {
       break;
     }
 
-    sram_stream_write_bytes(stream, savedProp, sizeof(SavedPropRecord));
-    if (typeSize > 0) {
-      sram_stream_write_bytes(stream, &propRecord.type, typeSize);
-    }
-    hdr.recordCount++;
-  }
-
-  /* Save projectile snapshots. */
-  // TODO: Potentially could exclude matrixes from projectile/embed data
-  for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
-    SavedProjectileEntry projEntry;
-    projEntry.index = (s32)pi;
-    projEntry.projectile = g_Projectiles[pi];
-    projEntry.projectile.obj = NULL;
-    projEntry.projectile.ownerprop = NULL;
-    projEntry.projectile.sound1 = NULL;
-    projEntry.projectile.sound2 = NULL;
-    sram_stream_write_bytes(stream, &projEntry, sizeof(projEntry));
-  }
-
-  /* Save embedment snapshots. */
-  for (pi = 0; pi < EMBEDMENT_ARR_MAX; pi++) {
-    SavedEmbedmentEntry embEntry;
-    s32 projIdx = -1;
-    embEntry.index = (s32)pi;
-    embEntry.embedment = g_Embedments[pi];
-    if (g_Embedments[pi].projectile != NULL) {
-      projIdx = g_Embedments[pi].projectile - g_Projectiles;
-    }
-    embEntry.embedment.projectile = (struct Projectile *)(s32)projIdx;
-    sram_stream_write_bytes(stream, &embEntry, sizeof(embEntry));
+    recordCount++;
   }
 
   /* Patch the props header with the real size and record count. */
-  hdr.size = stream->total_processed - dataStart;
-  sram_write(headerOffset, &hdr, sizeof(hdr));
+  u32 totalPropsSize = stream->total_processed - dataStart;
+  stream_seek(stream, headerOffset);
+  write_u32(stream, totalPropsSize);
+  write_u16(stream, recordCount);
+  write_u16(stream, get_prop_index(ptr_obj_pos_list_first_entry));
+  write_u16(stream, get_prop_index(ptr_obj_pos_list_current_entry));
+  write_u16(stream, get_prop_index(ptr_obj_pos_list_final_entry));
+
+  // Resume stream offset at the end
+  stream_seek(stream, dataStart + totalPropsSize);
 
   return TRUE;
 }
 
-/* ------------------------------------------------------------------ */
-/* Load                                                                */
-/* ------------------------------------------------------------------ */
-
-static bool load_saved_object(const char *typeName, ObjectRecord *obj,
-                              const SavedObjectRecord *savedObj,
-                              PropRecord *prop) {
-  PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
-  s32 destroyedLvl;
-
-  pdhr->extrascale = savedObj->extrascale;
-  pdhr->state = savedObj->state;
-  pdhr->type = savedObj->type;
-  obj->obj = savedObj->obj;
-  obj->pad = savedObj->pad;
-  obj->flags = savedObj->flags;
-  obj->flags2 = savedObj->flags2;
-  obj->prop = prop;
-  if (obj->model == NULL) {
-    practiceLogWarn("%s prop has no model set", typeName);
-    return FALSE;
-  }
-  obj->mtx = savedObj->mtx;
-  obj->runtime_pos = savedObj->runtime_pos;
-  obj->runtime_bitflags = savedObj->runtime_bitflags;
-  obj->maxdamage = savedObj->maxdamage;
-  obj->damage = savedObj->damage;
-  obj->shadecol = savedObj->shadecol;
-  obj->nextcol = savedObj->nextcol;
-
-  if (obj->model != NULL && obj->model->obj != NULL) {
-    s32 i;
-    s32 numSw = obj->model->obj->numSwitches;
-    if (numSw > 32) {
-      numSw = 32;
-    }
-    for (i = 0; i < numSw; i++) {
-      ModelNode *switchNode = obj->model->obj->Switches[i];
-      if (switchNode != NULL &&
-          (switchNode->Opcode & 0xFF) == MODELNODE_OPCODE_SWITCH) {
-        union ModelRwData *rwdata = modelGetNodeRwData(obj->model, switchNode);
-        if (rwdata != NULL) {
-          rwdata->Switch.visible = (savedObj->switchStates & (1 << i)) != 0;
-        }
-      }
-    }
-    sub_GAME_7F06EFC4(obj->model);
-  }
-
-  destroyedLvl = objGetDestroyedLevel(obj);
-  if (destroyedLvl > 0) {
-    objDeform(obj, destroyedLvl);
-  }
-
-  return TRUE;
-}
-static u32 get_obj_subtype_size(u8 obj_type) {
-  switch (obj_type) {
-  case PROPDEF_PROP:
-  case PROPDEF_ALARM:
-  case PROPDEF_RACK:
-  case PROPDEF_HAT:
-  case PROPDEF_UNK41:
-  case PROPDEF_GAS_RELEASING:
-    return sizeof(SavedObjectRecord) - sizeof(SavedObjectRecord); // 0
-  case PROPDEF_KEY:
-    return sizeof(SavedKeyRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_CCTV:
-    return sizeof(SavedCCTVRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_MAGAZINE:
-    return sizeof(SavedAmmoCrateRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_COLLECTABLE:
-    return sizeof(SavedWeaponObjRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_MONITOR:
-    return sizeof(SavedMonitorObjRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_MULTI_MONITOR:
-    return sizeof(SavedMultiMonitorObjRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_AUTOGUN:
-    return sizeof(SavedAutogunRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_AMMO:
-    return sizeof(SavedMultiAmmoCrateRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_ARMOUR:
-    return sizeof(SavedBodyArmourRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_VEHICHLE:
-    return sizeof(SavedVehichleRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_AIRCRAFT:
-    return sizeof(SavedAircraftRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_GLASS:
-  case PROPDEF_SAFE:
-    return sizeof(SavedGlassRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_TINTED_GLASS:
-    return sizeof(SavedTintedGlassRecord) - sizeof(SavedObjectRecord);
-  case PROPDEF_TANK:
-    return sizeof(SavedTankRecord) - sizeof(SavedObjectRecord);
-  default:
-    return 0;
-  }
-}
-
-bool load_props_state(SramStream *stream) {
-  PropsHeaderSection hdr;
+bool load_props_state(StateStream *stream) {
   u32 dataStart;
   s32 i;
   u16 nextIndexToRemove = 0;
   s32 c;
   u32 pi;
-  SavedRecordsOfProp propRec;
 
-  /* Read props header. */
-  sram_stream_read_bytes(stream, &hdr, sizeof(hdr));
-  dataStart = stream->sram_base + stream->total_processed;
+  u32 totalPropsSize = read_u32(stream);
+  u16 recordCount = read_u16(stream);
+  s16 indexOfFirstEntry = read_u16(stream);
+  s16 indexOfCurrentEntry = read_u16(stream);
+  s16 indexOfFinalEntry = read_u16(stream);
 
-  for (i = 0; i < hdr.recordCount; i++) {
-    SavedPropRecord *savedProp = &propRec.prop;
-    PropRecord *prop;
-    bool supportedType = FALSE;
+  dataStart = stream->base_address + stream->total_processed;
 
-    /* Read the SavedPropRecord. */
-    sram_stream_read_bytes(stream, savedProp, sizeof(SavedPropRecord));
-
-    /* Read the type-specific data into the union. */
-    if (savedProp->type == PROP_TYPE_DOOR) {
-      sram_stream_read_bytes(stream, &propRec.type.door,
-                             sizeof(SavedDoorRecord));
-    } else if (savedProp->type == PROP_TYPE_OBJ) {
-      sram_stream_read_bytes(stream, &propRec.type.door.obj,
-                             sizeof(SavedObjectRecord));
-      u8 obj_type = propRec.type.door.obj.type;
-      u32 remainder_size = get_obj_subtype_size(obj_type);
-      if (remainder_size > 0) {
-        sram_stream_read_bytes(
-            stream, ((u8 *)&propRec.type) + sizeof(SavedObjectRecord),
-            remainder_size);
-      }
+  /* Clear and restore active projectiles. */
+  for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
+    if (!(g_Projectiles[pi].flags & PROJECTILEFLAG_FREE)) {
+      projectileFree(&g_Projectiles[pi]);
     }
+  }
 
-    prop = get_prop_by_index(savedProp->index);
+  {
+    u16 activeProjCount = read_u16(stream);
+    for (pi = 0; pi < activeProjCount; pi++) {
+      u16 index = read_u16(stream);
+      load_projectile(stream, &g_Projectiles[index]);
+    }
+  }
+
+  /* Clear and restore active embedments. */
+  for (pi = 0; pi < EMBEDMENT_ARR_MAX; pi++) {
+    if (!(g_Embedments[pi].flags & EMBEDMENTFLAG_FREE)) {
+      embedmentFree(&g_Embedments[pi]);
+    }
+  }
+
+  {
+    u16 activeEmbCount = read_u16(stream);
+    for (pi = 0; pi < activeEmbCount; pi++) {
+      u16 index = read_u16(stream);
+      load_embedment(stream, &g_Embedments[index]);
+    }
+  }
+
+  for (i = 0; i < recordCount; i++) {
+    u16 savedPropIndex = read_u16(stream);
+    u8 savedPropType = read_u8(stream);
+    u8 savedPropFlags = read_u8(stream);
+    s16 savedPropTimetoregen = read_u16(stream);
+    coord3d savedPropPos;
+    read_bytes(stream, &savedPropPos, sizeof(coord3d));
+    s32 savedPropStanOffset = read_u32(stream);
+    f32 savedPropZDepth = read_f32(stream);
+    u16 savedPropParentIdx = read_u16(stream);
+    u16 savedPropChildIdx = read_u16(stream);
+    u16 savedPropPrevIdx = read_u16(stream);
+    u16 savedPropNextIdx = read_u16(stream);
+    u8 savedPropRooms[4];
+    savedPropRooms[0] = read_u8(stream);
+    savedPropRooms[1] = read_u8(stream);
+    savedPropRooms[2] = read_u8(stream);
+    savedPropRooms[3] = read_u8(stream);
+    s32 savedPropUnk30 = read_u32(stream);
+
+    PropRecord *prop = get_prop_by_index(savedPropIndex);
 
     if (ADD_AND_REMOVE_PROPS) {
-      for (c = nextIndexToRemove; c < savedProp->index; c++) {
+      for (c = nextIndexToRemove; c < savedPropIndex; c++) {
         removePropAtIndex(c);
       }
-      nextIndexToRemove = savedProp->index + 1;
+      nextIndexToRemove = savedPropIndex + 1;
     }
 
     /* Only modify props which still exist while testing. */
     if (!ADD_AND_REMOVE_PROPS &&
         (prop == NULL || !(prop->flags & PROPFLAG_ENABLED) ||
-         prop->type != savedProp->type)) {
+         prop->type != savedPropType)) {
+      skip_prop_data(stream, savedPropType);
       continue;
     }
 
-    switch ((PROP_TYPE)prop->type) {
+    bool supportedType = FALSE;
+    switch ((PROP_TYPE)savedPropType) {
     case PROP_TYPE_DOOR:
       supportedType = TRUE;
       break;
@@ -748,83 +1074,57 @@ bool load_props_state(SramStream *stream) {
         }
       }
       break;
+    case PROP_TYPE_NUL:
+    case PROP_TYPE_CHR:
+    case PROP_TYPE_WEAPON:
+    case PROP_TYPE_PLAYER:
+    case PROP_TYPE_VIEWER:
+    case PROP_TYPE_EXPLOSION:
+    case PROP_TYPE_SMOKE:
+    case PROP_TYPE_MAX:
+      supportedType = FALSE;
+      break;
     }
 
     if (ADD_AND_REMOVE_PROPS || supportedType) {
-      prop->type = savedProp->type;
-      prop->flags = savedProp->flags;
-      prop->timetoregen = savedProp->timetoregen;
-      prop->pos = savedProp->pos;
-      prop->stan = get_tile_by_offset(savedProp->stanOffset);
-      prop->zDepth = savedProp->zDepth;
+      prop->type = savedPropType;
+      prop->flags = savedPropFlags;
+      prop->timetoregen = savedPropTimetoregen;
+      prop->pos = savedPropPos;
+      prop->stan = get_tile_by_offset(savedPropStanOffset);
+      prop->zDepth = savedPropZDepth;
       if (ADD_AND_REMOVE_PROPS) {
-        prop->parent = get_prop_by_index(savedProp->parentIndex);
-        prop->child = get_prop_by_index(savedProp->childIndex);
-        prop->prev = get_prop_by_index(savedProp->prevIndex);
-        prop->next = get_prop_by_index(savedProp->nextIndex);
+        prop->parent = get_prop_by_index(savedPropParentIdx);
+        prop->child = get_prop_by_index(savedPropChildIdx);
+        prop->prev = get_prop_by_index(savedPropPrevIdx);
+        prop->next = get_prop_by_index(savedPropNextIdx);
       }
-      prop->rooms[0] = savedProp->rooms[0];
-      prop->rooms[1] = savedProp->rooms[1];
-      prop->rooms[2] = savedProp->rooms[2];
-      prop->rooms[3] = savedProp->rooms[3];
-      prop->unk30 = savedProp->unk30;
+      prop->rooms[0] = savedPropRooms[0];
+      prop->rooms[1] = savedPropRooms[1];
+      prop->rooms[2] = savedPropRooms[2];
+      prop->rooms[3] = savedPropRooms[3];
+      prop->unk30 = savedPropUnk30;
     }
 
-    switch ((PROP_TYPE)savedProp->type) {
+    switch ((PROP_TYPE)savedPropType) {
     case PROP_TYPE_DOOR: {
-      const SavedDoorRecord *savedDoor = &propRec.type.door;
-      const SavedObjectRecord *savedObj = &savedDoor->obj;
       DoorRecord *door = prop->door;
       ObjectRecord *obj = prop->obj;
 
-      // Doors are never loaded or unloaded, meaning they should always occupy
-      // the same slots and we don't need to allocate or free anything
       if (prop->type != PROP_TYPE_DOOR || prop->door == NULL) {
         practiceLogWarn("Prop at index %d is not a door (type=%d)",
-                        savedProp->index, savedProp->type);
+                        savedPropIndex, savedPropType);
         return FALSE;
       }
 
-      if (!load_saved_object("Door", obj, savedObj, prop))
+      if (!load_object_base(stream, obj, prop)) {
         return FALSE;
+      }
 
-      // TODO: Would it be simpler and faster to just memcpy all this?
-      // door->linkedDoorOffset should never change
-      door->maxFrac = savedDoor->maxFrac;
-      door->perimFrac = savedDoor->perimFrac;
-      door->accel = savedDoor->accel;
-      door->decel = savedDoor->decel;
-      door->maxSpeed = savedDoor->maxSpeed;
-      door->doorFlags = savedDoor->doorFlags;
-      door->doorType = savedDoor->doorType;
-      door->keyflags = savedDoor->keyflags;
-      door->autoCloseFrames = savedDoor->autoCloseFrames;
-      door->doorOpenSound = savedDoor->doorOpenSound;
-      door->frac = savedDoor->frac;
-      door->unkac = savedDoor->unkac;
-      door->unkb0 = savedDoor->unkb0;
-      door->openPosition = savedDoor->openPosition;
-      door->speed = savedDoor->speed;
-      door->openstate = savedDoor->openstate;
-      door->unkbd = savedDoor->unkbd;
-      door->calculatedopacity = savedDoor->calculatedopacity;
-      door->TintDist = savedDoor->TintDist;
-      door->CullDist = savedDoor->CullDist;
-      door->soundType = savedDoor->soundType;
-      door->fadeTime60 = savedDoor->fadeTime60;
-      // door->linkedDoor should never change
-      // door->unkcc is restored later
-      door->bbox = savedDoor->bbox;
-      door->openedTime = savedDoor->openedTime;
-      door->portalNumber = savedDoor->portalNumber;
-      door->openSoundState = NULL;  // clear sound state
-      door->closeSoundState = NULL; // clear sound state
-      door->lastcalc60i = savedDoor->lastcalc60i;
+      load_door_record(stream, door);
 
-      // Update bounds, collisions, and portals
       door7F052B00(door);
 
-      // Handle vertical/sliding door vertex clipping (DOORFLAG_0004)
       if (door->doorFlags & DOORFLAG_0004) {
         Model *model = obj->model;
         ModelNode *node = model->obj->RootNode->Child->Child;
@@ -834,7 +1134,6 @@ bool load_props_state(SramStream *stream) {
             (struct ModelRwData_DisplayList_CollisionRecord *)
                 modelGetNodeRwData(model, node);
 
-        // Restore pristine vertices back to unkcc buffer before applying state
         if (door->unkcc != NULL && dlcRecord != NULL &&
             dlcRecord->Vertices != NULL) {
           s32 var_a0;
@@ -863,6 +1162,11 @@ bool load_props_state(SramStream *stream) {
     case PROP_TYPE_OBJ: {
       ObjectRecord *obj = prop->obj;
       if (obj == NULL) {
+        // Just skip the rest
+        TempObjectRecord temp_obj;
+        if (load_object_base(stream, &temp_obj.base, NULL)) {
+          load_object_subtype(stream, &temp_obj.base);
+        }
         break;
       }
 
@@ -882,338 +1186,11 @@ bool load_props_state(SramStream *stream) {
         sub_GAME_7F050DE8(obj->model);
       }
 
-      switch (obj->type) {
-      case PROPDEF_PROP:
-      case PROPDEF_ALARM:
-      case PROPDEF_RACK:
-      case PROPDEF_HAT:
-      case PROPDEF_UNK41:
-      case PROPDEF_GAS_RELEASING: {
-        const SavedObjectRecord *savedObj =
-            (const SavedObjectRecord *)&propRec.type;
-        if (!load_saved_object("Prop/Generic", obj,
-                               (SavedObjectRecord *)savedObj, prop))
-          return FALSE;
-        break;
+      if (!load_object_base(stream, obj, prop)) {
+        return FALSE;
       }
-      case PROPDEF_KEY: {
-        const SavedKeyRecord *savedKey = &propRec.type.key;
-        KeyRecord *key = (KeyRecord *)obj;
-        if (!load_saved_object("Key", (ObjectRecord *)key, &savedKey->obj,
-                               prop))
-          return FALSE;
-        key->keyflags = savedKey->keyflags;
-        break;
-      }
-      case PROPDEF_CCTV: {
-        const SavedCCTVRecord *savedCCTV = &propRec.type.cctv;
-        CCTVRecord *cctv = (CCTVRecord *)obj;
-        if (!load_saved_object("CCTV", (ObjectRecord *)cctv, &savedCCTV->obj,
-                               prop))
-          return FALSE;
-        cctv->cctv_pad = savedCCTV->pad;
-        cctv->unk84 = savedCCTV->unk84;
-        cctv->unkC4 = savedCCTV->unkC4;
-        cctv->unkC8 = savedCCTV->unkC8;
-        cctv->unkCC = savedCCTV->unkCC;
-        cctv->unkD0 = savedCCTV->unkD0;
-        cctv->unkD4 = savedCCTV->unkD4;
-        cctv->unkD8 = savedCCTV->unkD8;
-        cctv->unkDC = savedCCTV->unkDC;
-        cctv->timer = savedCCTV->timer;
-        cctv->convert_to_f32 = savedCCTV->convert_to_f32;
-        cctv->unkE8 = savedCCTV->unkE8;
-        cctv->unkEC = savedCCTV->unkEC;
-        cctv->unkF0 = savedCCTV->unkF0;
-        cctv->unkF4 = savedCCTV->unkF4;
-        cctv->unkF8 = savedCCTV->unkF8;
-        break;
-      }
-      case PROPDEF_MAGAZINE: {
-        const SavedAmmoCrateRecord *savedMag = &propRec.type.magazine;
-        AmmoCrateRecord *mag = (AmmoCrateRecord *)obj;
-        if (!load_saved_object("Magazine", (ObjectRecord *)mag, &savedMag->obj,
-                               prop))
-          return FALSE;
-        mag->ammoType = savedMag->ammoType;
-        break;
-      }
-      case PROPDEF_COLLECTABLE: {
-        const SavedWeaponObjRecord *savedWpn = &propRec.type.weaponObj;
-        WeaponObjRecord *wpn = (WeaponObjRecord *)obj;
-        if (!load_saved_object("Weapon", (ObjectRecord *)wpn, &savedWpn->obj,
-                               prop))
-          return FALSE;
-        wpn->weaponnum = savedWpn->weaponnum;
-        wpn->LinkedWeaponType = savedWpn->LinkedWeaponType;
-        wpn->timer = savedWpn->timer;
-        wpn->dualweapon =
-            savedWpn->dualweaponPropIndex != -1
-                ? get_prop_by_index(savedWpn->dualweaponPropIndex)->weapon
-                : NULL;
-        break;
-      }
-      case PROPDEF_MONITOR: {
-        const SavedMonitorObjRecord *savedMon = &propRec.type.monitor;
-        MonitorObjRecord *mon = (MonitorObjRecord *)obj;
-        if (!load_saved_object("Monitor", (ObjectRecord *)mon, &savedMon->obj,
-                               prop))
-          return FALSE;
 
-        mon->Monitor.cmdlist = (u32 *)savedMon->Monitor.cmdlist;
-        mon->Monitor.offset = savedMon->Monitor.offset;
-        mon->Monitor.pause60 = savedMon->Monitor.pause60;
-        mon->Monitor.tconfig =
-            (struct sImageTableEntry *)savedMon->Monitor.tconfig;
-        mon->Monitor.rot = savedMon->Monitor.rot;
-        mon->Monitor.xscale = savedMon->Monitor.xscale;
-        mon->Monitor.xscalefrac = savedMon->Monitor.xscalefrac;
-        mon->Monitor.xscaleinc = savedMon->Monitor.xscaleinc;
-        mon->Monitor.xscaleold = savedMon->Monitor.xscaleold;
-        mon->Monitor.xscalenew = savedMon->Monitor.xscalenew;
-        mon->Monitor.yscale = savedMon->Monitor.yscale;
-        mon->Monitor.yscalefrac = savedMon->Monitor.yscalefrac;
-        mon->Monitor.yscaleinc = savedMon->Monitor.yscaleinc;
-        mon->Monitor.yscaleold = savedMon->Monitor.yscaleold;
-        mon->Monitor.yscalenew = savedMon->Monitor.yscalenew;
-        mon->Monitor.xmid = savedMon->Monitor.xmid;
-        mon->Monitor.xmidfrac = savedMon->Monitor.xmidfrac;
-        mon->Monitor.xmidinc = savedMon->Monitor.xmidinc;
-        mon->Monitor.xmidold = savedMon->Monitor.xmidold;
-        mon->Monitor.xmidnew = savedMon->Monitor.xmidnew;
-        mon->Monitor.ymid = savedMon->Monitor.ymid;
-        mon->Monitor.ymidfrac = savedMon->Monitor.ymidfrac;
-        mon->Monitor.ymidinc = savedMon->Monitor.ymidinc;
-        mon->Monitor.ymidold = savedMon->Monitor.ymidold;
-        mon->Monitor.ymidnew = savedMon->Monitor.ymidnew;
-        mon->Monitor.red = savedMon->Monitor.red;
-        mon->Monitor.redold = savedMon->Monitor.redold;
-        mon->Monitor.rednew = savedMon->Monitor.rednew;
-        mon->Monitor.green = savedMon->Monitor.green;
-        mon->Monitor.greenold = savedMon->Monitor.greenold;
-        mon->Monitor.greennew = savedMon->Monitor.greennew;
-        mon->Monitor.blue = savedMon->Monitor.blue;
-        mon->Monitor.blueold = savedMon->Monitor.blueold;
-        mon->Monitor.bluenew = savedMon->Monitor.bluenew;
-        mon->Monitor.alpha = savedMon->Monitor.alpha;
-        mon->Monitor.alphaold = savedMon->Monitor.alphaold;
-        mon->Monitor.alphanew = savedMon->Monitor.alphanew;
-        mon->Monitor.colfrac = savedMon->Monitor.colfrac;
-        mon->Monitor.colinc = savedMon->Monitor.colinc;
-
-        mon->OwnerOffset = savedMon->OwnerOffset;
-        mon->OwnerPart = savedMon->OwnerPart;
-        mon->ImageNum = savedMon->ImageNum;
-        break;
-      }
-      case PROPDEF_MULTI_MONITOR: {
-        const SavedMultiMonitorObjRecord *savedMmon =
-            &propRec.type.multiMonitor;
-        MultiMonitorObjRecord *mmon = (MultiMonitorObjRecord *)obj;
-        s32 m;
-        if (!load_saved_object("MultiMonitor", (ObjectRecord *)mmon,
-                               &savedMmon->obj, prop))
-          return FALSE;
-
-        for (m = 0; m < 4; m++) {
-          mmon->Monitor[m].cmdlist = (u32 *)savedMmon->Monitor[m].cmdlist;
-          mmon->Monitor[m].offset = savedMmon->Monitor[m].offset;
-          mmon->Monitor[m].pause60 = savedMmon->Monitor[m].pause60;
-          mmon->Monitor[m].tconfig =
-              (struct sImageTableEntry *)savedMmon->Monitor[m].tconfig;
-          mmon->Monitor[m].rot = savedMmon->Monitor[m].rot;
-          mmon->Monitor[m].xscale = savedMmon->Monitor[m].xscale;
-          mmon->Monitor[m].xscalefrac = savedMmon->Monitor[m].xscalefrac;
-          mmon->Monitor[m].xscaleinc = savedMmon->Monitor[m].xscaleinc;
-          mmon->Monitor[m].xscaleold = savedMmon->Monitor[m].xscaleold;
-          mmon->Monitor[m].xscalenew = savedMmon->Monitor[m].xscalenew;
-          mmon->Monitor[m].yscale = savedMmon->Monitor[m].yscale;
-          mmon->Monitor[m].yscalefrac = savedMmon->Monitor[m].yscalefrac;
-          mmon->Monitor[m].yscaleinc = savedMmon->Monitor[m].yscaleinc;
-          mmon->Monitor[m].yscaleold = savedMmon->Monitor[m].yscaleold;
-          mmon->Monitor[m].yscalenew = savedMmon->Monitor[m].yscalenew;
-          mmon->Monitor[m].xmid = savedMmon->Monitor[m].xmid;
-          mmon->Monitor[m].xmidfrac = savedMmon->Monitor[m].xmidfrac;
-          mmon->Monitor[m].xmidinc = savedMmon->Monitor[m].xmidinc;
-          mmon->Monitor[m].xmidold = savedMmon->Monitor[m].xmidold;
-          mmon->Monitor[m].xmidnew = savedMmon->Monitor[m].xmidnew;
-          mmon->Monitor[m].ymid = savedMmon->Monitor[m].ymid;
-          mmon->Monitor[m].ymidfrac = savedMmon->Monitor[m].ymidfrac;
-          mmon->Monitor[m].ymidinc = savedMmon->Monitor[m].ymidinc;
-          mmon->Monitor[m].ymidold = savedMmon->Monitor[m].ymidold;
-          mmon->Monitor[m].ymidnew = savedMmon->Monitor[m].ymidnew;
-          mmon->Monitor[m].red = savedMmon->Monitor[m].red;
-          mmon->Monitor[m].redold = savedMmon->Monitor[m].redold;
-          mmon->Monitor[m].rednew = savedMmon->Monitor[m].rednew;
-          mmon->Monitor[m].green = savedMmon->Monitor[m].green;
-          mmon->Monitor[m].greenold = savedMmon->Monitor[m].greenold;
-          mmon->Monitor[m].greennew = savedMmon->Monitor[m].greennew;
-          mmon->Monitor[m].blue = savedMmon->Monitor[m].blue;
-          mmon->Monitor[m].blueold = savedMmon->Monitor[m].blueold;
-          mmon->Monitor[m].bluenew = savedMmon->Monitor[m].bluenew;
-          mmon->Monitor[m].alpha = savedMmon->Monitor[m].alpha;
-          mmon->Monitor[m].alphaold = savedMmon->Monitor[m].alphaold;
-          mmon->Monitor[m].alphanew = savedMmon->Monitor[m].alphanew;
-          mmon->Monitor[m].colfrac = savedMmon->Monitor[m].colfrac;
-          mmon->Monitor[m].colinc = savedMmon->Monitor[m].colinc;
-        }
-
-        mmon->ImageNums[0] = savedMmon->ImageNums[0];
-        mmon->ImageNums[1] = savedMmon->ImageNums[1];
-        mmon->ImageNums[2] = savedMmon->ImageNums[2];
-        mmon->ImageNums[3] = savedMmon->ImageNums[3];
-        break;
-      }
-      case PROPDEF_AUTOGUN: {
-        const SavedAutogunRecord *savedAgun = &propRec.type.autogun;
-        AutogunRecord *agun = (AutogunRecord *)obj;
-        if (!load_saved_object("Autogun", (ObjectRecord *)agun, &savedAgun->obj,
-                               prop))
-          return FALSE;
-        agun->padID = savedAgun->padID;
-        agun->rot_related = savedAgun->rot_related;
-        agun->unk88 = savedAgun->unk88;
-        agun->unk8C = savedAgun->unk8C;
-        agun->unk90 = savedAgun->unk90;
-        agun->unk94 = savedAgun->unk94;
-        agun->unk98 = savedAgun->unk98;
-        agun->unk9C = savedAgun->unk9C;
-        agun->unkA0 = savedAgun->unkA0;
-        agun->speed = savedAgun->speed;
-        agun->aimdist = savedAgun->aimdist;
-        agun->unkAC = savedAgun->unkAC;
-        agun->unkB0 = savedAgun->unkB0;
-        agun->unkB4 = savedAgun->unkB4;
-        agun->unkB8 = savedAgun->unkB8;
-        agun->unkBC = savedAgun->unkBC;
-        agun->unkC0 = savedAgun->unkC0;
-        agun->unkC4 = NULL;
-        agun->unkC8 = NULL;
-        if (agun->beam != NULL) {
-          *agun->beam = savedAgun->beam;
-        }
-        agun->is_active = savedAgun->is_active;
-        agun->unkD4 = savedAgun->unkD4;
-        break;
-      }
-      case PROPDEF_AMMO: {
-        const SavedMultiAmmoCrateRecord *savedAmmo = &propRec.type.ammoCrate;
-        MultiAmmoCrateRecord *ammo = (MultiAmmoCrateRecord *)obj;
-        s32 a;
-        if (!load_saved_object("AmmoCrate", (ObjectRecord *)ammo,
-                               &savedAmmo->obj, prop))
-          return FALSE;
-        ammo->unk80 = savedAmmo->unk80;
-        for (a = 0; a < AMMOTYPE_GLOBAL_MAX; a++) {
-          ammo->quantities[a] = savedAmmo->quantities[a];
-        }
-        break;
-      }
-      case PROPDEF_ARMOUR: {
-        const SavedBodyArmourRecord *savedArm = &propRec.type.armour;
-        BodyArmourRecord *arm = (BodyArmourRecord *)obj;
-        if (!load_saved_object("Armour", (ObjectRecord *)arm, &savedArm->obj,
-                               prop))
-          return FALSE;
-        arm->initialamount = savedArm->initialamount;
-        arm->amount = savedArm->amount;
-        break;
-      }
-      case PROPDEF_VEHICHLE: {
-        const SavedVehichleRecord *savedVeh = &propRec.type.vehicle;
-        VehichleRecord *veh = (VehichleRecord *)obj;
-        if (!load_saved_object("Vehicle", (ObjectRecord *)veh, &savedVeh->obj,
-                               prop))
-          return FALSE;
-        veh->ailist =
-            savedVeh->ailist ? ailistFindById(savedVeh->ailist) : NULL;
-        veh->aioffset = savedVeh->aioffset;
-        veh->aireturnlist = savedVeh->aireturnlist;
-        veh->speed = savedVeh->speed;
-        veh->wheelxrot = savedVeh->wheelxrot;
-        veh->wheelyrot = savedVeh->wheelyrot;
-        veh->speedaim = savedVeh->speedaim;
-        veh->speedtime60 = savedVeh->speedtime60;
-        veh->turnrot60 = savedVeh->turnrot60;
-        veh->roty = savedVeh->roty;
-        veh->path = savedVeh->path ? pathFindById(savedVeh->path) : NULL;
-        veh->nextstep = savedVeh->nextstep;
-        veh->Sound = NULL;
-        break;
-      }
-      case PROPDEF_AIRCRAFT: {
-        const SavedAircraftRecord *savedAir = &propRec.type.aircraft;
-        AircraftRecord *air = (AircraftRecord *)obj;
-        if (!load_saved_object("Aircraft", (ObjectRecord *)air, &savedAir->obj,
-                               prop))
-          return FALSE;
-        air->ailist =
-            savedAir->ailist ? ailistFindById(savedAir->ailist) : NULL;
-        air->aioffset = savedAir->aioffset;
-        air->aireturnlist = savedAir->aireturnlist;
-        air->rotoryrot = savedAir->rotoryrot;
-        air->rotaryspeed = savedAir->rotaryspeed;
-        air->rotaryspeedaim = savedAir->rotaryspeedaim;
-        air->rotaryspeedtime = savedAir->rotaryspeedtime;
-        air->speed = savedAir->speed;
-        air->speedaim = savedAir->speedaim;
-        air->speedtime60 = savedAir->speedtime60;
-        air->yrot = savedAir->yrot;
-        air->nextstep = savedAir->nextstep;
-        air->path = savedAir->path ? pathFindById(savedAir->path) : NULL;
-        air->Sound = NULL; // Clear sound state
-        break;
-      }
-      case PROPDEF_GLASS:
-      case PROPDEF_SAFE: {
-        const SavedGlassRecord *savedGl = &propRec.type.glass;
-        GlassRecord *gl = (GlassRecord *)obj;
-        if (!load_saved_object("Glass/Safe", (ObjectRecord *)gl, &savedGl->obj,
-                               prop))
-          return FALSE;
-        gl->normal = savedGl->normal;
-        break;
-      }
-      case PROPDEF_TINTED_GLASS: {
-        const SavedTintedGlassRecord *savedTgl = &propRec.type.tintedGlass;
-        TintedGlassRecord *tgl = (TintedGlassRecord *)obj;
-        if (!load_saved_object("TintedGlass", (ObjectRecord *)tgl,
-                               &savedTgl->obj, prop))
-          return FALSE;
-        tgl->TintDist = savedTgl->TintDist;
-        tgl->CullDist = savedTgl->CullDist;
-        tgl->calculatedopacity = savedTgl->calculatedopacity;
-        tgl->portalnum = savedTgl->portalnum;
-        tgl->unk90 = savedTgl->unk90;
-        break;
-      }
-      case PROPDEF_TANK: {
-        const SavedTankRecord *savedTank = &propRec.type.tank;
-        TankRecord *tank = (TankRecord *)obj;
-        if (!load_saved_object("Tank", (ObjectRecord *)tank, &savedTank->obj,
-                               prop))
-          return FALSE;
-        tank->rect = savedTank->rect;
-        tank->unkA4 = savedTank->unkA4;
-        tank->unkA8 = savedTank->unkA8;
-        tank->unkAC = savedTank->unkAC;
-        tank->unkB0 = savedTank->unkB0;
-        tank->unkB4 = savedTank->unkB4;
-        tank->unkB8 = savedTank->unkB8;
-        tank->unkBC = savedTank->unkBC;
-        tank->unkC0 = savedTank->unkC0;
-        tank->is_firing_tank = savedTank->is_firing_tank;
-        tank->turret_vertical_angle = savedTank->turret_vertical_angle;
-        tank->turret_orientation_angle = savedTank->turret_orientation_angle;
-        tank->unkD0 = savedTank->unkD0;
-        tank->stan_y = savedTank->stan_y;
-        tank->unkD8 = savedTank->unkD8;
-        tank->tank_orientation_angle = savedTank->tank_orientation_angle;
-        break;
-      }
-      default:
-        break;
-      }
+      load_object_subtype(stream, obj);
       break;
     }
 
@@ -1227,6 +1204,20 @@ bool load_props_state(SramStream *stream) {
     default:
       break;
     }
+
+    /* Resolve projectile ownerprop and obj pointers to real props/objects. */
+    for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
+      Projectile *proj = &g_Projectiles[pi];
+      if (proj->flags & PROJECTILEFLAG_FREE)
+        continue;
+
+      if ((s32)proj->ownerprop == savedPropIndex) {
+        proj->ownerprop = prop;
+      }
+      if ((s32)proj->obj == savedPropIndex) {
+        proj->obj = prop->obj;
+      }
+    }
   }
 
   if (ADD_AND_REMOVE_PROPS) {
@@ -1235,74 +1226,9 @@ bool load_props_state(SramStream *stream) {
       removePropAtIndex(c);
     }
 
-    ptr_obj_pos_list_first_entry = get_prop_by_index(hdr.indexOfFirstEntry);
-    ptr_obj_pos_list_current_entry = get_prop_by_index(hdr.indexOfCurrentEntry);
-    ptr_obj_pos_list_final_entry = get_prop_by_index(hdr.indexOfFinalEntry);
-  }
-
-  /* Restore projectile snapshots. */
-  for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
-    SavedProjectileEntry projectile;
-    sram_stream_read_bytes(stream, &projectile, sizeof(projectile));
-    g_Projectiles[projectile.index] = projectile.projectile;
-  }
-
-  /* Restore embedment snapshots. */
-  for (pi = 0; pi < EMBEDMENT_ARR_MAX; pi++) {
-    SavedEmbedmentEntry embedment;
-    sram_stream_read_bytes(stream, &embedment, sizeof(embedment));
-    g_Embedments[embedment.index] = embedment.embedment;
-    {
-      s32 projIdx = (s32)g_Embedments[embedment.index].projectile;
-      if (projIdx >= 0 && projIdx < PROJECTILES_ARR_MAX) {
-        g_Embedments[embedment.index].projectile = &g_Projectiles[projIdx];
-      }
-    }
-  }
-
-  /* Fix up projectile/embedment back-pointers for restored props.
-     Re-read the prop records from storage to get the saved object indices. */
-  {
-    s32 fi;
-
-    sram_stream_seek(stream, dataStart);
-    for (fi = 0; fi < hdr.recordCount; fi++) {
-      SavedPropRecord *savedProp = &propRec.prop;
-      sram_stream_read_bytes(stream, savedProp, sizeof(SavedPropRecord));
-
-      if (savedProp->type == PROP_TYPE_DOOR) {
-        sram_stream_read_bytes(stream, &propRec.type.door,
-                               sizeof(SavedDoorRecord));
-      } else if (savedProp->type == PROP_TYPE_OBJ) {
-        sram_stream_read_bytes(stream, &propRec.type.door.obj,
-                               sizeof(SavedObjectRecord));
-        u8 obj_type = propRec.type.door.obj.type;
-        u32 remainder_size = get_obj_subtype_size(obj_type);
-        if (remainder_size > 0) {
-          sram_stream_read_bytes(
-              stream, ((u8 *)&propRec.type) + sizeof(SavedObjectRecord),
-              remainder_size);
-        }
-      }
-
-      if (savedProp->type == PROP_TYPE_OBJ) {
-        PropRecord *prop = get_prop_by_index(savedProp->index);
-        if (prop != NULL && prop->obj != NULL) {
-          ObjectRecord *obj = prop->obj;
-          SavedObjectRecord *savedObj = (SavedObjectRecord *)&propRec.type;
-          if (savedObj->projectileIdx >= 0 &&
-              savedObj->projectileIdx < PROJECTILES_ARR_MAX) {
-            obj->projectile = &g_Projectiles[savedObj->projectileIdx];
-            g_Projectiles[savedObj->projectileIdx].obj = obj;
-            g_Projectiles[savedObj->projectileIdx].ownerprop = prop;
-          }
-          if (savedObj->embedmentIdx >= 0 &&
-              savedObj->embedmentIdx < EMBEDMENT_ARR_MAX) {
-            obj->embedment = &g_Embedments[savedObj->embedmentIdx];
-          }
-        }
-      }
-    }
+    ptr_obj_pos_list_first_entry = get_prop_by_index(indexOfFirstEntry);
+    ptr_obj_pos_list_current_entry = get_prop_by_index(indexOfCurrentEntry);
+    ptr_obj_pos_list_final_entry = get_prop_by_index(indexOfFinalEntry);
   }
 
   return TRUE;

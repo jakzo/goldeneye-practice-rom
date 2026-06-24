@@ -1,46 +1,93 @@
 #ifndef PRACTICE_STATES_STREAM_H
 #define PRACTICE_STATES_STREAM_H
 
+#include <bondtypes.h>
 #include <ultra64.h>
+
+#ifndef __GNUC__
+#define __attribute__(x)
+#define inline
+#endif
 
 #define SRAM_PAGE_SIZE 512
 
-typedef struct {
-  u8 page[SRAM_PAGE_SIZE] __attribute__((aligned(16)));
-  u32 page_offset;
-  u32 sram_base;
-  u32 sram_offset;
-  u32 total_processed;
-} SramStream;
+typedef struct StateStream StateStream;
 
-extern SramStream *g_ActiveSramStream;
+struct StateStream {
+  void (*write_bytes)(StateStream *stream, const void *src, u32 size);
+  void (*read_bytes)(StateStream *stream, void *dst, u32 size);
+  void (*seek)(StateStream *stream, u32 absolute_offset);
+  void (*flush)(StateStream *stream);
+  u32 total_processed;
+  u32 base_address;
+};
+
+typedef struct {
+  StateStream base;
+  u8 page[SRAM_PAGE_SIZE]
+      __attribute__((aligned(16))); // 16 byte alignment for D-cache
+  u32 page_offset;
+  u32 current_page_addr;
+  bool is_write;
+  bool is_dirty;
+} SramStream;
 
 void sram_stream_init_write(SramStream *stream, u32 sram_base);
 void sram_stream_init_read(SramStream *stream, u32 sram_base);
-void sram_stream_flush(SramStream *stream);
-void sram_stream_seek(SramStream *stream, u32 absolute_sram_offset);
 
-void sram_stream_write_bytes(SramStream *stream, const void *src, u32 size);
-void sram_stream_read_bytes(SramStream *stream, void *dst, u32 size);
+// Generic stream helpers
+static inline void write_u32(StateStream *stream, u32 val) {
+  stream->write_bytes(stream, &val, sizeof(u32));
+}
 
-void sram_stream_write_u32(SramStream *stream, u32 val);
-void sram_stream_write_u16(SramStream *stream, u16 val);
-void sram_stream_write_u8(SramStream *stream, u8 val);
+static inline void write_u16(StateStream *stream, u16 val) {
+  stream->write_bytes(stream, &val, sizeof(u16));
+}
 
-u32 sram_stream_read_u32(SramStream *stream);
-u16 sram_stream_read_u16(SramStream *stream);
-u8 sram_stream_read_u8(SramStream *stream);
+static inline void write_u8(StateStream *stream, u8 val) {
+  stream->write_bytes(stream, &val, sizeof(u8));
+}
 
-// Global active stream helper functions to make calling code look like
-// write32/read32
-void write32(u32 val);
-void write16(u16 val);
-void write8(u8 val);
-void write_bytes(const void *src, u32 size);
+static inline void write_f32(StateStream *stream, f32 val) {
+  stream->write_bytes(stream, &val, sizeof(f32));
+}
 
-u32 read32(void);
-u16 read16(void);
-u8 read8(void);
-void read_bytes(void *dst, u32 size);
+static inline void write_bytes(StateStream *stream, const void *src, u32 size) {
+  stream->write_bytes(stream, src, size);
+}
+
+static inline u32 read_u32(StateStream *stream) {
+  u32 val;
+  stream->read_bytes(stream, &val, sizeof(u32));
+  return val;
+}
+
+static inline u16 read_u16(StateStream *stream) {
+  u16 val;
+  stream->read_bytes(stream, &val, sizeof(u16));
+  return val;
+}
+
+static inline u8 read_u8(StateStream *stream) {
+  u8 val;
+  stream->read_bytes(stream, &val, sizeof(u8));
+  return val;
+}
+
+static inline f32 read_f32(StateStream *stream) {
+  f32 val;
+  stream->read_bytes(stream, &val, sizeof(f32));
+  return val;
+}
+
+static inline void read_bytes(StateStream *stream, void *dst, u32 size) {
+  stream->read_bytes(stream, dst, size);
+}
+
+static inline void stream_seek(StateStream *stream, u32 absolute_offset) {
+  stream->seek(stream, absolute_offset);
+}
+
+static inline void stream_flush(StateStream *stream) { stream->flush(stream); }
 
 #endif // PRACTICE_STATES_STREAM_H

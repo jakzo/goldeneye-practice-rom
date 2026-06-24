@@ -1,17 +1,10 @@
-#include "practice_states_bond.h"
 #include "bondinv.h"
 #include "bondview.h"
-#include "chr.h"
 #include "chrai.h"
-#include "gun.h"
 #include "objecthandler.h"
 #include "player.h"
-#include "player_2.h"
 #include "practice_states.h"
-#include "practice_states_globals.h"
 #include "practice_states_utils.h"
-#include "practice_storage.h"
-#include "practice_ui.h"
 #include "watch.h"
 #include <bondconstants.h>
 #include <bondgame.h>
@@ -29,13 +22,6 @@ extern int bondinvAddPropToInv(PropRecord *prop);
 extern s32 g_EnterTankAudioState;
 extern void *memcpy(void *dst, const void *src, size_t count);
 
-/* ------------------------------------------------------------------ */
-/* Player state — the five contiguous blocks are written directly to   */
-/* storage from the live player struct (no working-memory copy).       */
-/* On load they are read directly back, with live pointers backed up   */
-/* and restored around the raw copy.                                   */
-/* ------------------------------------------------------------------ */
-
 static const struct {
   u32 srcoff;
   u32 size;
@@ -44,16 +30,16 @@ static const struct {
     {0x11B8, 0x06C0}, {0x29B8, 0x00B8},
 };
 
-static void save_player_state_direct(SramStream *stream, struct player *src) {
+static void save_player_state_direct(StateStream *stream, struct player *src) {
   u8 *src_bytes = (u8 *)src;
   s32 i;
   for (i = 0; i < 5; i++) {
-    sram_stream_write_bytes(stream, src_bytes + player_blocks[i].srcoff,
-                            player_blocks[i].size);
+    write_bytes(stream, src_bytes + player_blocks[i].srcoff,
+                player_blocks[i].size);
   }
 }
 
-static void load_player_state_direct(SramStream *stream, struct player *dst) {
+static void load_player_state_direct(StateStream *stream, struct player *dst) {
   u8 *dst_bytes = (u8 *)dst;
   s32 backup_field_5C = dst->field_5C;
   s32 backup_field_60 = dst->field_60;
@@ -73,8 +59,8 @@ static void load_player_state_direct(SramStream *stream, struct player *dst) {
   backup_hand_rocket[1] = dst->hands[1].rocket;
 
   for (i = 0; i < 5; i++) {
-    sram_stream_read_bytes(stream, dst_bytes + player_blocks[i].srcoff,
-                           player_blocks[i].size);
+    read_bytes(stream, dst_bytes + player_blocks[i].srcoff,
+               player_blocks[i].size);
   }
 
   dst->field_5C = backup_field_5C;
@@ -91,11 +77,7 @@ static void load_player_state_direct(SramStream *stream, struct player *dst) {
   dst->textoverrides = backup_textoverrides;
 }
 
-/* ------------------------------------------------------------------ */
-/* Save                                                                */
-/* ------------------------------------------------------------------ */
-
-void save_bond_state(SramStream *stream) {
+void save_bond_state(StateStream *stream) {
   if (g_CurrentPlayer == NULL) {
     return;
   }
@@ -104,86 +86,74 @@ void save_bond_state(SramStream *stream) {
   save_player_state_direct(stream, g_CurrentPlayer);
 
   /* 2. Bond helper section (sparse fields). */
-  {
-    BondHelperSection helper;
-    BondHelperSection *h = &helper;
-    h->room_pointer_offset = get_tile_offset(g_CurrentPlayer->room_pointer);
-    h->field_488_current_tile_ptr_offset =
-        get_tile_offset(g_CurrentPlayer->field_488.current_tile_ptr);
-    h->field_488_current_tile_ptr_for_portals_offset = get_tile_offset(
-        g_CurrentPlayer->field_488.current_tile_ptr_for_portals);
-    h->previous_collision_info_current_tile_ptr_offset = get_tile_offset(
-        g_CurrentPlayer->previous_collision_info.current_tile_ptr);
-    h->previous_collision_info_current_tile_ptr_for_portals_offset =
-        get_tile_offset(g_CurrentPlayer->previous_collision_info
-                            .current_tile_ptr_for_portals);
-    h->field_2A70_offset = get_tile_offset(g_CurrentPlayer->field_2A70);
-    h->autoaim_target_y_index =
-        get_prop_index(g_CurrentPlayer->autoaim_target_y);
-    h->autoaim_target_x_index =
-        get_prop_index(g_CurrentPlayer->autoaim_target_x);
+  write_u32(stream, get_tile_offset(g_CurrentPlayer->room_pointer));
+  write_u32(stream,
+            get_tile_offset(g_CurrentPlayer->field_488.current_tile_ptr));
+  write_u32(
+      stream,
+      get_tile_offset(g_CurrentPlayer->field_488.current_tile_ptr_for_portals));
+  write_u32(stream,
+            get_tile_offset(
+                g_CurrentPlayer->previous_collision_info.current_tile_ptr));
+  write_u32(stream, get_tile_offset(g_CurrentPlayer->previous_collision_info
+                                        .current_tile_ptr_for_portals));
+  write_u32(stream, get_tile_offset(g_CurrentPlayer->field_2A70));
+  write_u32(stream, get_prop_index(g_CurrentPlayer->autoaim_target_y));
+  write_u32(stream, get_prop_index(g_CurrentPlayer->autoaim_target_x));
 
-    if (g_CurrentPlayer->prop != NULL) {
-      h->has_prop = TRUE;
-      h->prop_pos = g_CurrentPlayer->prop->pos;
-      h->prop_stan_offset = get_tile_offset(g_CurrentPlayer->prop->stan);
-      h->prop_rooms[0] = g_CurrentPlayer->prop->rooms[0];
-      h->prop_rooms[1] = g_CurrentPlayer->prop->rooms[1];
-      h->prop_rooms[2] = g_CurrentPlayer->prop->rooms[2];
-      h->prop_rooms[3] = g_CurrentPlayer->prop->rooms[3];
-    } else {
-      h->has_prop = FALSE;
-    }
-    sram_stream_write_bytes(stream, h, sizeof(*h));
+  if (g_CurrentPlayer->prop != NULL) {
+    write_u8(stream, TRUE);
+    write_bytes(stream, &g_CurrentPlayer->prop->pos, sizeof(coord3d));
+    write_u32(stream, get_tile_offset(g_CurrentPlayer->prop->stan));
+    write_u8(stream, g_CurrentPlayer->prop->rooms[0]);
+    write_u8(stream, g_CurrentPlayer->prop->rooms[1]);
+    write_u8(stream, g_CurrentPlayer->prop->rooms[2]);
+    write_u8(stream, g_CurrentPlayer->prop->rooms[3]);
+  } else {
+    write_u8(stream, FALSE);
   }
 
   /* 3. Inventory section. */
   {
-    BondInventorySection inventory;
-    BondInventorySection *inv = &inventory;
     InvItem *first = g_CurrentPlayer->ptr_inventory_first_in_cycle;
     InvItem *item = first;
     s32 count = 0;
     s32 i;
 
-    for (i = 0; i < 50; i++) {
-      inv->inv_items[i].type = -1;
-      inv->inv_items[i].weapon_right = -1;
-      inv->inv_items[i].weapon_left = -1;
-      inv->inv_items[i].prop_index = -1;
-    }
-
     if (item != NULL) {
       do {
-        if (count >= 50)
-          break;
-        inv->inv_items[count].type = item->type;
-        if (item->type == INV_ITEM_WEAPON) {
-          inv->inv_items[count].weapon_right =
-              item->type_inv_item.type_weap.weapon;
-        } else if (item->type == INV_ITEM_DUAL) {
-          inv->inv_items[count].weapon_right =
-              item->type_inv_item.type_dual.weapon_right;
-          inv->inv_items[count].weapon_left =
-              item->type_inv_item.type_dual.weapon_left;
-        } else if (item->type == INV_ITEM_PROP) {
-          inv->inv_items[count].prop_index =
-              get_prop_index(item->type_inv_item.type_prop.prop);
-        }
         count++;
         item = item->next;
       } while (item != first && item != NULL);
     }
-    inv->num_inv_items = count;
-    sram_stream_write_bytes(stream, inv, sizeof(*inv));
+
+    write_u32(stream, count);
+
+    item = first;
+    for (i = 0; i < count; i++) {
+      s32 weapon_right = -1;
+      s32 weapon_left = -1;
+      s32 prop_index = -1;
+
+      write_u32(stream, item->type);
+      if (item->type == INV_ITEM_WEAPON) {
+        weapon_right = item->type_inv_item.type_weap.weapon;
+      } else if (item->type == INV_ITEM_DUAL) {
+        weapon_right = item->type_inv_item.type_dual.weapon_right;
+        weapon_left = item->type_inv_item.type_dual.weapon_left;
+      } else if (item->type == INV_ITEM_PROP) {
+        prop_index = get_prop_index(item->type_inv_item.type_prop.prop);
+      }
+      write_u32(stream, weapon_right);
+      write_u32(stream, weapon_left);
+      write_u32(stream, prop_index);
+
+      item = item->next;
+    }
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* Load                                                                */
-/* ------------------------------------------------------------------ */
-
-void load_bond_state(SramStream *stream) {
+void load_bond_state(StateStream *stream) {
   s32 preload_hand_item[2];
   textoverride *live_textoverrides;
 
@@ -201,52 +171,58 @@ void load_bond_state(SramStream *stream) {
 
   /* 3. Read and apply bond helper section. */
   {
-    BondHelperSection helper;
-    BondHelperSection *h = &helper;
-    sram_stream_read_bytes(stream, h, sizeof(*h));
-
-    g_CurrentPlayer->room_pointer = get_tile_by_offset(h->room_pointer_offset);
+    g_CurrentPlayer->room_pointer = get_tile_by_offset(read_u32(stream));
     g_CurrentPlayer->field_488.current_tile_ptr =
-        get_tile_by_offset(h->field_488_current_tile_ptr_offset);
+        get_tile_by_offset(read_u32(stream));
     g_CurrentPlayer->field_488.current_tile_ptr_for_portals =
-        get_tile_by_offset(h->field_488_current_tile_ptr_for_portals_offset);
+        get_tile_by_offset(read_u32(stream));
     g_CurrentPlayer->previous_collision_info.current_tile_ptr =
-        get_tile_by_offset(h->previous_collision_info_current_tile_ptr_offset);
+        get_tile_by_offset(read_u32(stream));
     g_CurrentPlayer->previous_collision_info.current_tile_ptr_for_portals =
-        get_tile_by_offset(
-            h->previous_collision_info_current_tile_ptr_for_portals_offset);
-    g_CurrentPlayer->field_2A70 = get_tile_by_offset(h->field_2A70_offset);
+        get_tile_by_offset(read_u32(stream));
+    g_CurrentPlayer->field_2A70 = get_tile_by_offset(read_u32(stream));
 
     g_CurrentPlayer->autoaim_target_y =
-        get_enabled_prop_by_index(h->autoaim_target_y_index);
+        get_enabled_prop_by_index(read_u32(stream));
     g_CurrentPlayer->autoaim_target_x =
-        get_enabled_prop_by_index(h->autoaim_target_x_index);
+        get_enabled_prop_by_index(read_u32(stream));
 
     /* Recalculate derived look parameters. */
     bondviewApplyVertaTheta();
 
     /* Sync player's world PropRecord. */
-    if (h->has_prop) {
+    if (read_u8(stream)) {
+      coord3d prop_pos;
+      s32 prop_stan_offset;
+      u8 prop_rooms[4];
+
+      read_bytes(stream, &prop_pos, sizeof(coord3d));
+      prop_stan_offset = read_u32(stream);
+      prop_rooms[0] = read_u8(stream);
+      prop_rooms[1] = read_u8(stream);
+      prop_rooms[2] = read_u8(stream);
+      prop_rooms[3] = read_u8(stream);
+
       if (g_CurrentPlayer->prop != NULL) {
         chrpropDeregisterRooms(g_CurrentPlayer->prop);
-        g_CurrentPlayer->prop->pos = h->prop_pos;
-        g_CurrentPlayer->prop->stan = get_tile_by_offset(h->prop_stan_offset);
-        g_CurrentPlayer->prop->rooms[0] = h->prop_rooms[0];
-        g_CurrentPlayer->prop->rooms[1] = h->prop_rooms[1];
-        g_CurrentPlayer->prop->rooms[2] = h->prop_rooms[2];
-        g_CurrentPlayer->prop->rooms[3] = h->prop_rooms[3];
+        g_CurrentPlayer->prop->pos = prop_pos;
+        g_CurrentPlayer->prop->stan = get_tile_by_offset(prop_stan_offset);
+        g_CurrentPlayer->prop->rooms[0] = prop_rooms[0];
+        g_CurrentPlayer->prop->rooms[1] = prop_rooms[1];
+        g_CurrentPlayer->prop->rooms[2] = prop_rooms[2];
+        g_CurrentPlayer->prop->rooms[3] = prop_rooms[3];
         chrpropRegisterRooms(g_CurrentPlayer->prop);
       } else {
         g_CurrentPlayer->prop = chrpropAllocate();
         if (g_CurrentPlayer->prop != NULL) {
           g_CurrentPlayer->prop->obj = NULL;
           g_CurrentPlayer->prop->type = PROP_TYPE_VIEWER;
-          g_CurrentPlayer->prop->pos = h->prop_pos;
-          g_CurrentPlayer->prop->stan = get_tile_by_offset(h->prop_stan_offset);
-          g_CurrentPlayer->prop->rooms[0] = h->prop_rooms[0];
-          g_CurrentPlayer->prop->rooms[1] = h->prop_rooms[1];
-          g_CurrentPlayer->prop->rooms[2] = h->prop_rooms[2];
-          g_CurrentPlayer->prop->rooms[3] = h->prop_rooms[3];
+          g_CurrentPlayer->prop->pos = prop_pos;
+          g_CurrentPlayer->prop->stan = get_tile_by_offset(prop_stan_offset);
+          g_CurrentPlayer->prop->rooms[0] = prop_rooms[0];
+          g_CurrentPlayer->prop->rooms[1] = prop_rooms[1];
+          g_CurrentPlayer->prop->rooms[2] = prop_rooms[2];
+          g_CurrentPlayer->prop->rooms[3] = prop_rooms[3];
           chrpropActivate(g_CurrentPlayer->prop);
           chrpropEnable(g_CurrentPlayer->prop);
           chrpropRegisterRooms(g_CurrentPlayer->prop);
@@ -273,24 +249,26 @@ void load_bond_state(SramStream *stream) {
 
   /* 4. Re-initialize inventory, then read and apply inventory section. */
   {
-    BondInventorySection inventory;
-    BondInventorySection *inv = &inventory;
+    s32 num_inv_items;
     s32 i;
 
     bondinvReinitInv();
     g_CurrentPlayer->textoverrides = live_textoverrides;
 
-    sram_stream_read_bytes(stream, inv, sizeof(*inv));
+    num_inv_items = read_u32(stream);
 
-    for (i = 0; i < inv->num_inv_items; i++) {
-      s32 type = inv->inv_items[i].type;
+    for (i = 0; i < num_inv_items; i++) {
+      s32 type = read_u32(stream);
+      s32 weapon_right = read_u32(stream);
+      s32 weapon_left = read_u32(stream);
+      s32 prop_index = read_u32(stream);
+
       if (type == INV_ITEM_WEAPON) {
-        bondinvAddInvItem(inv->inv_items[i].weapon_right);
+        bondinvAddInvItem(weapon_right);
       } else if (type == INV_ITEM_DUAL) {
-        bondinvAddDoublesInvItem(inv->inv_items[i].weapon_right,
-                                 inv->inv_items[i].weapon_left);
+        bondinvAddDoublesInvItem(weapon_right, weapon_left);
       } else if (type == INV_ITEM_PROP) {
-        PropRecord *prop = get_prop_by_index(inv->inv_items[i].prop_index);
+        PropRecord *prop = get_prop_by_index(prop_index);
         if (prop != NULL) {
           bondinvAddPropToInv(prop);
         }

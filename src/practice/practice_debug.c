@@ -186,8 +186,8 @@ void practice_debug_got_door(PropRecord *door) {
   }
 }
 
+#ifdef NON_FINAL
 void practice_debug_tick() {
-#if FALSE
   extern void save_game_state(void);
   extern void load_game_state(void);
   if (g_save_test_timer == -1 && g_CameraMode == CAMERAMODE_FP) {
@@ -220,7 +220,6 @@ void practice_debug_tick() {
         propExecuteTickOperation(door, FALSE);
         emu_log_write("DOOR_TEST_AFTER\n");
       }
-      g_save_test_timer = -2;
     }
     if (g_save_test_timer == 60) {
       // TODO: Break here and read the state of door number 4
@@ -238,5 +237,5 @@ void practice_debug_tick() {
       practice_debug_got_door(door);
     }
   }
-#endif
 }
+#endif
