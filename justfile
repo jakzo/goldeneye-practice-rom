@@ -1,5 +1,4 @@
 image := "goldeneye"
-ares := "/Applications/ares.app/Contents/MacOS/ares"
 
 _default:
     just -l
@@ -14,40 +13,45 @@ clean_all:
     docker rmi {{ image }}
     echo "Make sure to run 'just setup' again."
 
+# Full clean and re-extract of assets
+reset:
+    git clean -fdx -e '.vscode' -e 'baserom.u.z64' -e '**/*.c' -e '**/*.h'
+    docker image rm {{ image }}
+    docker build -t {{ image }} .
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} ./scripts/extract_baserom.u.sh
+
 # run this to setup your local machine for development
 setup:
     docker build -t {{ image }} .
-    if [ -f baserom.u.z64 ]; then docker run --rm -v $(pwd):/home/dev {{ image }} ./scripts/extract_baserom.u.sh; fi
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} ./scripts/extract_baserom.u.sh
     if [ -f baserom.e.z64 ]; then docker run --rm -v $(pwd):/home/dev {{ image }} ./scripts/extract_diff.e.sh; fi
     if [ -f baserom.j.z64 ]; then docker run --rm -v $(pwd):/home/dev {{ image }} ./scripts/extract_diff.j.sh; fi
 
 # build the rom
 make:
     if test -z "$(docker images -q {{ image }})"; then just setup; fi
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j$(nproc) COMPARE=0 FINAL=YES
-    if [ -f baserom.e.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j$(nproc) COMPARE=0 FINAL=YES VERSION=EU; fi
-    if [ -f baserom.j.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j$(nproc) COMPARE=0 FINAL=YES VERSION=JP; fi
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }}
+    if [ -f baserom.e.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} VERSION=EU; fi
+    if [ -f baserom.j.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} VERSION=JP; fi
 
-make-debug:
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j$(nproc) COMPARE=0 FINAL=NO
-    if [ -f baserom.e.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j$(nproc) COMPARE=0 FINAL=NO VERSION=EU; fi
-    if [ -f baserom.j.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j$(nproc) COMPARE=0 FINAL=NO VERSION=JP; fi
+make-dev:
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1
+    if [ -f baserom.e.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1 VERSION=EU; fi
+    if [ -f baserom.j.z64 ]; then docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1 VERSION=JP; fi
 
-make-clean:
-    git clean -fdx -e '.vscode' -e 'baserom.u.z64' -e '**/*.c' -e '**/*.h'
-    docker image rm {{ image }}
-    docker build -t {{ image }} .
-    docker run --rm -v $(pwd):/home/dev {{ image }} ./scripts/extract_baserom.u.sh
-    # Sometimes this fails to generate bin/aspboot so try again I guess?
-    docker run --rm -v $(pwd):/home/dev {{ image }} ./scripts/extract_baserom.u.sh
-    docker run --rm -v $(pwd):/home/dev {{ image }} make -j8 COMPARE=0 FINAL=YES
+make-clean: reset
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }}
 
-ares BOOT_LEVEL="TITLE":
-    docker run --rm -v $(pwd):/home/dev {{ image }} make -j8 COMPARE=0 FINAL=NO {{ BOOT_LEVEL }}
-    {{ ares }} ./build/u/ge007.u.z64
+ares:
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }}
+    ares ./build/u/ge007.u.z64
 
-sc64-debug BOOT_LEVEL="TITLE":
-    docker run --rm -v $(pwd):/home/dev {{ image }} make -j8 COMPARE=0 FINAL=NO {{ BOOT_LEVEL }}
+ares-dev BOOT_LEVEL="TITLE":
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}
+    ares ./build/u/ge007.u.z64
+
+sc64-dev BOOT_LEVEL="TITLE":
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} {{ BOOT_LEVEL }}
     sc64deployer upload build/u/ge007.u.z64
     sc64deployer debug
 

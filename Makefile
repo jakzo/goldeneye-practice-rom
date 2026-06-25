@@ -9,9 +9,11 @@ FINAL := YES
 VERSION := US
 IDO_RECOMP := YES
 VERBOSE := 2
+# If DEV is set (e.g. DEV=1), -DDEV is added to enable code with #ifdef DEV
+DEV := 0
 # If COMPARE is 1, check the output sha1sum when building 'all', and if fail to match
 # then compare ELF sections to known md5 checksums.
-COMPARE := 1
+COMPARE := 0
 
 # Include Terminal Codes for colourising text.
 include include/make/VT100Codes.make
@@ -58,10 +60,12 @@ ConvertAIPRINT = sed -E -e ':loop s/PRINT\("(..*?)(.)"/PRINT\("\1",\x27\2\x27/g;
 
 # per VERSION flags
 ifeq ($(FINAL), YES)
+ GCC_OPTIMIZATION := -O2
  OPTIMIZATION := -O2
  LCDEFS :=
  CFLAGWARNING :=
 else
+ GCC_OPTIMIZATION := -g
  OPTIMIZATION := -g
  LCDEFS := -DDEBUG
  CFLAGWARNING :=-fullwarn -wlint
@@ -114,8 +118,11 @@ ifeq ($(VERSION), USB)
  LDFILEOPTS := -DVERSION_$(LANG) -DOUTCODE=$(OUTCODE) -DENABLE_USB
 endif
 
-ifneq ($(FINAL), YES)
- LCDEFS += -DNON_FINAL
+ifeq ($(DEV), 1)
+ GCC_OPTIMIZATION := -g
+ LCDEFS += -DDEV
+ CFLAGWARNING := -fullwarn -wlint
+ ASMDEFS += --defsym DEV=1
 endif
 
 ALLOWED_VERSIONS := US EU JP DEBUG USB
@@ -213,7 +220,7 @@ BOOT_LEVELID := LEVELID_$(BOOT_LEVEL)
 CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL) -DBOOT_LEVELID=$(BOOT_LEVELID)
 
 CC_GCC := $(TOOLCHAIN)gcc
-CFLAGS_GCC := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -fms-extensions -fno-stack-protector -G 0 -g $(OPTIMIZATION) $(INCLUDE) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL) -DBOOT_LEVELID=$(BOOT_LEVELID)
+CFLAGS_GCC := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -fms-extensions -fno-stack-protector -G 0 -g $(GCC_OPTIMIZATION) $(INCLUDE) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL) -DBOOT_LEVELID=$(BOOT_LEVELID)
 LIBGCC := $(shell $(CC_GCC) -print-libgcc-file-name)
 
 # Ensure the build directory for practice files exists
@@ -246,16 +253,8 @@ ASM_PREPROC := python3 $(ASM_PROCESSOR_DIR)/asm_processor.py
 
 OBJCOPY := $(TOOLCHAIN)objcopy
 
-
-
-
-
-
-
-
-
-
-
+BUILD_CONFIG_STAMP := $(BUILD_DIR)/.build_config
+BUILD_CONFIG_TMP := $(BUILD_CONFIG_STAMP).tmp
 
 ## Build Recipes ##
 
@@ -272,12 +271,48 @@ OBJCOPY := $(TOOLCHAIN)objcopy
 .NOTPARALLEL: print_info create_directories $(APPROM) checksum
 
 # Phony Recipes - These targets are not files, Get Make to do something
-.PHONY: print_info create_directories build_tools prerequisites checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test  context extractassets textures 
+.PHONY: FORCE print_info create_directories build_tools prerequisites checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test  context extractassets textures 
 
 
 # this file references variables defined above: BUILD_DIR, CFLAGWARNING, INCLUDE, LCDEFS
 # this file defines and builds $(ULTRAOBJECTS)
 include src/libultrare/Makefile.libultrare
+
+CONFIG_SENSITIVE_OBJECTS := \
+	$(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) \
+	$(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) \
+	$(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) $(PRACTICEOBJECTS) \
+	$(ULTRAOBJECTS)
+
+$(CONFIG_SENSITIVE_OBJECTS) $(APPELF): $(BUILD_CONFIG_STAMP)
+
+FORCE:
+
+$(BUILD_CONFIG_STAMP): FORCE
+	@mkdir -p $(@D)
+	@{ \
+		printf '%s\n' 'FINAL=$(FINAL)'; \
+		printf '%s\n' 'VERSION=$(VERSION)'; \
+		printf '%s\n' 'IDO_RECOMP=$(IDO_RECOMP)'; \
+		printf '%s\n' 'BOOT_LEVEL=$(BOOT_LEVEL)'; \
+		printf '%s\n' 'DEV=$(DEV)'; \
+		printf '%s\n' 'GCC_OPTIMIZATION=$(GCC_OPTIMIZATION)'; \
+		printf '%s\n' 'OPTIMIZATION=$(OPTIMIZATION)'; \
+		printf '%s\n' 'LCDEFS=$(LCDEFS)'; \
+		printf '%s\n' 'CFLAGWARNING=$(CFLAGWARNING)'; \
+		printf '%s\n' 'CFLAGS=$(CFLAGS)'; \
+		printf '%s\n' 'CFLAGS_GCC=$(CFLAGS_GCC)'; \
+		printf '%s\n' 'CFLAGS_LIBULTRA=$(CFLAGS_LIBULTRA)'; \
+		printf '%s\n' 'ASFLAGS=$(ASFLAGS)'; \
+		printf '%s\n' 'ASFLAGS_LIBULTRA=$(ASFLAGS_LIBULTRA)'; \
+		printf '%s\n' 'LDFILEOPTS=$(LDFILEOPTS)'; \
+		printf '%s\n' 'LDFLAGS=$(LDFLAGS)'; \
+	} > $(BUILD_CONFIG_TMP)
+	@if ! cmp -s $(BUILD_CONFIG_TMP) $@; then \
+		mv $(BUILD_CONFIG_TMP) $@; \
+	else \
+		rm $(BUILD_CONFIG_TMP); \
+	fi
 
 # Build RSP
 $(BUILD_DIR)/rsp/%.bin: rsp/*.s

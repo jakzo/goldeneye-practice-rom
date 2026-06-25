@@ -16,7 +16,7 @@ src/bondtypes.h
 -Isrc/inflate
 -Isrc/practice
 -Isrc/practice/state
--DNON_FINAL
+-DDEV
 -DVERSION_US
 -DLANG_US
 -DREFRESH_NTSC

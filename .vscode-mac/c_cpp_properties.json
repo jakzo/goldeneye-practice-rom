@@ -13,7 +13,7 @@
                 "${workspaceFolder}/src/practice/state"
             ],
             "defines": [
-                "NON_FINAL",
+                "DEV",
                 "VERSION_US",
                 "TARGET_N64",
                 "PRACTICE_ROM",

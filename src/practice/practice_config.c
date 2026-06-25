@@ -7,14 +7,20 @@
 #define BOOT_LEVELID LEVELID_TITLE
 #endif
 
+#ifdef DEV
+#define SKIP_CUTSCENES TRUE
+#else
+#define SKIP_CUTSCENES FALSE
+#endif
+
 struct PracticeConfig practice = {
-    TRUE,         // skip_logos_on_startup
-    TRUE,         // left_trigger_hotkeys
-    BOOT_LEVELID, // boot_level
-    TRUE,         // disable_intro_cutscenes
-    5.0f,         // log_message_duration
-    TRUE,         // show_hundredths_on_timer
-    TRUE,         // show_mission_timer
-    FALSE,        // grenade_cam
-    TRUE,         // splits_enabled
+    TRUE,           // skip_logos_on_startup
+    TRUE,           // left_trigger_hotkeys
+    BOOT_LEVELID,   // boot_level
+    SKIP_CUTSCENES, // disable_intro_cutscenes
+    5.0f,           // log_message_duration
+    TRUE,           // show_hundredths_on_timer
+    TRUE,           // show_mission_timer
+    FALSE,          // grenade_cam
+    TRUE,           // splits_enabled
 };

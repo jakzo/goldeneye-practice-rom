@@ -42,7 +42,7 @@ jobs:
         run: ./scripts/extract_baserom.u.sh
 
       - name: Build practice ROM (IDO via QEMU)
-        run: make -j$(nproc) COMPARE=0 IDO_RECOMP=NO
+        run: make -j$(nproc) IDO_RECOMP=NO
 
       - name: Determine release tag
         id: tag

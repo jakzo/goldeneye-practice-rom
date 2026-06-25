@@ -2,7 +2,8 @@
 #include "../practice_sram.h"
 #include "../practice_ui.h"
 #include <ultra64.h>
-#include <string.h>
+
+extern void *memcpy(void *dst, const void *src, size_t count);
 
 static void sram_stream_flush_impl(StateStream *stream) {
   SramStream *sram = (SramStream *)stream;

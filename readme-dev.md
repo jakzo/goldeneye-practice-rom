@@ -30,7 +30,7 @@ Easiest way is to log to the screen with `practiceLogDebug`. These will also log
 If you use an emulator like [ares](https://ares-emu.net/download) you can start a GDB server and compiling with `FINAL=NO` will include debug symbols, so you can use GDB to attach a debugger. Full command is:
 
 ```sh
-docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 FINAL=NO
+docker run --rm -v $(pwd):/home/dev goldeneye make -j8 FINAL=NO
 ```
 
 But there are some limitations:
@@ -42,7 +42,7 @@ But there are some limitations:
 Also keep in mind that this build is missing optimizations which you get with `FINAL=YES` (default):
 
 ```sh
-docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0
+docker run --rm -v $(pwd):/home/dev goldeneye make -j8
 ```
 
 If something goes wrong and you're getting mysterious build errors, clean and start fresh with:
@@ -54,7 +54,7 @@ git clean -fdx -e '.vscode/*' -e 'baserom.u.z64' && \
 docker image rm goldeneye && \
 docker build -t goldeneye . && \
 docker run --rm -v $(pwd):/home/dev goldeneye ./scripts/extract_baserom.u.sh && \
-docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 FINAL=YES
+docker run --rm -v $(pwd):/home/dev goldeneye make -j8 FINAL=YES
 ```
 
 I find I need to do this when switching between building with `FINAL=YES` and `FINAL=NO`.
@@ -70,7 +70,7 @@ I use this on Mac to run in ares:
 You can also build it to start in a specific level:
 
 ```sh
-docker run --rm -v $(pwd):/home/dev goldeneye make -j8 COMPARE=0 BOOT_LEVEL=LEVELID_RUNWAY
+docker run --rm -v $(pwd):/home/dev goldeneye make -j8 BOOT_LEVEL=LEVELID_RUNWAY
 ```
 
 ## Release

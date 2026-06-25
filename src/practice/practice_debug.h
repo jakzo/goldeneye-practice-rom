@@ -8,10 +8,6 @@
  */
 void practice_log_memory_usage();
 
-#ifdef NON_FINAL
 void practice_debug_tick();
-#else
-#define practice_debug_tick() ((void)0)
-#endif
 
 #endif /* PRACTICE_DEBUG_H */
