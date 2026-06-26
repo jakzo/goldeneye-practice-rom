@@ -1,14 +1,14 @@
 #include "practice_debug.h"
 #include "bondview.h"
 #include "emu_log.h"
+#include "front.h"
+#include "joy.h"
 #include "practice_states.h"
 #include "practice_ui.h"
 #include <bondgame.h>
 #include <memp.h>
 #include <tlb_manage.h>
 #include <ultra64.h>
-#include "joy.h"
-#include "front.h"
 
 /* g_mempPools[] is defined in memp.c; we need an extern here as it's not
  * in memp.h. */
@@ -152,11 +152,12 @@ void practice_debug_tick() {
       emu_log_write("SAVE_TEST_SAVE_DONE\n");
     }
     if (g_save_test_timer == 60) {
-      emu_log_write("SAVE_TEST_START_HOLD_C_LEFT\n");
+      emu_log_write("SAVE_TEST_START_MOVING_LEFT\n");
       g_SimulatedButtons |= L_CBUTTONS;
     }
     if (g_save_test_timer == 90) {
-      emu_log_write("SAVE_TEST_STOP_HOLD_C_LEFT\n");
+      emu_log_write("SAVE_TEST_AMMO_CRATE_PICKED_UP\n");
+      emu_log_write("SAVE_TEST_STOP_MOVING_LEFT\n");
       g_SimulatedButtons &= ~L_CBUTTONS;
     }
     if (g_save_test_timer == 120) {
@@ -171,7 +172,9 @@ void practice_debug_tick() {
 extern ALBank *g_musicSfxBufferPtr;
 struct ALBankAlt_s;
 struct ALSoundState_s;
-extern struct ALSoundState_s *sndPlaySfx(struct ALBankAlt_s *soundBank, s16 soundIndex, struct ALSoundState_s *pendingState);
+extern struct ALSoundState_s *sndPlaySfx(struct ALBankAlt_s *soundBank,
+                                         s16 soundIndex,
+                                         struct ALSoundState_s *pendingState);
 
 static int get_next_playable_level(int current) {
   int i = current + 1;
@@ -240,9 +243,9 @@ void practice_briefing_menu_tick(void) {
 
   if (updated) {
     selected_stage = mission_folder_setup_entries[briefingpage].stage_id;
-    current_menu_briefing_page = BRIEFING_TITLE; // Go back to primary objectives page
+    current_menu_briefing_page =
+        BRIEFING_TITLE; // Go back to primary objectives page
     load_briefing_text_for_stage();
     sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, PAPER_TURN_SFX, NULL);
   }
 }
-
