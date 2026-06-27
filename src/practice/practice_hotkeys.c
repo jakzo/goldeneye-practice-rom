@@ -61,17 +61,20 @@ bool practice_check_hotkeys(void) {
     return TRUE;
   }
 
-  if (jgbptf & R_CBUTTONS) {
-    practice_log_memory_usage();
-    return TRUE;
-  }
-
   if (jgbptf & START_BUTTON) {
     unpause();
     lvlStageLoad(g_CurrentStageToLoad);
     practiceLogInfo("Level restarted");
     return TRUE;
   }
+
+#if DEV
+  // TODO: Display memory usage while paused?
+  if (jgbptf & R_CBUTTONS) {
+    practice_log_memory_usage();
+    return TRUE;
+  }
+#endif
 
   return TRUE;
 }
