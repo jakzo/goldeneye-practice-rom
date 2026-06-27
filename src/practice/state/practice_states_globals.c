@@ -30,8 +30,10 @@ void save_global_state(StateStream *stream) {
 
   // Font
 #if defined(VERSION_JP) || defined(VERSION_EU)
-  write_bytes(stream, dword_CODE_bss_jp80079CEC, sizeof(dword_CODE_bss_jp80079CEC));
-  write_bytes(stream, dword_CODE_bss_jp80079Cd8, sizeof(dword_CODE_bss_jp80079Cd8));
+  write_bytes(stream, dword_CODE_bss_jp80079CEC,
+              sizeof(dword_CODE_bss_jp80079CEC));
+  write_bytes(stream, dword_CODE_bss_jp80079Cd8,
+              sizeof(dword_CODE_bss_jp80079Cd8));
 #else
   write_u32(stream, copy_1stfonttable);
   write_u32(stream, copy_2ndfonttable);
@@ -82,8 +84,10 @@ void load_global_state(StateStream *stream) {
 
   // Font
 #if defined(VERSION_JP) || defined(VERSION_EU)
-  read_bytes(stream, dword_CODE_bss_jp80079CEC, sizeof(dword_CODE_bss_jp80079CEC));
-  read_bytes(stream, dword_CODE_bss_jp80079Cd8, sizeof(dword_CODE_bss_jp80079Cd8));
+  read_bytes(stream, dword_CODE_bss_jp80079CEC,
+             sizeof(dword_CODE_bss_jp80079CEC));
+  read_bytes(stream, dword_CODE_bss_jp80079Cd8,
+             sizeof(dword_CODE_bss_jp80079Cd8));
 #else
   copy_1stfonttable = read_u32(stream);
   copy_2ndfonttable = read_u32(stream);
@@ -122,6 +126,8 @@ void load_global_state(StateStream *stream) {
   // Values
   g_GlobalTimer = read_u32(stream);
   mission_timer = read_u32(stream);
+  // TODO: Either restore RNG state after props or stop restoration of prop
+  // state from consuming RNG (ideally this)
   read_bytes(stream, &g_randomSeed, sizeof(g_randomSeed));
   read_bytes(stream, &g_chrObjRandomSeed, sizeof(g_chrObjRandomSeed));
 }

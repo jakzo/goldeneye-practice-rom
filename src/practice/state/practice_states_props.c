@@ -1,6 +1,7 @@
 #include "practice_states_props.h"
 #include "chrai.h"
 #include "chrobjhandler.h"
+#include "explosions.h"
 #include "practice_states.h"
 #include "practice_states_utils.h"
 #include "practice_ui.h"
@@ -416,6 +417,18 @@ static void load_door_record(StateStream *stream, DoorRecord *door) {
   door->lastcalc60i = read_u32(stream);
 }
 
+static void save_smoke_record(StateStream *stream, struct Smoke *smoke) {
+  write_u16(stream, smoke->duration);
+  write_u16(stream, smoke->smoke_type);
+  write_bytes(stream, smoke->parts, sizeof(smoke->parts));
+}
+
+static void load_smoke_record(StateStream *stream, struct Smoke *smoke) {
+  smoke->duration = read_u16(stream);
+  smoke->smoke_type = read_u16(stream);
+  read_bytes(stream, smoke->parts, sizeof(smoke->parts));
+}
+
 static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
   switch (obj->type) {
   case PROPDEF_PROP:
@@ -627,6 +640,9 @@ static void skip_prop_data(StateStream *stream, u8 type) {
     if (load_object_base(stream, &temp_obj.base, NULL)) {
       load_object_subtype(stream, &temp_obj.base);
     }
+  } else if (type == PROP_TYPE_SMOKE) {
+    struct Smoke temp_smoke;
+    load_smoke_record(stream, &temp_smoke);
   }
 }
 
@@ -956,12 +972,17 @@ bool save_props_state(StateStream *stream) {
       break;
     }
 
+    case PROP_TYPE_SMOKE:
+      if (prop->smoke != NULL) {
+        save_smoke_record(stream, prop->smoke);
+      }
+      break;
+
     case PROP_TYPE_NUL:
     case PROP_TYPE_CHR:
     case PROP_TYPE_PLAYER:
     case PROP_TYPE_VIEWER:
     case PROP_TYPE_EXPLOSION:
-    case PROP_TYPE_SMOKE:
     default:
       break;
     }
@@ -1110,12 +1131,14 @@ bool load_props_state(StateStream *stream) {
       supportedType =
           prop->weapon != NULL && prop->weapon->type == PROPDEF_COLLECTABLE;
       break;
+    case PROP_TYPE_SMOKE:
+      supportedType = prop->smoke != NULL && prop->smoke->prop == prop;
+      break;
     case PROP_TYPE_NUL:
     case PROP_TYPE_CHR:
     case PROP_TYPE_PLAYER:
     case PROP_TYPE_VIEWER:
     case PROP_TYPE_EXPLOSION:
-    case PROP_TYPE_SMOKE:
     case PROP_TYPE_MAX:
       supportedType = FALSE;
       break;
@@ -1230,12 +1253,20 @@ bool load_props_state(StateStream *stream) {
       break;
     }
 
+    case PROP_TYPE_SMOKE:
+      if (prop->smoke == NULL || prop->smoke->prop != prop) {
+        struct Smoke temp_smoke;
+        load_smoke_record(stream, &temp_smoke);
+      } else {
+        load_smoke_record(stream, prop->smoke);
+      }
+      break;
+
     case PROP_TYPE_NUL:
     case PROP_TYPE_CHR:
     case PROP_TYPE_PLAYER:
     case PROP_TYPE_VIEWER:
     case PROP_TYPE_EXPLOSION:
-    case PROP_TYPE_SMOKE:
     default:
       break;
     }

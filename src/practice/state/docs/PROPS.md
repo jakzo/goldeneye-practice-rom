@@ -73,7 +73,7 @@ Each `PropRecord` defines its entity type in its `type` field:
 - `PROP_TYPE_PLAYER` (5): Player (uses `chr`).
 - `PROP_TYPE_VIEWER` (6): Multi-player/cutscene viewer (uses `chr`).
 - `PROP_TYPE_EXPLOSION` (7): Explosions (uses `explosion`).
-- `PROP_TYPE_SMOKE` (8): Smoke particles (uses `smoke`).
+- `PROP_TYPE_SMOKE` (8): Smoke clouds (uses `smoke`). Save/load implemented.
 
 ---
 
@@ -425,6 +425,38 @@ typedef struct ChrRecord
     PropRecord *handle_positiondata_hat;          /* 0x01CC - Pointer to hat prop definition */
 } ChrRecord;
 ```
+
+---
+
+### 5. `Smoke` (PROP_TYPE_SMOKE) — Save/load implemented
+
+A transient smoke cloud produced by an explosion or by a damaged object. Smoke records come from the fixed 20-entry `g_SmokeBuffer`; the associated prop points to its buffer entry and supplies the cloud's world position and rooms.
+
+```c
+struct SmokePart
+{
+    coord3d pos;    /* 0x00 - World position of this smoke sprite */
+    f32 size;       /* 0x0C - Sprite size; 0.0 means this part is inactive */
+    f32 rot;        /* 0x10 - Current sprite rotation in radians */
+    f32 deltarot;   /* 0x14 - Rotation added on each update */
+    f32 offset1;    /* 0x18 - First animated texture/noise offset */
+    f32 offset2;    /* 0x1C - Second animated texture/noise offset */
+    f32 alpha;      /* 0x20 - Current opacity; the part expires below 4.0 */
+    s16 count;      /* 0x24 - Number of updates since this part appeared */
+};
+
+struct Smoke
+{
+    PropRecord      *prop;                    /* 0x000 - Back-pointer to the live smoke prop */
+    s16              duration;                /* 0x004 - Number of smoke updates elapsed */
+    s16              smoke_type;              /* 0x006 - Index 0-10 into g_SmokeTypes */
+    struct SmokePart parts[SMOKE_PARTS_LEN];  /* 0x008 - Ten independently animated sprites */
+};
+```
+
+`smoke_type` selects the duration, spawn/dissolve rates, size, rotation rates, colour, and cloud propagation duration from `g_SmokeTypes`. Values 0-7 are selected by explosion definitions; 8 and 9 are short-lived effects produced by damaged objects; 10 is the large cloud created while the tank fires. `duration` normally runs from 0 through the selected type's configured lifetime. Each part's `size` is the active marker, while `alpha` and `count` control its fade.
+
+The serializer restores `duration`, `smoke_type`, and all ten `SmokePart` values. It deliberately preserves `Smoke::prop` rather than serializing its address: the live smoke prop and its fixed buffer slot already point to each other, and restoring an address is unnecessary and unsafe. With prop allocation still disabled, a smoke cloud which has completely expired since the save is skipped rather than recreated.
 
 ## Save/Load Guidelines
 
