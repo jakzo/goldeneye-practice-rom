@@ -103,6 +103,18 @@ void practice_tests_tick(void) {
     } else if (after_frames(2)) {
       emu_log("TEST_COMPLETE");
     }
+#elif TEST_CASE == STATE_DAM
+    if (after_frames(30)) {
+      emu_log("TRIGGER_SAVE");
+      save_game_state();
+      emu_log("SAVE_DONE");
+    } else if (after_frames(30)) {
+      emu_log("TRIGGER_LOAD");
+      load_game_state();
+      emu_log("LOAD_DONE");
+    } else if (after_frames(2)) {
+      emu_log("TEST_COMPLETE");
+    }
 #endif
   }
 }

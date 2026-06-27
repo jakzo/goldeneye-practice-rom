@@ -1,5 +1,7 @@
 ### Unreleased
 
+- Save state support for explosions and smoke
+
 # 0.3.0
 
 - Added a splits system

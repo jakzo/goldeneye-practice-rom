@@ -16,7 +16,7 @@ static void sram_stream_flush_impl(StateStream *stream) {
 static void sram_stream_write_bytes_impl(StateStream *stream, const void *src,
                                          u32 size) {
   SramStream *sram = (SramStream *)stream;
-  if (sram->current_page_addr + sram->page_offset + size > 0x8000) {
+  if (sram->current_page_addr + sram->page_offset + size > SRAM_SIZE_BYTES) {
     practiceLogDebug("SRAM write out of bounds: offset %d, size %d",
                      sram->current_page_addr + sram->page_offset, size);
     return;
@@ -48,7 +48,7 @@ static void sram_stream_write_bytes_impl(StateStream *stream, const void *src,
 static void sram_stream_read_bytes_impl(StateStream *stream, void *dst,
                                         u32 size) {
   SramStream *sram = (SramStream *)stream;
-  if (sram->current_page_addr + sram->page_offset + size > 0x8000) {
+  if (sram->current_page_addr + sram->page_offset + size > SRAM_SIZE_BYTES) {
     practiceLogDebug("SRAM read out of bounds: offset %d, size %d",
                      sram->current_page_addr + sram->page_offset, size);
     return;

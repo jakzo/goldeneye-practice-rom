@@ -212,10 +212,17 @@ static void add_to_log_queue(LogLevel level, const char *fmt, va_list args) {
 }
 
 void practiceLogDebug(const char *fmt, ...) {
+  char text[LOG_MESSAGE_MAX_LEN];
   va_list args;
+  s32 len;
+
   va_start(args, fmt);
-  emu_log(fmt, args);
+  len = practice_vsnprintf(text, fmt, args);
   va_end(args);
+
+  text[len] = '\n';
+  text[len + 1] = '\0';
+  emu_log_write(text);
 }
 
 void practiceLogInfo(const char *fmt, ...) {

@@ -64,7 +64,7 @@ void save_game_state(void) {
   g_HasSavedState = TRUE;
 
   sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, 0);
-  practiceLogInfo("State saved");
+  practiceLogInfo("State saved (%dKB)", (g_SavedHeader.size + 1023) / 1024);
 }
 
 void load_game_state(void) {
