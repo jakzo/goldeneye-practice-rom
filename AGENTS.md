@@ -106,4 +106,4 @@ The codebase heavily utilizes standard decompilation patterns to bridge C with y
     - See the settings in `.vscode/launch.json` for how to connect
     - Note that the IDO compiler is old and does NOT produce debug symbols so only function breakpoints (not lines) work
     - You will also not be able to see variables and must look at the memory address pointed to by pointer arguments in the CPU registers if debugging game (not practice) code
-    - However the newly added code in the src/practice files are compiled using GCC and DO have proper debug symbols so breaking and viewing variables there does work
+    - However some code like that in the src/practice files is compiled using GCC and DO have proper debug symbols so breaking and viewing variables there does work

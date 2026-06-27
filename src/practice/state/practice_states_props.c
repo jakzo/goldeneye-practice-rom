@@ -55,6 +55,28 @@ static void removePropAtIndex(s16 index) {
   // removing them from global variable lists?
 }
 
+static s16 get_prop_index_for_object(ObjectRecord *obj) {
+  s32 i;
+
+  if (obj == NULL) {
+    return -1;
+  }
+
+  // TODO: Is there a faster way to check than looping over all prop entries?
+  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+    PropRecord *prop = get_enabled_prop_by_index(i);
+    if (prop != NULL &&
+        // TODO: Can we remove this type check?
+        (prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_DOOR ||
+         prop->type == PROP_TYPE_WEAPON) &&
+        prop->obj == obj) {
+      return i;
+    }
+  }
+
+  return -1;
+}
+
 static void save_projectile(StateStream *stream, Projectile *proj) {
   write_u32(stream, proj->flags);
   write_bytes(stream, &proj->speed, sizeof(coord3d));
@@ -89,11 +111,12 @@ static void save_projectile(StateStream *stream, Projectile *proj) {
   write_u32(stream, proj->unkD8);
   write_u32(stream, proj->unkDC);
   write_u32(stream, proj->unkE0);
-  write_u16(stream, proj->obj ? get_prop_index(proj->obj->prop) : -1);
+  write_u16(stream, get_prop_index_for_object(proj->obj));
   write_u32(stream, proj->unkE8);
 }
 
-static void load_projectile(StateStream *stream, Projectile *proj) {
+static void load_projectile(StateStream *stream, Projectile *proj,
+                            s16 *ownerprop_idx, s16 *obj_idx) {
   proj->flags = read_u32(stream);
   read_bytes(stream, &proj->speed, sizeof(coord3d));
   read_bytes(stream, &proj->unk10, sizeof(coord3d));
@@ -103,10 +126,8 @@ static void load_projectile(StateStream *stream, Projectile *proj) {
   proj->unk64 = read_f32(stream);
   read_bytes(stream, proj->unk68, sizeof(proj->unk68));
   read_bytes(stream, proj->unk78, sizeof(proj->unk78));
-  {
-    s16 ownerprop_idx = (s16)read_u16(stream);
-    proj->ownerprop = (PropRecord *)(s32)ownerprop_idx;
-  }
+  *ownerprop_idx = (s16)read_u16(stream);
+  proj->ownerprop = NULL;
   proj->unk8C = read_f32(stream);
   proj->unk90 = read_u32(stream);
   proj->unk94 = read_f32(stream);
@@ -132,10 +153,8 @@ static void load_projectile(StateStream *stream, Projectile *proj) {
   proj->unkD8 = read_u32(stream);
   proj->unkDC = read_u32(stream);
   proj->unkE0 = read_u32(stream);
-  {
-    s16 obj_idx = (s16)read_u16(stream);
-    proj->obj = (ObjectRecord *)(s32)obj_idx;
-  }
+  *obj_idx = (s16)read_u16(stream);
+  proj->obj = NULL;
   proj->unkE8 = read_u32(stream);
 }
 
@@ -234,20 +253,21 @@ static bool load_object_base(StateStream *stream, ObjectRecord *obj,
   embedmentIdx = (s16)read_u16(stream);
   switchStates = read_u32(stream);
 
-  // Restore projectile pointer
-  if (projectileIdx != -1 && prop != NULL) {
+  // Projectile and embedment occupy the same union slot. Restore only the
+  // member selected by the runtime flags; writing both would overwrite the
+  // first pointer with the second.
+  if (prop != NULL && (obj->runtime_bitflags & RUNTIMEBITFLAG_DEPOSIT) &&
+      projectileIdx >= 0 && projectileIdx < PROJECTILES_ARR_MAX) {
     obj->projectile = &g_Projectiles[projectileIdx];
     obj->projectile->obj = obj;
-    obj->projectile->ownerprop = prop;
-  } else {
-    obj->projectile = NULL;
-  }
-
-  // Restore embedment pointer
-  if (embedmentIdx != -1 && prop != NULL) {
+  } else if (prop != NULL &&
+             (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED) &&
+             embedmentIdx >= 0 && embedmentIdx < EMBEDMENT_ARR_MAX) {
     obj->embedment = &g_Embedments[embedmentIdx];
   } else {
-    obj->embedment = NULL;
+    obj->projectile = NULL;
+    obj->runtime_bitflags &=
+        ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
   }
 
   if (prop != NULL && obj->model != NULL && obj->model->obj != NULL) {
@@ -437,12 +457,18 @@ static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
   }
   case PROPDEF_COLLECTABLE: {
     WeaponObjRecord *wpn = (WeaponObjRecord *)obj;
+    PropRecord *dualProp;
     wpn->weaponnum = read_u8(stream);
     wpn->LinkedWeaponType = read_u8(stream);
     wpn->timer = read_u16(stream);
     s16 dualIdx = read_u16(stream);
-    wpn->dualweapon = (dualIdx != -1)
-                          ? (WeaponObjRecord *)get_prop_by_index(dualIdx)->obj
+    dualProp = get_enabled_prop_by_index(dualIdx);
+    wpn->dualweapon = dualProp != NULL &&
+                              (dualProp->type == PROP_TYPE_OBJ ||
+                               dualProp->type == PROP_TYPE_WEAPON) &&
+                              dualProp->obj != NULL &&
+                              dualProp->obj->type == PROPDEF_COLLECTABLE
+                          ? dualProp->weapon
                           : NULL;
     break;
   }
@@ -596,7 +622,7 @@ static void skip_prop_data(StateStream *stream, u8 type) {
     DoorRecord temp_door;
     load_object_base(stream, &temp_obj, NULL);
     load_door_record(stream, &temp_door);
-  } else if (type == PROP_TYPE_OBJ) {
+  } else if (type == PROP_TYPE_OBJ || type == PROP_TYPE_WEAPON) {
     TempObjectRecord temp_obj;
     if (load_object_base(stream, &temp_obj.base, NULL)) {
       load_object_subtype(stream, &temp_obj.base);
@@ -718,7 +744,8 @@ bool save_props_state(StateStream *stream) {
       break;
     }
 
-    case PROP_TYPE_OBJ: {
+    case PROP_TYPE_OBJ:
+    case PROP_TYPE_WEAPON: {
       ObjectRecord *obj = prop->obj;
       if (obj != NULL) {
         save_object_base(stream, obj);
@@ -931,7 +958,6 @@ bool save_props_state(StateStream *stream) {
 
     case PROP_TYPE_NUL:
     case PROP_TYPE_CHR:
-    case PROP_TYPE_WEAPON:
     case PROP_TYPE_PLAYER:
     case PROP_TYPE_VIEWER:
     case PROP_TYPE_EXPLOSION:
@@ -964,6 +990,8 @@ bool load_props_state(StateStream *stream) {
   u16 nextIndexToRemove = 0;
   s32 c;
   u32 pi;
+  s16 projectileOwnerPropIndices[PROJECTILES_ARR_MAX];
+  s16 projectileObjPropIndices[PROJECTILES_ARR_MAX];
 
   u32 totalPropsSize = read_u32(stream);
   u16 recordCount = read_u16(stream);
@@ -975,6 +1003,8 @@ bool load_props_state(StateStream *stream) {
 
   /* Clear and restore active projectiles. */
   for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
+    projectileOwnerPropIndices[pi] = -1;
+    projectileObjPropIndices[pi] = -1;
     if (!(g_Projectiles[pi].flags & PROJECTILEFLAG_FREE)) {
       projectileFree(&g_Projectiles[pi]);
     }
@@ -984,7 +1014,9 @@ bool load_props_state(StateStream *stream) {
     u16 activeProjCount = read_u16(stream);
     for (pi = 0; pi < activeProjCount; pi++) {
       u16 index = read_u16(stream);
-      load_projectile(stream, &g_Projectiles[index]);
+      load_projectile(stream, &g_Projectiles[index],
+                      &projectileOwnerPropIndices[index],
+                      &projectileObjPropIndices[index]);
     }
   }
 
@@ -1074,9 +1106,12 @@ bool load_props_state(StateStream *stream) {
         }
       }
       break;
+    case PROP_TYPE_WEAPON:
+      supportedType =
+          prop->weapon != NULL && prop->weapon->type == PROPDEF_COLLECTABLE;
+      break;
     case PROP_TYPE_NUL:
     case PROP_TYPE_CHR:
-    case PROP_TYPE_WEAPON:
     case PROP_TYPE_PLAYER:
     case PROP_TYPE_VIEWER:
     case PROP_TYPE_EXPLOSION:
@@ -1159,7 +1194,8 @@ bool load_props_state(StateStream *stream) {
       break;
     }
 
-    case PROP_TYPE_OBJ: {
+    case PROP_TYPE_OBJ:
+    case PROP_TYPE_WEAPON: {
       ObjectRecord *obj = prop->obj;
       if (obj == NULL) {
         // Just skip the rest
@@ -1196,7 +1232,6 @@ bool load_props_state(StateStream *stream) {
 
     case PROP_TYPE_NUL:
     case PROP_TYPE_CHR:
-    case PROP_TYPE_WEAPON:
     case PROP_TYPE_PLAYER:
     case PROP_TYPE_VIEWER:
     case PROP_TYPE_EXPLOSION:
@@ -1204,19 +1239,28 @@ bool load_props_state(StateStream *stream) {
     default:
       break;
     }
+  }
 
-    /* Resolve projectile ownerprop and obj pointers to real props/objects. */
-    for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
-      Projectile *proj = &g_Projectiles[pi];
-      if (proj->flags & PROJECTILEFLAG_FREE)
-        continue;
+  /* Resolve projectile references only after all saved props are processed. */
+  for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
+    Projectile *proj = &g_Projectiles[pi];
+    PropRecord *objProp;
 
-      if ((s32)proj->ownerprop == savedPropIndex) {
-        proj->ownerprop = prop;
-      }
-      if ((s32)proj->obj == savedPropIndex) {
-        proj->obj = prop->obj;
-      }
+    if (proj->flags & PROJECTILEFLAG_FREE) {
+      continue;
+    }
+
+    proj->ownerprop = get_enabled_prop_by_index(projectileOwnerPropIndices[pi]);
+    objProp = get_enabled_prop_by_index(projectileObjPropIndices[pi]);
+
+    if (objProp != NULL &&
+        (objProp->type == PROP_TYPE_OBJ || objProp->type == PROP_TYPE_DOOR ||
+         objProp->type == PROP_TYPE_WEAPON) &&
+        objProp->obj != NULL) {
+      proj->obj = objProp->obj;
+    } else {
+      proj->obj = NULL;
+      projectileFree(proj);
     }
   }
 

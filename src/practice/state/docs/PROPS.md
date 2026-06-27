@@ -66,10 +66,10 @@ typedef struct PropRecord
 Each `PropRecord` defines its entity type in its `type` field:
 
 - `PROP_TYPE_NUL` (0): Null / unused.
-- `PROP_TYPE_OBJ` (1): Interactive game objects (crates, armor, computers, etc. - uses `obj`).
-- `PROP_TYPE_DOOR` (2): Doors (uses `door`).
+- `PROP_TYPE_OBJ` (1): Interactive game objects (crates, armor, computers, etc. - uses `obj`). Save/load implemented.
+- `PROP_TYPE_DOOR` (2): Doors (uses `door`). Save/load implemented.
 - `PROP_TYPE_CHR` (3): Characters/NPCs (uses `chr`).
-- `PROP_TYPE_WEAPON` (4): Weapon pickups (uses `weapon`).
+- `PROP_TYPE_WEAPON` (4): Weapon pickups, thrown weapons, and mines in the world (uses `weapon`). Save/load implemented.
 - `PROP_TYPE_PLAYER` (5): Player (uses `chr`).
 - `PROP_TYPE_VIEWER` (6): Multi-player/cutscene viewer (uses `chr`).
 - `PROP_TYPE_EXPLOSION` (7): Explosions (uses `explosion`).
@@ -238,20 +238,34 @@ typedef struct DoorRecord
 
 ---
 
-### 3. `WeaponObjRecord` (PROP_TYPE_WEAPON)
+### 3. `WeaponObjRecord` (PROP_TYPE_WEAPON) — Save/load implemented
 
-A weapon or ammunition container resting on the ground, collectable by Bond or NPCs. Extends `ObjectRecord`.
+A weapon or ammunition container resting on the ground, held by a character, or active as a thrown weapon or mine. Extends `ObjectRecord`. Top-level `PROP_TYPE_WEAPON` records use `PROPDEF_COLLECTABLE` as their object-definition type.
 
 ```c
 typedef struct WeaponObjRecord
 {
     inherits                ObjectRecord;         /* 0x00 - Inner ObjectRecord base structure */
-    s8                      weaponnum;            /* 0x80 - Item ID index (ITEM_IDS enum) */
-    s8                      LinkedWeaponType;     /* 0x81 - Paired weapon type */
-    s16                     timer;                /* 0x82 - Transient/disappearing timer value */
-    struct WeaponObjRecord *dualweapon;           /* 0x84 - Companion weapon for dual pickups */
+    s8                      weaponnum;            /* 0x80 - ITEM_IDS value identifying the weapon/item.
+                                                   * Values range from ITEM_UNARMED (0) through the
+                                                   * weapon, gadget, key-item, and token IDs. */
+    s8                      LinkedWeaponType;     /* 0x81 - ITEM_IDS value for the other weapon in a
+                                                   * dual-wield pair. The game uses this when two
+                                                   * weapon objects are linked so collecting them
+                                                   * grants/records a dual-wield combination. A
+                                                   * negative value means no linked weapon type. */
+    s16                     timer;                /* 0x82 - Runtime countdown/state for thrown weapons.
+                                                   * Grenades and timed mines count down to detonation;
+                                                   * remote/proximity mines use 1 for armed, 0 to
+                                                   * detonate, and -1 after detonation is requested. */
+    struct WeaponObjRecord *dualweapon;           /* 0x84 - The other live weapon object in that
+                                                   * dual-wield pair, or NULL.
+                                                   * Serialized as its PropRecord array index and
+                                                   * resolved back to the live WeaponObjRecord. */
 } WeaponObjRecord;
 ```
+
+The serializer also restores the inherited `ObjectRecord`, including transform, damage, model-switch visibility, projectile/embedment indices, and runtime flags. This preserves dropped or thrown weapon position and motion. `dualweapon` is not saved as an address because the address can become stale; it is converted to a stable prop index.
 
 ---
 
@@ -421,3 +435,7 @@ typedef struct ChrRecord
     - Active sound state nodes (`ALSoundState *`) are dynamically allocated. On reload, these pointer members must be set to `NULL` to prevent crashes when the sound engine tries to modify a dead address.
 3. **List Integrity**:
     - Care must be taken not to alter list linkage (`prev`/`next`) directly unless allocating/deallocating a prop, as list order and pointers are crucial to the engine’s update loop.
+4. **Projectile/Embedment Union Integrity**:
+    - `ObjectRecord::projectile` and `ObjectRecord::embedment` share one union slot. Restore only `projectile` for `RUNTIMEBITFLAG_DEPOSIT`, only `embedment` for `RUNTIMEBITFLAG_EMBEDDED`, or clear the slot and both flags when the saved index is invalid.
+5. **Deferred Projectile Reference Resolution**:
+    - Read saved `Projectile::ownerprop` and `Projectile::obj` indices into separate temporary arrays rather than casting them to pointers. Resolve them only after all prop records have been processed. If the object prop was collected or removed and is no longer enabled, mark the projectile free instead of retaining an invalid reference.
