@@ -682,6 +682,7 @@ static void skip_prop_data(StateStream *stream, u8 type) {
   } else if (type == PROP_TYPE_CHR) {
     ChrRecord temp_chr;
     temp_chr.hidden = 0;
+    temp_chr.model = NULL;
     load_chr_record(stream, &temp_chr);
   }
 }
@@ -1210,9 +1211,9 @@ bool load_props_state(StateStream *stream) {
       supportedType = TRUE;
       break;
     case PROP_TYPE_CHR:
-      // The CHR-specific payload is supported, but restoring the base
-      // PropRecord would move the character without synchronizing its model,
-      // movement, collision, stand tile, and room state.
+      // The CHR module restores the spatial subset of the base PropRecord
+      // together with its model, collision, and movement history. Other
+      // common PropRecord fields remain unchanged for now.
       supportedType = FALSE;
       break;
     case PROP_TYPE_NUL:
@@ -1370,6 +1371,8 @@ bool load_props_state(StateStream *stream) {
       if (prop->chr == NULL) {
         skip_prop_data(stream, PROP_TYPE_CHR);
       } else {
+        load_chr_prop_spatial_state(prop, &savedPropPos,
+                                    savedPropStanOffset, savedPropRooms);
         load_chr_record(stream, prop->chr);
       }
       break;

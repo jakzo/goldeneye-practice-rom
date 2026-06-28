@@ -49,14 +49,19 @@ typedef struct PropRecord
         struct Scorch          *scorch;
         void                   *voidp;
     };                       /* 0x04 - Union pointing to the underlying entity type */
-    coord3d            pos;  /* 0x08 - 3D world position coordinates */
-    StandTile         *stan; /* 0x14 - Pointer to the StandTile the prop is resting on */
+    coord3d            pos;  /* 0x08 - 3D world position in level units.
+                              *        Restored for CHRs with their movement/model state. */
+    StandTile         *stan; /* 0x14 - StandTile containing the prop, or NULL.
+                              *        Serialized as a same-level byte offset, never an address. */
     f32                zDepth;                          /* 0x18 - Render depth sorting value */
     struct PropRecord *parent;                          /* 0x1c - Parent pointer in attachment hierarchy */
     struct PropRecord *child;                           /* 0x20 - Child pointer in attachment hierarchy */
     struct PropRecord *prev;                            /* 0x24 - Previous prop in active list */
     struct PropRecord *next;                            /* 0x28 - Next prop in active list */
-    u8                 rooms[PROPRECORD_STAN_ROOM_LEN]; /* 0x2c - Rooms occupied by this prop (0xFF terminated) */
+    u8                 rooms[PROPRECORD_STAN_ROOM_LEN]; /* 0x2c - Up to three room IDs (0-254), followed
+                                                         *        by 0xFF; all four bytes are serialized.
+                                                         *        CHRs are deregistered before replacement
+                                                         *        and registered in the restored rooms. */
     s32                unk30;                           /* 0x30 - Unused/Unknown. */
 } PropRecord;
 ```
@@ -291,7 +296,9 @@ typedef struct ChrRecord
     ACT_TYPE    actiontype : 8;                   /* 0x0007 - Active behavior action state (ACT_TYPE) */
     s8          sleep;                            /* 0x0008 - Signed tick delay before the next AI/action
                                                    *          update; normally 0-127, decremented each tick */
-    s8          invalidmove;                      /* 0x0009 - Collision/unreachable path flag */
+    s8          invalidmove;                      /* 0x0009 - Movement failure flag: 0 means the last
+                                                   *          attempted move was valid; 1 makes travel
+                                                   *          actions reconsider or stop their route */
     s8          numclosearghs;                    /* 0x000A - AI-readable near-miss/close-hit counter;
                                                    *          initialized to 0 (exact increment path TODO) */
     s8          numarghs;                         /* 0x000B - Confirmed damage-reaction counter;
@@ -343,7 +350,10 @@ typedef struct ChrRecord
                                                    */
     PropRecord *prop;                             /* 0x0018 - Pointer to container PropRecord */
     Model      *model;                            /* 0x001C - Pointer to dynamic Model geometry instance */
-    void       *field_20;                         /* 0x0020 - Pathfinding navigation buffer */
+    void       *field_20;                         /* 0x0020 - Head of a dynamically allocated skeletal
+                                                   *          joint/matrix render list. Never serialize
+                                                   *          this process-local address; reconstruct or
+                                                   *          clear it with model/allocation support. */
     f32         chrwidth;                         /* 0x0024 - Width of character collision cylinder */
     f32         chrheight;                        /* 0x0028 - Height of character collision cylinder */
     union {
@@ -377,13 +387,20 @@ typedef struct ChrRecord
         struct act_bytes        act_bytes;        /* 0x002C - Raw buffer representation */
         struct act_ubytes       act_ubytes;       /* 0x002C - Unsigned raw buffer representation */
     };
-    f32         sumground;                        /* 0x00A4 */
-    f32         manground;                        /* 0x00A8 */
-    f32         ground;                           /* 0x00AC - Current height above level ground floor */
-    coord3d     fallspeed;                        /* 0x00B0 - 3D velocity vectors (used for gravity/knocks) */
-    coord3d     prevpos;                          /* 0x00BC - Position in previous update frame */
-    s32         lastwalk60;                       /* 0x00C8 */
-    s32         lastmoveok60;                     /* 0x00CC */
+    f32         sumground;                        /* 0x00A4 - Ground-height accumulation value,
+                                                   *          initialized to 0.0; exact smoothing use TODO */
+    f32         manground;                        /* 0x00A8 - Companion/manual ground-height value,
+                                                   *          initialized to 0.0; exact use TODO */
+    f32         ground;                           /* 0x00AC - World Y coordinate of the supporting floor;
+                                                   *          initialized/recomputed from model collision */
+    coord3d     fallspeed;                        /* 0x00B0 - X/Y/Z falling or impact velocity in level
+                                                   *          units; each component initializes to 0.0 */
+    coord3d     prevpos;                          /* 0x00BC - Model-root world position before the previous
+                                                   *          animation/movement update */
+    s32         lastwalk60;                       /* 0x00C8 - Absolute g_GlobalTimer tick of the last travel
+                                                   *          update; 0 means no recorded walk */
+    s32         lastmoveok60;                     /* 0x00CC - Absolute g_GlobalTimer tick of the last valid
+                                                   *          move, used to detect a stuck route */
     f32         visionrange;                      /* 0x00D0 - Sight distance parameter in world units */
     s32         lastseetarget60;                  /* 0x00D4 - Absolute g_GlobalTimer tick when the
                                                    *          target was last seen; 0 means never */
@@ -430,7 +447,9 @@ typedef struct ChrRecord
                                                    *          CHR_FREE (-1) means no pending event */
     s16         chrseedie;                        /* 0x011A - ID of character seen dying;
                                                    *          CHR_FREE (-1) means no pending event */
-    rect4f      collision_bounds;                 /* 0x011C - Bounding box boundaries (4 coordinate pairs) */
+    rect4f      collision_bounds;                 /* 0x011C - Four X/Z points forming the CHR collision
+                                                   *          diamond around prop->pos, normally at
+                                                   *          chrwidth radius */
     f32         shotbondsum;                      /* 0x013C - Fractional accumulated guard-fire damage
                                                    *          against Bond; normally 0.0 <= value < 1.0 */
     f32         aimuplshoulder;                   /* 0x0140 - Arms rotation angles */

@@ -1,12 +1,17 @@
 #include "practice_states_chr.h"
 #include "practice_states_utils.h"
 #include "chrai.h"
+#include "objecthandler.h"
 #include <bondconstants.h>
 
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 
 void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   s32 ailist_id = -1;
+  bool has_model_transform =
+      chr->model != NULL && chr->model->obj != NULL &&
+      chr->model->obj->RootNode != NULL &&
+      (chr->model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
 
   write_u8(stream, (u8)chr->accuracyrating);
   write_u8(stream, (u8)chr->speedrating);
@@ -47,10 +52,32 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_u16(stream, chr->aioffset);
   write_u16(stream, (u16)chr->aireturnlist);
   write_u8(stream, (u8)chr->sleep);
+
+  write_u8(stream, (u8)chr->invalidmove);
+  write_f32(stream, chr->sumground);
+  write_f32(stream, chr->manground);
+  write_f32(stream, chr->ground);
+  write_bytes(stream, &chr->fallspeed, sizeof(coord3d));
+  write_bytes(stream, &chr->prevpos, sizeof(coord3d));
+  write_u32(stream, chr->lastwalk60);
+  write_u32(stream, chr->lastmoveok60);
+  write_bytes(stream, &chr->collision_bounds, sizeof(rect4f));
+
+  write_u8(stream, has_model_transform);
+  if (has_model_transform) {
+    coord3d model_offset;
+
+    getsuboffset(chr->model, &model_offset);
+    write_bytes(stream, &model_offset, sizeof(coord3d));
+    write_f32(stream, getsubroty(chr->model));
+  }
 }
 
 void load_chr_record(StateStream *stream, ChrRecord *chr) {
   s32 ailist_id;
+  bool has_model_transform;
+  coord3d model_offset;
+  f32 model_heading;
 
   chr->accuracyrating = (s8)read_u8(stream);
   chr->speedrating = (s8)read_u8(stream);
@@ -97,4 +124,44 @@ void load_chr_record(StateStream *stream, ChrRecord *chr) {
     chr->aioffset = 0;
     chr->aireturnlist = -1;
   }
+
+  chr->invalidmove = (s8)read_u8(stream);
+  chr->sumground = read_f32(stream);
+  chr->manground = read_f32(stream);
+  chr->ground = read_f32(stream);
+  read_bytes(stream, &chr->fallspeed, sizeof(coord3d));
+  read_bytes(stream, &chr->prevpos, sizeof(coord3d));
+  chr->lastwalk60 = read_u32(stream);
+  chr->lastmoveok60 = read_u32(stream);
+  read_bytes(stream, &chr->collision_bounds, sizeof(rect4f));
+
+  has_model_transform = read_u8(stream);
+  if (has_model_transform) {
+    read_bytes(stream, &model_offset, sizeof(coord3d));
+    model_heading = read_f32(stream);
+
+    // TODO: Loading currently assumes this active ChrRecord still owns the
+    // same live Model. Once loading can remove or create CHRs, allocate and
+    // connect the saved model before applying its root transform.
+    if (chr->model != NULL && chr->model->obj != NULL &&
+        chr->model->obj->RootNode != NULL) {
+      setsuboffset(chr->model, &model_offset);
+      setsubroty(chr->model, model_heading);
+    }
+  }
+}
+
+void load_chr_prop_spatial_state(PropRecord *prop, const coord3d *pos,
+                                 s32 stan_offset, const u8 rooms[4]) {
+  // TODO: This currently relies on the saved CHR still having the same active
+  // PropRecord. Once loading can remove or create props, call this only after
+  // allocating the saved prop and establishing its ChrRecord back-pointer.
+  chrpropDeregisterRooms(prop);
+  prop->pos = *pos;
+  prop->stan = get_tile_by_offset(stan_offset);
+  prop->rooms[0] = rooms[0];
+  prop->rooms[1] = rooms[1];
+  prop->rooms[2] = rooms[2];
+  prop->rooms[3] = rooms[3];
+  chrpropRegisterRooms(prop);
 }

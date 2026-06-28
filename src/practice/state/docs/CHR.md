@@ -153,21 +153,82 @@ action processing and are normally capped at 127; it is decremented by
 field also spaces some animation/action updates, so it is restored with the
 interpreter state rather than independently.
 
+The sixth CHR serialization slice restores spatial and movement state as one
+unit:
+
+```c
+PropRecord::pos;              /* Current world position. */
+PropRecord::stan;             /* Current StandTile, encoded as a byte offset. */
+PropRecord::rooms[4];         /* 0xFF-terminated occupied-room IDs. */
+ChrRecord::invalidmove;       /* Whether the most recent move failed. */
+ChrRecord::sumground;         /* Ground-height accumulator. */
+ChrRecord::manground;         /* Companion/manual ground-height value. */
+ChrRecord::ground;            /* Supporting floor's world Y coordinate. */
+ChrRecord::fallspeed;         /* Current X/Y/Z fall or impact velocity. */
+ChrRecord::prevpos;           /* Previous model-root world position. */
+ChrRecord::lastwalk60;        /* Last travel-update g_GlobalTimer tick. */
+ChrRecord::lastmoveok60;      /* Last successful-move g_GlobalTimer tick. */
+ChrRecord::collision_bounds;  /* Four-point X/Z collision diamond. */
+Model root offset;            /* Current rendered model world position. */
+Model root heading;           /* Current Y-axis heading in radians. */
+```
+
+`PropRecord::pos` and the model root offset are both three finite floating-point
+world coordinates. They normally agree after a character tick, but both are
+saved because animation processing owns the model root and copies it into the
+prop. The root heading is an angle in radians, normally normalized to
+`0 <= heading < 2*pi`. Only these root transform values are included; live
+animation frames, interpolation, and secondary root-node working values remain
+part of the later action/model-animation group.
+
+`stan` is serialized as a byte offset from `standTileStart`; `-1` represents
+`NULL`. This is stable under the existing same-level restriction. `rooms`
+contains up to three room IDs in the range 0-254 followed by `0xff`. Loading
+first deregisters the active prop from its old rooms, replaces all four room
+bytes and its stand tile, then registers it in the restored rooms.
+
+`invalidmove` is set to `0` when travel starts or succeeds and `1` on a failed
+movement attempt. Patrol, go-position, and run-position actions use it to
+decide whether to stop or reconsider a route.
+
+`ground` is the world Y coordinate of the supporting floor, not a distance
+above it. `fallspeed` is the character's three-component falling or
+impact-motion velocity and initializes to `(0, 0, 0)`. `sumground` and
+`manground` also initialize to `0.0`; their exact ground-smoothing roles are
+not exposed by the currently decompiled C, so naming their individual
+semantics remains TODO. They are restored with `ground` because all three form
+the contiguous ground-motion state.
+
+`prevpos` records the model root before the previous movement/animation tick.
+Travel actions compare it with the current prop position to detect crossing a
+destination. `lastwalk60` and `lastmoveok60` are absolute `g_GlobalTimer`
+ticks: the former records recent travel processing, while the latter is
+refreshed after a valid move and is tested to detect a stuck route. Zero is the
+initial/no-walk value for `lastwalk60`; `lastmoveok60` initializes to the
+current global timer.
+
+`collision_bounds` contains four X/Z coordinate pairs. For an ordinary CHR,
+they form a diamond centered on `prop->pos` with points at plus/minus
+`chrwidth` on each axis. Saving the live values also preserves any
+action-specific bound update until the engine calculates them again.
+
 The payload is implemented in `practice_states_chr.c` and dispatched by
-`practice_states_props.c`. The common `PropRecord` payload is deliberately not
-restored for CHRs yet: changing its position, stand tile, or rooms without also
-synchronizing the character model, collision, and movement history is unsafe.
+`practice_states_props.c`. For CHRs, only the spatial subset of the common
+`PropRecord` payload (`pos`, `stan`, and `rooms`) is restored. The remaining
+common fields stay live until their dependencies are implemented.
 
 Do not include the following in that slice:
 
-- `damage`, `maxdamage`, action data, `actiontype`, movement fields, held
-  weapons, model state, or flags. Those values have coupled state which must be
+- `damage`, `maxdamage`, action data, `actiontype`, held weapons, live model
+  animation state, or flags. Those values have coupled state which must be
   investigated and restored together.
 - The complete `hidden` and `chrflags` fields. They contain action-coupled and
   destructive bits which must be restored with character action, model,
   movement, damage, and allocation state.
-- Prop position. A CHR position change must keep the prop, character movement
-  history, stand tile, rooms, collision bounds, and model transform coherent.
+- `field_20`. Despite its earlier tentative pathfinding label, its consumers
+  identify it as a dynamically allocated skeletal joint/matrix render list.
+  Its address is process-local and must be reconstructed or cleared with
+  allocation/model support.
 
 TODO: CHR loading currently assumes the saved character still has the same
 enabled `PropRecord`, `ChrRecord`, and `Model`. Preserve their existing

@@ -11,10 +11,10 @@ Above all, make sure you investigate thoroughly to fully understand where pieces
 ## Current Goal
 
 Currently we want to complete `PROP_TYPE_CHR`, the final prop type. The first
-scalar AI field set is implemented; its supporting structures and the
-remaining restore surface are documented in `CHR.md`. Do not broaden the
-implementation without investigating and documenting the additional state
-coupling.
+six conservative field sets, including spatial and movement state, are
+implemented; supporting structures and the remaining restore surface are
+documented in `CHR.md`. Do not broaden the implementation without
+investigating and documenting the additional state coupling.
 
 ### Next Goals
 
@@ -27,14 +27,48 @@ After the current goal we will need to handle:
 
 ## Prompt
 
-Read through this entire document and implement a prop type into the save/load system. Make sure to:
+Read through this entire document and implement the first set of props in the "Remaining Groups". These are intended to be a group of fields that are easy to restore since they don't rely on other fields. They are flexible so if one field is too hard or the grouping doesn't make sense you can edit the groupings. Make sure to:
 
-- Choose a prop/object type to implement
-- Prioritize props that are simple (ie. not pointers or things that need to be kept in sync with other things)
 - Document their purpose, possible values, etc. in the docs files the same way as the existing fields using the same format, and move them out of the TODO section
+- Remove them from the remaining groups section once implemented
 - Tell me what to do in the game to test that it works and doesn't crash/hang
 - No need to update the changelog or SAVE_STATE_VERSION
 - Right now the code only restores state to existing active props, but eventually once the code supports all types it will replace all props with the restored ones, so if you assume things based on this (like a pointer to a prop being correct already since we only restore to active props) then document it with a TODO comment explaining that it must be updated once that assumption is incorrect and we could remove existing props or add a new prop when loading state
+
+## Remaining Groups
+
+Equipment and attachments
+weapons_held, handle_positiondata_hat, prop parent/child links, and corresponding weapon ownership.
+Serialize prop indices and resolve after all props load. Restoring only one side would leave broken attachment relationships.
+
+Action and model-animation state
+actiontype, the action union, and the live model animation identity, frame, speed, looping, interpolation, and transform state.
+Implement action-specific payloads in batches:
+Simple: stand, sidestep, jumpout, run-position, surprised.
+Navigation: patrol and go-position.
+Combat: attack, attack-walk, attack-roll, grenade.
+Scripted/death/player actions last.
+
+Combat aiming state
+firecount, aimendcount, eight shoulder/back aim values, fireslot, and unk180 beam caches.
+These depend on equipped weapons, attack action, and model pose, so they should follow equipment and combat-action support.
+
+Damage and lifecycle
+damage, maxdamage, fadealpha, flinchcnt, chrflags, remaining hidden bits, and die/dead/argh actions.
+Whole chrflags and hidden restoration belongs here. Their bits can trigger initialization, firing, movement, freezing, item drops, or character removal.
+
+Character/model configuration
+headnum, bodynum, chrwidth, and chrheight.
+Head/body IDs must agree with the allocated model. Width can change during some death actions, so dimensions should be restored with model/lifecycle state.
+
+Audio and transient runtime allocations
+ptr_SEbuffer3, ptr_SEbuffer4, field_178, and field_20.
+The sound pointers and field_20's dynamically allocated skeletal joint/matrix
+list should be cleared or reconstructed, not serialized as addresses.
+
+Allocation and recreation
+prop, model, missing CHR creation, and removal of characters absent from the save.
+Preserve existing back-pointers for now. Implement allocation only after every payload needed to initialize a new CHR is supported.
 
 ## Key Learnings
 
