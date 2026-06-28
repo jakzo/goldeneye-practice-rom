@@ -1,7 +1,7 @@
 # Character Prop State
 
-This document covers `PROP_TYPE_CHR`, the final prop type without save/load
-support. `ChrRecord` owns a character's AI, combat, movement, damage, and
+This document covers the incremental save/load support for `PROP_TYPE_CHR`,
+the final prop type. `ChrRecord` owns a character's AI, combat, movement, damage, and
 render-facing state. Its top-level layout is documented in
 [`PROPS.md`](PROPS.md#4-chrrecord-prop_type_chr); this file documents the
 supporting structs stored in or referenced by that record.
@@ -194,9 +194,9 @@ Model root heading;           /* Current Y-axis heading in radians. */
 world coordinates. They normally agree after a character tick, but both are
 saved because animation processing owns the model root and copies it into the
 prop. The root heading is an angle in radians, normally normalized to
-`0 <= heading < 2*pi`. Only these root transform values are included; live
-animation frames, interpolation, and secondary root-node working values remain
-part of the later action/model-animation group.
+`0 <= heading < 2*pi`. The simple-action slice described below additionally
+restores the complete pointer-free root working record while its action is
+supported.
 
 `stan` is serialized as a byte offset from `standTileStart`; `-1` represents
 `NULL`. This is stable under the existing same-level restriction. `rooms`
@@ -294,16 +294,66 @@ Detaching clears ownership and the attachment node, then activates and enables
 the prop in the world. Together these fields make rendering, dropping, firing,
 and hat-hit handling agree with the CHR pointer fields.
 
+The eighth CHR serialization slice restores the first action batch and its
+live model-animation controller:
+
+```c
+ChrRecord::actiontype;       /* ACT_STAND, SIDESTEP, JUMPOUT, RUNPOS, SURPRISED. */
+ChrRecord::act_stand;        /* Active stand-facing and wall-check fields. */
+ChrRecord::act_runpos;       /* Destination, arrival distance, ETA, turn speed. */
+Model::anim, anim2;          /* Animation-table identities, encoded as offsets. */
+Model primary/merge frames;  /* Current frame pairs and fractional positions. */
+Model speed state;           /* Current/target/old speed and interpolation clocks. */
+Model loop state;            /* Loop enable, loop frame, and loop merge duration. */
+Model play-speed state;      /* Current/target play rate and interpolation clocks. */
+Model root RW data;          /* Pointer-free animation translation/heading state. */
+```
+
+Only those five action discriminators are applied. Saving any other action
+writes no action/model payload, and loading it leaves the destination action
+live; its union cannot safely be interpreted until the corresponding batch is
+implemented.
+
+`Model::anim` and `anim2` point into the permanent `ptr_animation_table`.
+They are serialized as signed byte offsets from `ptr_animation_table->data`;
+`-1` represents `NULL`. This reconstructs valid pointers for both an existing
+model and a model newly allocated by the gated replacement path. No saved
+address or existing-model identity is reused.
+
+The primary frame is represented by `framea`, `frameb`, `unk28` (the current
+fractional frame), and `unk2c` (the interpolation fraction). The merge/previous
+animation uses the corresponding `frame2a`, `frame2b`, `unk58`, and `unk5c`
+fields. Frame values are signed 16-bit animation-frame indices and must remain
+within the selected animation. `endframe` and `unk6c` are end-frame overrides;
+`-1.0` means use the animation's natural final frame.
+
+`speed` is the current frame advance per animation tick. `newspeed`,
+`oldspeed`, `timespeed`, and `elapsespeed` describe an in-progress speed
+transition. The equivalent secondary-animation values, loop controls,
+merge weights/clocks, `playspeed`, and play-speed transition fields are
+restored together because advancing only part of this controller can select
+different frames after loading. Cached decoded-frame slots are not serialized;
+matrix calculation regenerates them from the restored animation and frame
+indices. `animflipfunc` is cleared rather than treated as data because it is a
+function pointer and no GoldenEye caller installs one for these CHR actions.
+
+Character models use a `MODELNODE_OPCODE_HEADER` root whose
+`ModelRwData_HeaderRecord` contains only bytes, coordinates, angles, and
+interpolation values. The complete record is copied after resolving the model
+allocation. This includes the primary and merge translation/heading working
+values that `modelSetAnimation` normally initializes, so replacement mode does
+not assume that the destination model was already playing the saved animation.
+
 The payload is implemented in `practice_states_chr.c` and dispatched by
 `practice_states_props.c`. For CHRs, only the spatial subset of the common
 `PropRecord` payload (`pos`, `stan`, and `rooms`) is restored. The remaining
 common fields stay live until their dependencies are implemented.
 
-Do not include the following in that slice:
+Do not include the following in the implemented slices:
 
-- `damage`, `maxdamage`, action data, `actiontype`, live model animation state,
-  or flags. Those values have coupled state which must be investigated and
-  restored together.
+- `damage`, `maxdamage`, unsupported action-union data, unsupported
+  `actiontype` values, or flags. Those values have coupled state which must be
+  investigated and restored together.
 - The complete `hidden` and `chrflags` fields. They contain action-coupled and
   destructive bits which must be restored with character action, model,
   movement, damage, and allocation state.
@@ -409,8 +459,8 @@ struct act_stand {
     s32 turning;          /* 0x10 - Turn state; initialized to 2. */
     u32 checkfacingwall;  /* 0x14 - Boolean: check/correct facing into walls. */
     s32 wallcount;        /* 0x18 - Countdown until the next wall-facing check. */
-    f32 mergetime;        /* 0x1c - Animation interpolation duration. */
-    s8  face_target;      /* 0x20 - Boolean: face the character's current target. */
+    f32 mergetime;        /* 0x1c - Inactive/uninitialized in GoldenEye. */
+    s8  face_target;      /* 0x20 - Inactive/uninitialized in GoldenEye. */
 };
 ```
 
@@ -420,8 +470,14 @@ pad `0x08`, direction `0x10`, aim-only `0x20`, do-not-turn `0x40`, and current
 target `0x80`. Some standing paths also use `0x10` as a transient direction
 target, so it must be interpreted with the active code path.
 
-TODO: Determine the complete value sets for `reaim`, `turning`, and
-`face_target`.
+`prestand`, `reaim`, and `checkfacingwall` are Boolean values. `turning` uses
+`1` while turning, `2` when the animation frame has reached its terminal
+frame, and `3` when the requested heading has been reached; stand
+initialization starts it at `2`. `wallcount` starts at a random value from
+180 through 299 and is reduced on stand updates until a new facing check is
+performed. `mergetime` and `face_target` have no reads, writes, or
+initialization in the GoldenEye codebase; they are inactive union bytes and
+are deliberately not serialized.
 
 ### `act_anim`
 
@@ -608,12 +664,14 @@ TODO: Determine the meaning and possible values of all unnamed roll fields.
 ### `act_sidestep` and `act_jumpout`
 
 ```c
-struct act_sidestep { bool side; }; /* 0 = one side, nonzero = opposite side. */
-struct act_jumpout  { bool side; }; /* 0 = one side, nonzero = opposite side. */
+struct act_sidestep { bool side; }; /* Inactive/uninitialized in GoldenEye. */
+struct act_jumpout  { bool side; }; /* Inactive/uninitialized in GoldenEye. */
 ```
 
-These records select the mirrored direction of their animation/movement.
-TODO: Confirm which value maps to left and right.
+GoldenEye never reads or assigns either declared `side` member. Direction is
+encoded by the live animation identity and `Model::gunhand`/flip byte instead.
+These actions therefore have no serialized union payload; restoring their
+action discriminator and model controller is complete for the current code.
 
 ### `act_runpos`
 
@@ -732,13 +790,13 @@ level-table indices; raw addresses are unsafe.
 
 ```c
 struct act_surprised {
-    u32 type; /* Surprise-animation subtype. */
+    u32 type; /* Inactive/uninitialized in GoldenEye. */
 };
 ```
 
-TODO: Determine whether `type` is used in GoldenEye and document its valid
-values. Several transition functions select the animation directly on the
-model without assigning this member.
+GoldenEye never reads or assigns `type`. Spotting, surrendering, and
+looking-around variants are selected directly through `Model::anim`, so this
+action has no serialized union payload.
 
 ### `act_throwgrenade`
 

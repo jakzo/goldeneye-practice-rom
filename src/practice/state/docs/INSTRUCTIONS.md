@@ -11,9 +11,9 @@ Above all, make sure you investigate thoroughly to fully understand where pieces
 ## Current Goal
 
 Currently we want to complete `PROP_TYPE_CHR`, the final prop type. The first
-seven conservative field sets, including spatial, movement, and equipment
-state, are
-implemented; supporting structures and the remaining restore surface are
+eight conservative field sets, including spatial, movement, equipment, and
+simple action/model-animation state, are implemented; supporting structures
+and the remaining restore surface are
 documented in `CHR.md`. Do not broaden the implementation without
 investigating and documenting the additional state coupling.
 
@@ -28,22 +28,22 @@ After the current goal we will need to handle:
 
 ## Prompt
 
-Read through this entire document and implement the first set of props in the "Remaining Groups". These are intended to be a group of fields that are easy to restore since they don't rely on other fields. They are flexible so if one field is too hard or the grouping doesn't make sense you can edit the groupings. Make sure to:
+Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and implement the first set of props in the "Remaining Groups". These are intended to be a group of fields that are easy to restore since they don't rely on other fields. They are flexible so if one field is too hard or the grouping doesn't make sense you can edit the groupings. Make sure to:
 
 - Document their purpose, possible values, etc. in the docs files the same way as the existing fields using the same format, and move them out of the TODO section
 - Remove them from the remaining groups section once implemented
 - Tell me what to do in the game to test that it works and doesn't crash/hang
 - No need to update the changelog or SAVE_STATE_VERSION
-- Right now the code only restores state to existing active props, but eventually once the code supports all types it will replace all props with the restored ones, so if you assume things based on this (like a pointer to a prop being correct already since we only restore to active props) then document it with a TODO comment explaining that it must be updated once that assumption is incorrect and we could remove existing props or add a new prop when loading state
+- Right now the code only restores state to existing active props, but eventually once the code supports all types it will replace all props with the restored ones, so if you assume things based on this (like a pointer to a prop being correct already since we only restore to active props) then make sure to include code which does it properly without the assumption behind the ADD_AND_REMOVE_PROPS flag
 
 ## Remaining Groups
 
-Action and model-animation state
-actiontype, the action union, and the live model animation identity, frame, speed, looping, interpolation, and transform state.
-Implement action-specific payloads in batches:
-Simple: stand, sidestep, jumpout, run-position, surprised.
+Remaining action and model-animation batches
+The common live model animation identity, frame, speed, looping,
+interpolation, and transform state is implemented for the completed simple
+batch. Implement the remaining action-specific payloads in batches:
 Navigation: patrol and go-position.
-Combat: attack, attack-walk, attack-roll, grenade.
+Combat: attack, attack-walk, attack-roll, grenade.i
 Scripted/death/player actions last.
 
 Combat aiming state

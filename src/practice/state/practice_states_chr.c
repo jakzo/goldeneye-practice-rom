@@ -1,10 +1,275 @@
 #include "practice_states_chr.h"
 #include "practice_states_utils.h"
 #include "chrai.h"
+#include "initanitable.h"
 #include "objecthandler.h"
 #include <bondconstants.h>
 
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
+
+static bool is_simple_action(ACT_TYPE actiontype) {
+  switch (actiontype) {
+  case ACT_STAND:
+  case ACT_SIDESTEP:
+  case ACT_JUMPOUT:
+  case ACT_RUNPOS:
+  case ACT_SURPRISED:
+    return TRUE;
+  default:
+    return FALSE;
+  }
+}
+
+static s32 get_animation_offset(const ModelAnimation *animation) {
+  if (animation == NULL) {
+    return -1;
+  }
+
+  return (const u8 *)animation - &ptr_animation_table->data[0];
+}
+
+static ModelAnimation *get_animation_by_offset(s32 offset) {
+  if (offset < 0) {
+    return NULL;
+  }
+
+  return (ModelAnimation *)&ptr_animation_table->data[offset];
+}
+
+static void save_simple_action(StateStream *stream, const ChrRecord *chr) {
+  write_u8(stream, (u8)chr->actiontype);
+
+  switch (chr->actiontype) {
+  case ACT_STAND:
+    write_u32(stream, chr->act_stand.prestand);
+    write_u32(stream, chr->act_stand.face_entitytype);
+    write_u32(stream, chr->act_stand.face_entityid);
+    write_u32(stream, chr->act_stand.reaim);
+    write_u32(stream, chr->act_stand.turning);
+    write_u32(stream, chr->act_stand.checkfacingwall);
+    write_u32(stream, chr->act_stand.wallcount);
+    break;
+  case ACT_RUNPOS:
+    write_bytes(stream, &chr->act_runpos.pos, sizeof(coord3d));
+    write_f32(stream, chr->act_runpos.neardist);
+    write_u32(stream, chr->act_runpos.eta60);
+    write_f32(stream, chr->act_runpos.turnspeed);
+    break;
+  default:
+    // Sidestep, jumpout, and surprised are driven entirely by Model state.
+    break;
+  }
+}
+
+static void load_simple_action(StateStream *stream, ChrRecord *chr) {
+  ACT_TYPE actiontype = (ACT_TYPE)read_u8(stream);
+
+  if (chr != NULL) {
+    chr->actiontype = actiontype;
+  }
+
+  switch (actiontype) {
+  case ACT_STAND: {
+    s32 prestand = read_u32(stream);
+    s32 face_entitytype = read_u32(stream);
+    s32 face_entityid = read_u32(stream);
+    s32 reaim = read_u32(stream);
+    s32 turning = read_u32(stream);
+    u32 checkfacingwall = read_u32(stream);
+    s32 wallcount = read_u32(stream);
+
+    if (chr != NULL) {
+      chr->act_stand.prestand = prestand;
+      chr->act_stand.face_entitytype = face_entitytype;
+      chr->act_stand.face_entityid = face_entityid;
+      chr->act_stand.reaim = reaim;
+      chr->act_stand.turning = turning;
+      chr->act_stand.checkfacingwall = checkfacingwall;
+      chr->act_stand.wallcount = wallcount;
+    }
+    break;
+  }
+  case ACT_RUNPOS: {
+    coord3d pos;
+    f32 neardist;
+    s32 eta60;
+    f32 turnspeed;
+
+    read_bytes(stream, &pos, sizeof(coord3d));
+    neardist = read_f32(stream);
+    eta60 = read_u32(stream);
+    turnspeed = read_f32(stream);
+
+    if (chr != NULL) {
+      chr->act_runpos.pos = pos;
+      chr->act_runpos.neardist = neardist;
+      chr->act_runpos.eta60 = eta60;
+      chr->act_runpos.turnspeed = turnspeed;
+    }
+    break;
+  }
+  default:
+    break;
+  }
+}
+
+static void save_model_animation(StateStream *stream, const Model *model) {
+  ModelRwData_HeaderRecord *root_data;
+  bool has_root_data =
+      model->obj != NULL && model->obj->RootNode != NULL &&
+      (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
+
+  write_u32(stream, get_animation_offset(model->anim));
+  write_u32(stream, get_animation_offset(model->anim2));
+  write_u8(stream, (u8)model->gunhand);
+  write_u8(stream, (u8)model->unk25);
+  write_u8(stream, (u8)model->animlooping);
+  write_u8(stream, (u8)model->unk27);
+  write_f32(stream, model->unk28);
+  write_f32(stream, model->unk2c);
+  write_u16(stream, (u16)model->framea);
+  write_u16(stream, (u16)model->frameb);
+  write_f32(stream, model->endframe);
+  write_f32(stream, model->speed);
+  write_f32(stream, model->newspeed);
+  write_f32(stream, model->oldspeed);
+  write_f32(stream, model->timespeed);
+  write_f32(stream, model->elapsespeed);
+  write_f32(stream, model->unk58);
+  write_f32(stream, model->unk5c);
+  write_u16(stream, (u16)model->frame2a);
+  write_u16(stream, (u16)model->frame2b);
+  write_f32(stream, model->unk6c);
+  write_f32(stream, model->speed2);
+  write_u32(stream, model->unk74);
+  write_u32(stream, model->unk78);
+  write_f32(stream, model->unk7c);
+  write_u32(stream, model->unk80);
+  write_f32(stream, model->unk84);
+  write_f32(stream, model->unk88);
+  write_u32(stream, model->unk8c);
+  write_f32(stream, model->animloopframe);
+  write_f32(stream, model->animloopmerge);
+  write_u32(stream, model->unk9c);
+  write_u32(stream, model->unka0);
+  write_f32(stream, model->playspeed);
+  write_f32(stream, model->animrate);
+  write_f32(stream, model->unkac);
+  write_f32(stream, model->unkb0);
+  write_f32(stream, model->unkb4);
+  write_f32(stream, model->unkb8);
+  write_u32(stream, model->unkbc);
+
+  write_u8(stream, has_root_data);
+  if (has_root_data) {
+    root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
+        (Model *)model, model->obj->RootNode);
+    write_bytes(stream, root_data, sizeof(ModelRwData_HeaderRecord));
+  }
+}
+
+static void load_model_animation(StateStream *stream, Model *model) {
+  s32 anim_offset = read_u32(stream);
+  s32 anim2_offset = read_u32(stream);
+  s8 gunhand = (s8)read_u8(stream);
+  s8 unk25 = (s8)read_u8(stream);
+  s8 animlooping = (s8)read_u8(stream);
+  s8 unk27 = (s8)read_u8(stream);
+  f32 unk28 = read_f32(stream);
+  f32 unk2c = read_f32(stream);
+  s16 framea = (s16)read_u16(stream);
+  s16 frameb = (s16)read_u16(stream);
+  f32 endframe = read_f32(stream);
+  f32 speed = read_f32(stream);
+  f32 newspeed = read_f32(stream);
+  f32 oldspeed = read_f32(stream);
+  f32 timespeed = read_f32(stream);
+  f32 elapsespeed = read_f32(stream);
+  f32 unk58 = read_f32(stream);
+  f32 unk5c = read_f32(stream);
+  s16 frame2a = (s16)read_u16(stream);
+  s16 frame2b = (s16)read_u16(stream);
+  f32 unk6c = read_f32(stream);
+  f32 speed2 = read_f32(stream);
+  s32 unk74 = read_u32(stream);
+  s32 unk78 = read_u32(stream);
+  f32 unk7c = read_f32(stream);
+  s32 unk80 = read_u32(stream);
+  f32 unk84 = read_f32(stream);
+  f32 unk88 = read_f32(stream);
+  s32 unk8c = read_u32(stream);
+  f32 animloopframe = read_f32(stream);
+  f32 animloopmerge = read_f32(stream);
+  s32 unk9c = read_u32(stream);
+  s32 unka0 = read_u32(stream);
+  f32 playspeed = read_f32(stream);
+  f32 animrate = read_f32(stream);
+  f32 unkac = read_f32(stream);
+  f32 unkb0 = read_f32(stream);
+  f32 unkb4 = read_f32(stream);
+  f32 unkb8 = read_f32(stream);
+  s32 unkbc = read_u32(stream);
+  bool has_root_data = read_u8(stream);
+  ModelRwData_HeaderRecord root_data;
+
+  if (has_root_data) {
+    read_bytes(stream, &root_data, sizeof(ModelRwData_HeaderRecord));
+  }
+
+  if (model == NULL) {
+    return;
+  }
+
+  model->anim = get_animation_by_offset(anim_offset);
+  model->anim2 = get_animation_by_offset(anim2_offset);
+  model->gunhand = gunhand;
+  model->unk25 = unk25;
+  model->animlooping = animlooping;
+  model->unk27 = unk27;
+  model->unk28 = unk28;
+  model->unk2c = unk2c;
+  model->framea = framea;
+  model->frameb = frameb;
+  model->endframe = endframe;
+  model->speed = speed;
+  model->newspeed = newspeed;
+  model->oldspeed = oldspeed;
+  model->timespeed = timespeed;
+  model->elapsespeed = elapsespeed;
+  model->unk58 = unk58;
+  model->unk5c = unk5c;
+  model->frame2a = frame2a;
+  model->frame2b = frame2b;
+  model->unk6c = unk6c;
+  model->speed2 = speed2;
+  model->unk74 = unk74;
+  model->unk78 = unk78;
+  model->unk7c = unk7c;
+  model->unk80 = unk80;
+  model->unk84 = unk84;
+  model->unk88 = unk88;
+  model->unk8c = unk8c;
+  model->animloopframe = animloopframe;
+  model->animloopmerge = animloopmerge;
+  model->animflipfunc = 0;
+  model->unk9c = unk9c;
+  model->unka0 = unka0;
+  model->playspeed = playspeed;
+  model->animrate = animrate;
+  model->unkac = unkac;
+  model->unkb0 = unkb0;
+  model->unkb4 = unkb4;
+  model->unkb8 = unkb8;
+  model->unkbc = unkbc;
+
+  if (has_root_data && model->obj != NULL && model->obj->RootNode != NULL &&
+      (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
+    ModelRwData_HeaderRecord *dst =
+        (ModelRwData_HeaderRecord *)modelGetNodeRwData(
+            model, model->obj->RootNode);
+    *dst = root_data;
+  }
+}
 
 void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   s32 ailist_id = -1;
@@ -76,6 +341,15 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
     getsuboffset(chr->model, &model_offset);
     write_bytes(stream, &model_offset, sizeof(coord3d));
     write_f32(stream, getsubroty(chr->model));
+  }
+
+  write_u8(stream, is_simple_action(chr->actiontype));
+  if (is_simple_action(chr->actiontype)) {
+    save_simple_action(stream, chr);
+    write_u8(stream, chr->model != NULL);
+    if (chr->model != NULL) {
+      save_model_animation(stream, chr->model);
+    }
   }
 
   write_u16(stream, get_prop_index(chr->weapons_held[0]));
@@ -191,6 +465,13 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
         chr->model->obj->RootNode != NULL) {
       setsuboffset(chr->model, &model_offset);
       setsubroty(chr->model, model_heading);
+    }
+  }
+
+  if (read_u8(stream)) {
+    load_simple_action(stream, chr);
+    if (read_u8(stream)) {
+      load_model_animation(stream, chr != NULL ? chr->model : NULL);
     }
   }
 
