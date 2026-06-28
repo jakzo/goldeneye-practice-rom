@@ -298,7 +298,7 @@ The eighth CHR serialization slice restores the first action batch and its
 live model-animation controller:
 
 ```c
-ChrRecord::actiontype;       /* ACT_STAND, SIDESTEP, JUMPOUT, RUNPOS, SURPRISED. */
+ChrRecord::actiontype;       /* Supported simple and navigation ACT_TYPE values. */
 ChrRecord::act_stand;        /* Active stand-facing and wall-check fields. */
 ChrRecord::act_runpos;       /* Destination, arrival distance, ETA, turn speed. */
 Model::anim, anim2;          /* Animation-table identities, encoded as offsets. */
@@ -309,10 +309,19 @@ Model play-speed state;      /* Current/target play rate and interpolation clock
 Model root RW data;          /* Pointer-free animation translation/heading state. */
 ```
 
-Only those five action discriminators are applied. Saving any other action
+The supported discriminators are `ACT_STAND`, `ACT_SIDESTEP`, `ACT_JUMPOUT`,
+`ACT_RUNPOS`, `ACT_SURPRISED`, `ACT_PATROL`, and `ACT_GOPOS`. Saving any other action
 writes no action/model payload, and loading it leaves the destination action
 live; its union cannot safely be interpreted until the corresponding batch is
 implemented.
+
+The action records occupy one 120-byte union. The payload does not copy those
+120 bytes wholesale: doing so would waste substantial SRAM per CHR and would
+serialize pointer representations from attack, patrol, go-position, and
+player-action layouts. Instead, every meaningful field of each supported
+active member is written, with pointer fields converted to stable identities.
+Inactive overlay bytes are omitted; the engine neither reads nor initializes
+them for the supported action.
 
 `Model::anim` and `anim2` point into the permanent `ptr_animation_table`.
 They are serialized as signed byte offsets from `ptr_animation_table->data`;
@@ -343,6 +352,18 @@ interpolation values. The complete record is copied after resolving the model
 allocation. This includes the primary and merge translation/heading working
 values that `modelSetAnimation` normally initializes, so replacement mode does
 not assume that the destination model was already playing the saved animation.
+
+The ninth CHR serialization slice adds the two navigation actions:
+
+```c
+ChrRecord::act_patrol; /* Path ID, step/direction, waydata, visibility tick, speed. */
+ChrRecord::act_gopos;  /* Destination, route indices, waydata, clocks, speed mode. */
+```
+
+Patrol and go-position use the same live model-animation payload as the simple
+actions. Their movement also depends on the already restored prop position,
+stand tile, rooms, collision bounds, previous position, ground state, and
+movement timestamps.
 
 The payload is implemented in `practice_states_chr.c` and dispatched by
 `practice_states_props.c`. For CHRs, only the spatial subset of the common
@@ -693,14 +714,17 @@ Runtime patrol-path descriptor referenced by `act_patrol`.
 ```c
 struct patrol_path {
     s32 *data;  /* 0x00 - Pointer to path waypoint IDs. */
-    u8   unk04; /* 0x04 - TODO: determine purpose and values. */
-    u8   flags; /* 0x05 - TODO: determine path flag bits. */
+    u8   unk04; /* 0x04 - Level-local path ID, 0-255. */
+    u8   flags; /* 0x05 - Bit 0: loop from the end to the start. */
     u16  len;   /* 0x06 - Number of path entries. */
 };
 ```
 
-The path and its `data` are pointers and need stable IDs/offsets. Do not save
-their addresses.
+This is layout-compatible with the setup `PathRecord`: `data` aliases its
+`waypoints` member and `unk04` aliases `ID`. The save payload stores the ID and
+resolves it with `pathFindById`; `-1` is the serialized `NULL` sentinel.
+Neither `path` nor `data` is saved as an address. When flag bit 0 is clear,
+patrol reverses at either end; when set, it wraps to the opposite end.
 
 ### `waydata`
 
@@ -709,12 +733,12 @@ Incremental path-travel state embedded by patrol and go-to-position actions.
 ```c
 struct waydata {
     s8      mode;         /* 0x00 - WAYMODE_0..WAYMODE_5 or WAYMODE_MAGIC (0-6). */
-    s8      unk01;        /* 0x01 - Candidate/next mode; TODO. */
-    s8      unk02;        /* 0x02 - Boolean/state associated with pos; TODO. */
-    s8      unk03;        /* 0x03 - Boolean/state associated with pos_copy; TODO. */
+    s8      unk01;        /* 0x01 - Detour-probe retry/phase counter, normally 0-6. */
+    s8      unk02;        /* 0x02 - Boolean: direct/path candidate was accepted. */
+    s8      unk03;        /* 0x03 - Boolean: retain pos_copy as a detour target. */
     coord3d pos;          /* 0x04 - Current path segment position. */
-    coord3d pos2;         /* 0x10 - Secondary segment position; TODO verify. */
-    coord3d pos3;         /* 0x1c - Tertiary segment position. */
+    coord3d pos2;         /* 0x10 - First lateral detour candidate. */
+    coord3d pos3;         /* 0x1c - Second lateral detour candidate. */
     s32     age;          /* 0x28 - Number of updates in current path state. */
     coord3d pos_copy;     /* 0x2c - Saved/copy position used by travel logic. */
     f32     segdistdone;  /* 0x38 - Distance completed in cheap travel mode. */
@@ -722,10 +746,13 @@ struct waydata {
 };
 ```
 
-Modes `0` through `5` are phases of normal incremental navigation.
-`WAYMODE_MAGIC` (`6`) selects the cheaper off-screen path-travel method.
-TODO: Give semantic names to modes `0` through `5` after their transition
-conditions are fully understood.
+Modes `0` and `2` test direct travel and generate the two lateral candidates.
+Modes `1` and `3` probe those candidates over several updates. Mode `4`
+validates the selected detour, and mode `5` refines a failed detour by choosing
+the candidate with the smaller angular deviation. `WAYMODE_MAGIC` (`6`)
+selects cheaper off-screen interpolation using `segdistdone` and
+`segdisttotal`. `age` advances once per action tick and schedules route,
+door, and shortcut checks at ten-tick intervals.
 
 ### `act_patrol`
 
@@ -745,7 +772,14 @@ struct act_patrol {
 ```
 
 Loading this action requires stable path identification and consistent
-`waydata`, position, stand tile, room, and model movement state.
+`waydata`, position, stand tile, room, and model movement state. These are now
+restored together. `nextstep` is an index from `0` through `path->len - 1`;
+`forward` is Boolean. `lastvisible60` is an absolute `g_GlobalTimer` value used
+to decide when an off-screen patrol may enter cheap travel. `speed` is the
+current turn/speed interpolation value updated by `chrlvApplySpeed`.
+
+The nine trailing `unk80` through `unka0` words have no readers or writers in
+GoldenEye. They are inactive union storage and are not serialized.
 
 ### `waypoint`
 
@@ -773,18 +807,26 @@ struct act_gopos {
     StandTile *target;                         /* 0x0c - Final navigation tile. */
     waypoint  *target_path;                    /* 0x10 - Final waypoint. */
     waypoint  *waypoints[MAX_CHRWAYPOINTS];    /* 0x14 - Next path nodes. */
-    u8         curindex;                       /* 0x2c - Current entry; normally 0-2. */
-    u8         unk59;                          /* 0x2d - Flags/room guess; TODO. */
-    u16        unk5a;                          /* 0x2e - Clock/restart value; TODO. */
+    u8         curindex;                       /* 0x2c - Current route entry, 0-3. */
+    u8         unk59;                          /* 0x2d - SPEED: walk 0, run 1, sprint 2. */
+    u16        unk5a;                          /* 0x2e - Route-restart countdown. */
     struct waydata waydata;                    /* 0x30 - Current segment state. */
     s32        unk9c;                          /* 0x70 - Last path update tick. */
     f32        speed;                          /* 0x74 - Current movement speed. */
 };
 ```
 
-When `curindex` reaches 3 the route is recalculated and the waypoint array is
-replaced. `target` must use a stand-tile offset and waypoint pointers must use
-level-table indices; raw addresses are unsafe.
+The route array contains six entries and uses a `NULL` entry to transition from
+the final graph waypoint to `targetpos`. When route advancement passes entry
+3, the remaining route is recalculated into the same six slots and
+`curindex` becomes 1. `unk5a` is initialized from the estimated travel time
+plus 300 NTSC ticks, counts down by `g_ClockTimer`, and triggers replanning at
+zero. `unk9c` is an absolute global tick for visible/off-screen route updates.
+
+`target` is serialized as a stand-tile offset. `target_path` and all six route
+entries are signed 16-bit indices into `g_CurrentSetup.pathwaypoints`; `-1`
+represents `NULL`. These are resolved against the current level for both
+retained and newly allocated CHRs, so no existing pointer is assumed.
 
 ### `act_surprised`
 

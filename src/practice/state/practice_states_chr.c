@@ -6,13 +6,16 @@
 #include <bondconstants.h>
 
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
+extern PathRecord *pathFindById(s32 ID);
 
-static bool is_simple_action(ACT_TYPE actiontype) {
+static bool is_supported_action(ACT_TYPE actiontype) {
   switch (actiontype) {
   case ACT_STAND:
   case ACT_SIDESTEP:
   case ACT_JUMPOUT:
   case ACT_RUNPOS:
+  case ACT_PATROL:
+  case ACT_GOPOS:
   case ACT_SURPRISED:
     return TRUE;
   default:
@@ -36,7 +39,62 @@ static ModelAnimation *get_animation_by_offset(s32 offset) {
   return (ModelAnimation *)&ptr_animation_table->data[offset];
 }
 
-static void save_simple_action(StateStream *stream, const ChrRecord *chr) {
+static s16 get_waypoint_index(const waypoint *point) {
+  if (point == NULL || g_CurrentSetup.pathwaypoints == NULL) {
+    return -1;
+  }
+
+  return point - g_CurrentSetup.pathwaypoints;
+}
+
+static waypoint *get_waypoint_by_index(s16 index) {
+  if (index < 0 || g_CurrentSetup.pathwaypoints == NULL) {
+    return NULL;
+  }
+
+  return &g_CurrentSetup.pathwaypoints[index];
+}
+
+static s16 get_patrol_path_id(const struct patrol_path *path) {
+  const PathRecord *record = (const PathRecord *)path;
+  return record != NULL ? record->ID : -1;
+}
+
+static struct patrol_path *get_patrol_path_by_id(s16 id) {
+  return id >= 0 ? (struct patrol_path *)pathFindById(id) : NULL;
+}
+
+static void save_waydata(StateStream *stream, const struct waydata *waydata) {
+  write_u8(stream, (u8)waydata->mode);
+  write_u8(stream, (u8)waydata->unk01);
+  write_u8(stream, (u8)waydata->unk02);
+  write_u8(stream, (u8)waydata->unk03);
+  write_bytes(stream, &waydata->pos, sizeof(coord3d));
+  write_bytes(stream, &waydata->pos2, sizeof(coord3d));
+  write_bytes(stream, &waydata->pos3, sizeof(coord3d));
+  write_u32(stream, waydata->age);
+  write_bytes(stream, &waydata->pos_copy, sizeof(coord3d));
+  write_f32(stream, waydata->segdistdone);
+  write_f32(stream, waydata->segdisttotal);
+}
+
+static void load_waydata(StateStream *stream, struct waydata *waydata) {
+  waydata->mode = (s8)read_u8(stream);
+  waydata->unk01 = (s8)read_u8(stream);
+  waydata->unk02 = (s8)read_u8(stream);
+  waydata->unk03 = (s8)read_u8(stream);
+  read_bytes(stream, &waydata->pos, sizeof(coord3d));
+  read_bytes(stream, &waydata->pos2, sizeof(coord3d));
+  read_bytes(stream, &waydata->pos3, sizeof(coord3d));
+  waydata->age = read_u32(stream);
+  read_bytes(stream, &waydata->pos_copy, sizeof(coord3d));
+  waydata->segdistdone = read_f32(stream);
+  waydata->segdisttotal = read_f32(stream);
+}
+
+static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
+  s32 i;
+
   write_u8(stream, (u8)chr->actiontype);
 
   switch (chr->actiontype) {
@@ -55,14 +113,37 @@ static void save_simple_action(StateStream *stream, const ChrRecord *chr) {
     write_u32(stream, chr->act_runpos.eta60);
     write_f32(stream, chr->act_runpos.turnspeed);
     break;
+  case ACT_PATROL:
+    write_u16(stream, (u16)get_patrol_path_id(chr->act_patrol.path));
+    write_u32(stream, chr->act_patrol.nextstep);
+    write_u8(stream, chr->act_patrol.forward);
+    save_waydata(stream, &chr->act_patrol.waydata);
+    write_u32(stream, chr->act_patrol.lastvisible60);
+    write_f32(stream, chr->act_patrol.speed);
+    break;
+  case ACT_GOPOS:
+    write_bytes(stream, &chr->act_gopos.targetpos, sizeof(coord3d));
+    write_u32(stream, get_tile_offset(chr->act_gopos.target));
+    write_u16(stream, (u16)get_waypoint_index(chr->act_gopos.target_path));
+    for (i = 0; i < MAX_CHRWAYPOINTS; i++) {
+      write_u16(stream, (u16)get_waypoint_index(chr->act_gopos.waypoints[i]));
+    }
+    write_u8(stream, chr->act_gopos.curindex);
+    write_u8(stream, chr->act_gopos.unk59);
+    write_u16(stream, chr->act_gopos.unk5a);
+    save_waydata(stream, &chr->act_gopos.waydata);
+    write_u32(stream, chr->act_gopos.unk9c);
+    write_f32(stream, chr->act_gopos.speed);
+    break;
   default:
     // Sidestep, jumpout, and surprised are driven entirely by Model state.
     break;
   }
 }
 
-static void load_simple_action(StateStream *stream, ChrRecord *chr) {
+static void load_supported_action(StateStream *stream, ChrRecord *chr) {
   ACT_TYPE actiontype = (ACT_TYPE)read_u8(stream);
+  s32 i;
 
   if (chr != NULL) {
     chr->actiontype = actiontype;
@@ -105,6 +186,71 @@ static void load_simple_action(StateStream *stream, ChrRecord *chr) {
       chr->act_runpos.neardist = neardist;
       chr->act_runpos.eta60 = eta60;
       chr->act_runpos.turnspeed = turnspeed;
+    }
+    break;
+  }
+  case ACT_PATROL: {
+    s16 path_id = (s16)read_u16(stream);
+    s32 nextstep = read_u32(stream);
+    bool forward = read_u8(stream);
+    struct waydata waydata;
+    s32 lastvisible60;
+    f32 speed;
+
+    load_waydata(stream, &waydata);
+    lastvisible60 = read_u32(stream);
+    speed = read_f32(stream);
+
+    if (chr != NULL) {
+      chr->act_patrol.path = get_patrol_path_by_id(path_id);
+      chr->act_patrol.nextstep = nextstep;
+      chr->act_patrol.forward = forward;
+      chr->act_patrol.waydata = waydata;
+      chr->act_patrol.lastvisible60 = lastvisible60;
+      chr->act_patrol.speed = speed;
+    }
+    break;
+  }
+  case ACT_GOPOS: {
+    coord3d targetpos;
+    s32 target_offset;
+    s16 target_path_index;
+    s16 waypoint_indices[MAX_CHRWAYPOINTS];
+    u8 curindex;
+    u8 unk59;
+    u16 unk5a;
+    struct waydata waydata;
+    s32 unk9c;
+    f32 speed;
+
+    read_bytes(stream, &targetpos, sizeof(coord3d));
+    target_offset = read_u32(stream);
+    target_path_index = (s16)read_u16(stream);
+    for (i = 0; i < MAX_CHRWAYPOINTS; i++) {
+      waypoint_indices[i] = (s16)read_u16(stream);
+    }
+    curindex = read_u8(stream);
+    unk59 = read_u8(stream);
+    unk5a = read_u16(stream);
+    load_waydata(stream, &waydata);
+    unk9c = read_u32(stream);
+    speed = read_f32(stream);
+
+    if (chr != NULL) {
+      chr->act_gopos.targetpos = targetpos;
+      chr->act_gopos.target = get_tile_by_offset(target_offset);
+      chr->act_gopos.target_path =
+          get_waypoint_by_index(target_path_index);
+      for (i = 0; i < MAX_CHRWAYPOINTS; i++) {
+        chr->act_gopos.waypoints[i] =
+            get_waypoint_by_index(waypoint_indices[i]);
+      }
+      chr->act_gopos.curindex = curindex;
+      chr->act_gopos.unk59 = unk59;
+      chr->act_gopos.unk5a = unk5a;
+      chr->act_gopos.waydata = waydata;
+      chr->act_gopos.unk9c = unk9c;
+      chr->act_gopos.speed = speed;
     }
     break;
   }
@@ -343,9 +489,9 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
     write_f32(stream, getsubroty(chr->model));
   }
 
-  write_u8(stream, is_simple_action(chr->actiontype));
-  if (is_simple_action(chr->actiontype)) {
-    save_simple_action(stream, chr);
+  write_u8(stream, is_supported_action(chr->actiontype));
+  if (is_supported_action(chr->actiontype)) {
+    save_supported_action(stream, chr);
     write_u8(stream, chr->model != NULL);
     if (chr->model != NULL) {
       save_model_animation(stream, chr->model);
@@ -469,7 +615,7 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   }
 
   if (read_u8(stream)) {
-    load_simple_action(stream, chr);
+    load_supported_action(stream, chr);
     if (read_u8(stream)) {
       load_model_animation(stream, chr != NULL ? chr->model : NULL);
     }

@@ -11,8 +11,8 @@ Above all, make sure you investigate thoroughly to fully understand where pieces
 ## Current Goal
 
 Currently we want to complete `PROP_TYPE_CHR`, the final prop type. The first
-eight conservative field sets, including spatial, movement, equipment, and
-simple action/model-animation state, are implemented; supporting structures
+nine conservative field sets, including spatial, movement, equipment, and
+simple/navigation action and model-animation state, are implemented; supporting structures
 and the remaining restore surface are
 documented in `CHR.md`. Do not broaden the implementation without
 investigating and documenting the additional state coupling.
@@ -41,9 +41,9 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 Remaining action and model-animation batches
 The common live model animation identity, frame, speed, looping,
 interpolation, and transform state is implemented for the completed simple
-batch. Implement the remaining action-specific payloads in batches:
-Navigation: patrol and go-position.
-Combat: attack, attack-walk, attack-roll, grenade.i
+and navigation batches. Implement the remaining action-specific payloads in
+batches:
+Combat: attack, attack-walk, attack-roll, grenade.
 Scripted/death/player actions last.
 
 Combat aiming state
