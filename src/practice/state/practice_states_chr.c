@@ -1,8 +1,8 @@
 #include "practice_states_chr.h"
-#include "practice_states_utils.h"
 #include "chrai.h"
 #include "initanitable.h"
 #include "objecthandler.h"
+#include "practice_states_utils.h"
 #include <bondconstants.h>
 
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
@@ -239,8 +239,7 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
     if (chr != NULL) {
       chr->act_gopos.targetpos = targetpos;
       chr->act_gopos.target = get_tile_by_offset(target_offset);
-      chr->act_gopos.target_path =
-          get_waypoint_by_index(target_path_index);
+      chr->act_gopos.target_path = get_waypoint_by_index(target_path_index);
       for (i = 0; i < MAX_CHRWAYPOINTS; i++) {
         chr->act_gopos.waypoints[i] =
             get_waypoint_by_index(waypoint_indices[i]);
@@ -411,8 +410,8 @@ static void load_model_animation(StateStream *stream, Model *model) {
   if (has_root_data && model->obj != NULL && model->obj->RootNode != NULL &&
       (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
     ModelRwData_HeaderRecord *dst =
-        (ModelRwData_HeaderRecord *)modelGetNodeRwData(
-            model, model->obj->RootNode);
+        (ModelRwData_HeaderRecord *)modelGetNodeRwData(model,
+                                                       model->obj->RootNode);
     *dst = root_data;
   }
 }
@@ -507,11 +506,10 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
     s32 hand;
     for (hand = 0; hand < 2; hand++) {
       PropRecord *prop = chr->weapons_held[hand];
-      WeaponObjRecord *weapon =
-          prop != NULL && prop->obj != NULL &&
-                  prop->obj->type == PROPDEF_COLLECTABLE
-              ? prop->weapon
-              : NULL;
+      WeaponObjRecord *weapon = prop != NULL && prop->obj != NULL &&
+                                        prop->obj->type == PROPDEF_COLLECTABLE
+                                    ? prop->weapon
+                                    : NULL;
       write_u16(stream, weapon != NULL ? (u16)weapon->obj : (u16)-1);
       write_u8(stream, weapon != NULL ? (u8)weapon->weaponnum : 0);
       write_u32(stream, weapon != NULL ? weapon->flags : 0);

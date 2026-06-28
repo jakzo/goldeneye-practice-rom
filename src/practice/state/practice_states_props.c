@@ -1,5 +1,7 @@
 #include "practice_states_props.h"
+#include "chr.h"
 #include "chrai.h"
+#include "chrlv.h"
 #include "chrobjhandler.h"
 #include "explosions.h"
 #include "objecthandler.h"
@@ -8,8 +10,6 @@
 #include "practice_states_props.h"
 #include "practice_states_utils.h"
 #include "practice_ui.h"
-#include "chr.h"
-#include "chrlv.h"
 #include <bondconstants.h>
 #include <string.h>
 #include <ultra64.h>
@@ -49,8 +49,6 @@ typedef union {
   TintedGlassRecord tgl;
   TankRecord tank;
 } TempObjectRecord;
-
-
 
 static void retain_prop_from_free_list(PropRecord *prop) {
   PropRecord *current = ptr_obj_pos_list_final_entry;
@@ -166,8 +164,8 @@ static PropRecord *create_chr_prop(PropRecord *prop,
     return NULL;
   }
 
-  model = retrieve_header_for_body_and_head(
-      allocation->bodynum, allocation->headnum, 0);
+  model = retrieve_header_for_body_and_head(allocation->bodynum,
+                                            allocation->headnum, 0);
   if (model == NULL) {
     return NULL;
   }
@@ -246,8 +244,7 @@ static bool attach_prop_to_chr(ChrRecord *chr, PropRecord *prop,
   ObjectRecord *obj;
 
   if (prop == NULL || chr->prop == NULL || chr->model == NULL ||
-      chr->model->obj == NULL ||
-      switch_index >= chr->model->obj->numSwitches ||
+      chr->model->obj == NULL || switch_index >= chr->model->obj->numSwitches ||
       chr->model->obj->Switches[switch_index] == NULL) {
     return FALSE;
   }
@@ -268,8 +265,7 @@ static bool attach_prop_to_chr(ChrRecord *chr, PropRecord *prop,
   // The projectile/embedment pools were already restored from the save, so a
   // pointer retained by a weapon dropped after the save must not be reused.
   obj->projectile = NULL;
-  obj->runtime_bitflags &=
-      ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
+  obj->runtime_bitflags &= ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
   obj->runtime_bitflags |= RUNTIMEBITFLAG_HASOWNER;
   obj->model->attachedto = chr->model;
   obj->model->attachedto_objinst = chr->model->obj->Switches[switch_index];
@@ -288,33 +284,26 @@ static void restore_chr_attachments(PropRecord *chr_prop,
     return;
   }
 
-  saved[0] =
-      get_chr_attachment_prop(indices->weapons_held[GUNRIGHT],
-                              PROPDEF_COLLECTABLE);
-  saved[1] =
-      get_chr_attachment_prop(indices->weapons_held[GUNLEFT],
-                              PROPDEF_COLLECTABLE);
+  saved[0] = get_chr_attachment_prop(indices->weapons_held[GUNRIGHT],
+                                     PROPDEF_COLLECTABLE);
+  saved[1] = get_chr_attachment_prop(indices->weapons_held[GUNLEFT],
+                                     PROPDEF_COLLECTABLE);
   saved[2] = get_prop_by_index(indices->weapons_held[2]);
   saved[3] = get_chr_attachment_prop(indices->hat, PROPDEF_HAT);
 
   if (ADD_AND_REMOVE_PROPS) {
-    if (saved[GUNRIGHT] == NULL &&
-        indices->weapon_model[GUNRIGHT] >= 0) {
-      saved[GUNRIGHT] =
-          chrGiveWeapon(chr, indices->weapon_model[GUNRIGHT],
-                        indices->weaponnum[GUNRIGHT],
-                        indices->weapon_flags[GUNRIGHT]);
+    if (saved[GUNRIGHT] == NULL && indices->weapon_model[GUNRIGHT] >= 0) {
+      saved[GUNRIGHT] = chrGiveWeapon(chr, indices->weapon_model[GUNRIGHT],
+                                      indices->weaponnum[GUNRIGHT],
+                                      indices->weapon_flags[GUNRIGHT]);
     }
-    if (saved[GUNLEFT] == NULL &&
-        indices->weapon_model[GUNLEFT] >= 0) {
-      saved[GUNLEFT] =
-          chrGiveWeapon(chr, indices->weapon_model[GUNLEFT],
-                        indices->weaponnum[GUNLEFT],
-                        indices->weapon_flags[GUNLEFT]);
+    if (saved[GUNLEFT] == NULL && indices->weapon_model[GUNLEFT] >= 0) {
+      saved[GUNLEFT] = chrGiveWeapon(chr, indices->weapon_model[GUNLEFT],
+                                     indices->weaponnum[GUNLEFT],
+                                     indices->weapon_flags[GUNLEFT]);
     }
     if (saved[3] == NULL && indices->hat_model >= 0) {
-      saved[3] =
-          hatCreateForChr(chr, indices->hat_model, indices->hat_flags);
+      saved[3] = hatCreateForChr(chr, indices->hat_model, indices->hat_flags);
     }
   }
 
@@ -1603,8 +1592,7 @@ bool load_props_state(StateStream *stream) {
            savedPropType == PROP_TYPE_WEAPON) &&
           prop->parent == NULL) {
         PropRecord *saved_parent = get_prop_by_index(savedPropParentIdx);
-        if (saved_parent != NULL &&
-            saved_parent->type == PROP_TYPE_CHR) {
+        if (saved_parent != NULL && saved_parent->type == PROP_TYPE_CHR) {
           chrpropDeregisterRooms(prop);
         }
       }
@@ -1752,9 +1740,8 @@ bool load_props_state(StateStream *stream) {
       if (prop->chr == NULL) {
         skip_prop_data(stream, PROP_TYPE_CHR);
       } else {
-        load_chr_prop_spatial_state(prop, &savedPropPos,
-                                    savedPropStanOffset, savedPropRooms,
-                                    createdChrProp);
+        load_chr_prop_spatial_state(prop, &savedPropPos, savedPropStanOffset,
+                                    savedPropRooms, createdChrProp);
         load_chr_record(stream, prop->chr,
                         &pendingChrAttachments[savedPropIndex]);
         pendingChrAttachmentsValid[savedPropIndex] = TRUE;
