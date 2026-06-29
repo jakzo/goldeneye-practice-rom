@@ -7689,6 +7689,9 @@ void update_menu0C_missionfailed(void) {
 
 void interface_menu0C_missionfailed(void)
 {
+#ifdef PRACTICE_ROM
+    practice_mission_report_menu_tick();
+#endif
     viSetFovY(FOV_Y_F);
     viSetAspect(ASPECT_RATIO_SD);
     viSetZRange(100.0f, 10000.0f);
@@ -7879,6 +7882,9 @@ void interface_menu0D_missioncomplete()
 {
     int entry;
 
+#ifdef PRACTICE_ROM
+    practice_mission_stats_menu_tick();
+#endif
     viSetFovY(FOV_Y_F);
     viSetAspect(ASPECT_RATIO_SD);
     viSetZRange(100.0f, 10000.0f);
@@ -8056,6 +8062,9 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     stagename[0] = '\0';
     targettime = solo_target_time_array[mission_folder_setup_entries[briefingpage].mission_num][difficulty];
 #ifdef PRACTICE_ROM
+    practice_stats_preview_apply(&missiontimer, &missiontime, &killcount, &shotsfired,
+                                 &headshots, &bodyshots, &limbshots, &reg4, &reg5, &reg6,
+                                 &hitshots, &allhits, &besttime, &targettime);
     if (practice.show_hundredths_on_timer) {
         s32 hundredths = (missiontimer % 60) * 100 / 60;
         sprintf(stagename, "%02d:%02d.%02d", missiontime / 60, missiontime % 60, hundredths);
