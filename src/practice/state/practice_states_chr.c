@@ -1,12 +1,96 @@
 #include "practice_states_chr.h"
+#include "chr.h"
 #include "chrai.h"
 #include "initanitable.h"
 #include "objecthandler.h"
 #include "practice_states_utils.h"
 #include <bondconstants.h>
+#include <snd.h>
 
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern PathRecord *pathFindById(s32 ID);
+
+#define CHR_COMBAT_HIDDEN_MASK                                                \
+  (CHRHIDDEN_FIRE_WEAPON_LEFT | CHRHIDDEN_FIRE_WEAPON_RIGHT |                \
+   CHRHIDDEN_FIRE_TRACER | CHRHIDDEN_MOVING)
+
+typedef struct FiringAnimationTableRef {
+  struct weapon_firing_animation_table *table;
+  u8 count;
+} FiringAnimationTableRef;
+
+static const FiringAnimationTableRef firing_animation_tables[] = {
+    {rifle_firing_animation_group1, 1},
+    {rifle_firing_animation_group2, 2},
+    {rifle_firing_animation_group5, 2},
+    {rifle_firing_animation_group3, 1},
+    {rifle_firing_animation_group4, 1},
+    {pistol_firing_animation_group1, 4},
+    {pistol_firing_animation_group2, 2},
+    {pistol_firing_animation_group3, 4},
+    {pistol_firing_animation_group6, 4},
+    {pistol_firing_animation_group4, 1},
+    {pistol_firing_animation_group5, 1},
+    {doubles_firing_animation_group1, 1},
+    {doubles_firing_animation_group2, 2},
+    {doubles_firing_animation_group3, 2},
+    {crouched_rifle_firing_animation_group1, 1},
+    {crouched_rifle_firing_animation_groupA, 1},
+    {crouched_rifle_firing_animation_group2, 1},
+    {crouched_rifle_firing_animation_group3, 1},
+    {crouched_pistol_firing_animation_group1, 2},
+    {crouched_pistol_firing_animation_group2, 3},
+    {crouched_pistol_firing_animation_group3, 2},
+    {crouched_doubles_firing_animation_group1, 2},
+    {crouched_doubles_firing_animation_group2, 2},
+    {crouched_doubles_firing_animation_group3, 2},
+    {D_80030078, 20},
+    {D_80030660, 10},
+};
+
+static s16 get_firing_animation_id(
+    const struct weapon_firing_animation_table *animation) {
+  s32 table;
+  s32 row;
+
+  if (animation == NULL) {
+    return -1;
+  }
+
+  for (table = 0;
+       table < (s32)(sizeof(firing_animation_tables) /
+                     sizeof(firing_animation_tables[0]));
+       table++) {
+    for (row = 0; row < firing_animation_tables[table].count; row++) {
+      if (animation == &firing_animation_tables[table].table[row]) {
+        return (s16)((table << 8) | row);
+      }
+    }
+  }
+
+  return -1;
+}
+
+static struct weapon_firing_animation_table *
+get_firing_animation_by_id(s16 id) {
+  u8 table;
+  u8 row;
+
+  if (id < 0) {
+    return NULL;
+  }
+
+  table = (u16)id >> 8;
+  row = id & 0xff;
+
+  if (table >=
+          sizeof(firing_animation_tables) / sizeof(firing_animation_tables[0]) ||
+      row >= firing_animation_tables[table].count) {
+    return NULL;
+  }
+
+  return &firing_animation_tables[table].table[row];
+}
 
 static bool is_supported_action(ACT_TYPE actiontype) {
   switch (actiontype) {
@@ -14,6 +98,9 @@ static bool is_supported_action(ACT_TYPE actiontype) {
   case ACT_STAND:
   case ACT_KNEEL:
   case ACT_ANIM:
+  case ACT_ATTACK:
+  case ACT_ATTACKWALK:
+  case ACT_ATTACKROLL:
   case ACT_SIDESTEP:
   case ACT_JUMPOUT:
   case ACT_RUNPOS:
@@ -32,6 +119,23 @@ static bool is_supported_action(ACT_TYPE actiontype) {
     return TRUE;
   default:
     return FALSE;
+  }
+}
+
+static bool is_supported_chr_action(const ChrRecord *chr) {
+  if (!is_supported_action(chr->actiontype)) {
+    return FALSE;
+  }
+
+  switch (chr->actiontype) {
+  case ACT_ATTACK:
+    return get_firing_animation_id(chr->act_attack.animfloats) >= 0;
+  case ACT_ATTACKWALK:
+    return get_firing_animation_id(chr->act_attackwalk.animfloats) >= 0;
+  case ACT_ATTACKROLL:
+    return get_firing_animation_id(chr->act_attackroll.animfloats) >= 0;
+  default:
+    return TRUE;
   }
 }
 
@@ -127,6 +231,70 @@ static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
     write_u8(stream, chr->act_anim.noTranslate != 0);
     write_u8(stream, (chr->chrflags & CHRFLAG_02000000) != 0);
     break;
+  case ACT_ATTACK:
+    write_u16(stream, (u16)get_firing_animation_id(chr->act_attack.animfloats));
+    write_u8(stream, (u8)chr->act_attack.unk30);
+    write_u8(stream, (u8)chr->act_attack.unk31);
+    write_u8(stream, (u8)chr->act_attack.unk32);
+    write_u8(stream, (u8)chr->act_attack.unk33);
+    write_u8(stream, (u8)chr->act_attack.unk34);
+    write_u8(stream, (u8)chr->act_attack.unk36);
+    write_u8(stream, (u8)chr->act_attack.unk37);
+    write_bytes(stream, chr->act_attack.unk38, sizeof(chr->act_attack.unk38));
+    write_bytes(stream, chr->act_attack.unk3a, sizeof(chr->act_attack.unk3a));
+    write_bytes(stream, chr->act_attack.unk3c, sizeof(chr->act_attack.unk3c));
+    write_u32(stream, chr->act_attack.unk40);
+    write_u32(stream, chr->act_attack.unk44);
+    write_u32(stream, chr->act_attack.attack_time);
+    write_u32(stream, chr->act_attack.attacktype);
+    write_u32(stream, chr->act_attack.entityid);
+    write_u32(stream, chr->act_attack.unk54);
+    write_u32(stream, chr->act_attack.type_of_motion);
+    write_u8(stream, (u8)chr->act_attack.attack_item);
+    break;
+  case ACT_ATTACKWALK:
+    write_u32(stream, chr->act_attackwalk.clock_timer30);
+    write_u32(stream, chr->act_attackwalk.clock_timer34);
+    write_u32(stream, chr->act_attackwalk.unk038);
+    write_u16(stream,
+              (u16)get_firing_animation_id(chr->act_attackwalk.animfloats));
+    write_u32(stream, chr->act_attackwalk.timer40);
+    write_u32(stream, chr->act_attackwalk.unk044);
+    write_bytes(stream, chr->act_attackwalk.unk48,
+                sizeof(chr->act_attackwalk.unk48));
+    write_bytes(stream, chr->act_attackwalk.unk4a,
+                sizeof(chr->act_attackwalk.unk4a));
+    write_bytes(stream, chr->act_attackwalk.unk4C,
+                sizeof(chr->act_attackwalk.unk4C));
+    write_f32(stream, chr->act_attackwalk.speed);
+    write_u8(stream, (u8)chr->act_attackwalk.attack_item);
+    break;
+  case ACT_ATTACKROLL:
+    write_u16(stream,
+              (u16)get_firing_animation_id(chr->act_attackroll.animfloats));
+    write_u8(stream, (u8)chr->act_attackroll.unk30);
+    write_u8(stream, (u8)chr->act_attackroll.unk31);
+    write_u8(stream, (u8)chr->act_attackroll.unk32);
+    write_u8(stream, (u8)chr->act_attackroll.unk33);
+    write_u8(stream, (u8)chr->act_attackroll.unk34);
+    write_u8(stream, (u8)chr->act_attackroll.unk35);
+    write_u8(stream, (u8)chr->act_attackroll.unk36);
+    write_u8(stream, (u8)chr->act_attackroll.unk37);
+    write_bytes(stream, chr->act_attackroll.unk38,
+                sizeof(chr->act_attackroll.unk38));
+    write_bytes(stream, chr->act_attackroll.unk3a,
+                sizeof(chr->act_attackroll.unk3a));
+    write_bytes(stream, chr->act_attackroll.unk3c,
+                sizeof(chr->act_attackroll.unk3c));
+    write_u32(stream, chr->act_attackroll.unk40);
+    write_u32(stream, chr->act_attackroll.unk44);
+    write_u32(stream, chr->act_attackroll.attack_time);
+    write_u32(stream, chr->act_attackroll.unk4c[0]);
+    write_u32(stream, chr->act_attackroll.unk4c[1]);
+    write_u32(stream, chr->act_attackroll.unk54[0]);
+    write_u32(stream, chr->act_attackroll.unk54[1]);
+    write_u8(stream, (u8)chr->act_attackroll.attack_item);
+    break;
   case ACT_RUNPOS:
     write_bytes(stream, &chr->act_runpos.pos, sizeof(coord3d));
     write_f32(stream, chr->act_runpos.neardist);
@@ -210,6 +378,163 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
       } else {
         chr->chrflags &= ~CHRFLAG_02000000;
       }
+    }
+    break;
+  }
+  case ACT_ATTACK: {
+    s16 anim_id = (s16)read_u16(stream);
+    s8 unk30 = (s8)read_u8(stream);
+    s8 unk31 = (s8)read_u8(stream);
+    s8 unk32 = (s8)read_u8(stream);
+    s8 unk33 = (s8)read_u8(stream);
+    s8 unk34 = (s8)read_u8(stream);
+    s8 unk36 = (s8)read_u8(stream);
+    s8 unk37 = (s8)read_u8(stream);
+    s8 unk38[2];
+    s8 unk3a[2];
+    s8 unk3c[2];
+    u32 unk40;
+    s32 unk44;
+    s32 attack_time;
+    u32 attacktype;
+    u32 entityid;
+    u32 unk54;
+    s32 type_of_motion;
+    s8 attack_item;
+
+    read_bytes(stream, unk38, sizeof(unk38));
+    read_bytes(stream, unk3a, sizeof(unk3a));
+    read_bytes(stream, unk3c, sizeof(unk3c));
+    unk40 = read_u32(stream);
+    unk44 = read_u32(stream);
+    attack_time = read_u32(stream);
+    attacktype = read_u32(stream);
+    entityid = read_u32(stream);
+    unk54 = read_u32(stream);
+    type_of_motion = read_u32(stream);
+    attack_item = (s8)read_u8(stream);
+
+    if (chr != NULL) {
+      chr->act_attack.animfloats = get_firing_animation_by_id(anim_id);
+      chr->act_attack.unk30 = unk30;
+      chr->act_attack.unk31 = unk31;
+      chr->act_attack.unk32 = unk32;
+      chr->act_attack.unk33 = unk33;
+      chr->act_attack.unk34 = unk34;
+      chr->act_attack.unk36 = unk36;
+      chr->act_attack.unk37 = unk37;
+      chr->act_attack.unk38[0] = unk38[0];
+      chr->act_attack.unk38[1] = unk38[1];
+      chr->act_attack.unk3a[0] = unk3a[0];
+      chr->act_attack.unk3a[1] = unk3a[1];
+      chr->act_attack.unk3c[0] = unk3c[0];
+      chr->act_attack.unk3c[1] = unk3c[1];
+      chr->act_attack.unk40 = unk40;
+      chr->act_attack.unk44 = unk44;
+      chr->act_attack.attack_time = attack_time;
+      chr->act_attack.attacktype = attacktype;
+      chr->act_attack.entityid = entityid;
+      chr->act_attack.unk54 = unk54;
+      chr->act_attack.type_of_motion = type_of_motion;
+      chr->act_attack.attack_item = attack_item;
+    }
+    break;
+  }
+  case ACT_ATTACKWALK: {
+    s32 clock_timer30 = read_u32(stream);
+    s32 clock_timer34 = read_u32(stream);
+    u32 unk038 = read_u32(stream);
+    s16 anim_id = (s16)read_u16(stream);
+    s32 timer40 = read_u32(stream);
+    s32 unk044 = read_u32(stream);
+    s8 unk48[2];
+    s8 unk4a[2];
+    s8 unk4C[2];
+    f32 speed;
+    s8 attack_item;
+
+    read_bytes(stream, unk48, sizeof(unk48));
+    read_bytes(stream, unk4a, sizeof(unk4a));
+    read_bytes(stream, unk4C, sizeof(unk4C));
+    speed = read_f32(stream);
+    attack_item = (s8)read_u8(stream);
+
+    if (chr != NULL) {
+      chr->act_attackwalk.clock_timer30 = clock_timer30;
+      chr->act_attackwalk.clock_timer34 = clock_timer34;
+      chr->act_attackwalk.unk038 = unk038;
+      chr->act_attackwalk.animfloats =
+          get_firing_animation_by_id(anim_id);
+      chr->act_attackwalk.timer40 = timer40;
+      chr->act_attackwalk.unk044 = unk044;
+      chr->act_attackwalk.unk48[0] = unk48[0];
+      chr->act_attackwalk.unk48[1] = unk48[1];
+      chr->act_attackwalk.unk4a[0] = unk4a[0];
+      chr->act_attackwalk.unk4a[1] = unk4a[1];
+      chr->act_attackwalk.unk4C[0] = unk4C[0];
+      chr->act_attackwalk.unk4C[1] = unk4C[1];
+      chr->act_attackwalk.speed = speed;
+      chr->act_attackwalk.attack_item = attack_item;
+    }
+    break;
+  }
+  case ACT_ATTACKROLL: {
+    s16 anim_id = (s16)read_u16(stream);
+    s8 unk30 = (s8)read_u8(stream);
+    s8 unk31 = (s8)read_u8(stream);
+    s8 unk32 = (s8)read_u8(stream);
+    s8 unk33 = (s8)read_u8(stream);
+    s8 unk34 = (s8)read_u8(stream);
+    s8 unk35 = (s8)read_u8(stream);
+    s8 unk36 = (s8)read_u8(stream);
+    s8 unk37 = (s8)read_u8(stream);
+    s8 unk38[2];
+    s8 unk3a[2];
+    s8 unk3c[2];
+    u32 unk40;
+    s32 unk44;
+    s32 attack_time;
+    s32 unk4c[2];
+    s32 unk54[2];
+    s8 attack_item;
+
+    read_bytes(stream, unk38, sizeof(unk38));
+    read_bytes(stream, unk3a, sizeof(unk3a));
+    read_bytes(stream, unk3c, sizeof(unk3c));
+    unk40 = read_u32(stream);
+    unk44 = read_u32(stream);
+    attack_time = read_u32(stream);
+    unk4c[0] = read_u32(stream);
+    unk4c[1] = read_u32(stream);
+    unk54[0] = read_u32(stream);
+    unk54[1] = read_u32(stream);
+    attack_item = (s8)read_u8(stream);
+
+    if (chr != NULL) {
+      chr->act_attackroll.animfloats =
+          get_firing_animation_by_id(anim_id);
+      chr->act_attackroll.unk30 = unk30;
+      chr->act_attackroll.unk31 = unk31;
+      chr->act_attackroll.unk32 = unk32;
+      chr->act_attackroll.unk33 = unk33;
+      chr->act_attackroll.unk34 = unk34;
+      chr->act_attackroll.unk35 = unk35;
+      chr->act_attackroll.unk36 = unk36;
+      chr->act_attackroll.unk37 = unk37;
+      chr->act_attackroll.unk38[0] = unk38[0];
+      chr->act_attackroll.unk38[1] = unk38[1];
+      chr->act_attackroll.unk3a[0] = unk3a[0];
+      chr->act_attackroll.unk3a[1] = unk3a[1];
+      chr->act_attackroll.unk3c[0] = unk3c[0];
+      chr->act_attackroll.unk3c[1] = unk3c[1];
+      chr->act_attackroll.unk40 = unk40;
+      chr->act_attackroll.unk44 = unk44;
+      chr->act_attackroll.attack_time = attack_time;
+      chr->act_attackroll.unk4c[0] = unk4c[0];
+      chr->act_attackroll.unk4c[1] = unk4c[1];
+      chr->act_attackroll.unk54[0] = unk54[0];
+      chr->act_attackroll.unk54[1] = unk54[1];
+      chr->act_attackroll.attack_item = attack_item;
     }
     break;
   }
@@ -459,8 +784,24 @@ static void load_model_animation(StateStream *stream, Model *model) {
   }
 }
 
+static void clear_chr_transient_sounds(ChrRecord *chr) {
+  ALSoundState *sound3 = (ALSoundState *)chr->ptr_SEbuffer3;
+  ALSoundState *sound4 = (ALSoundState *)chr->ptr_SEbuffer4;
+
+  if (sound3 != NULL && sndGetPlayingState(sound3) != 0) {
+    sndDeactivate(sound3);
+  }
+  if (sound4 != NULL && sndGetPlayingState(sound4) != 0) {
+    sndDeactivate(sound4);
+  }
+
+  chr->ptr_SEbuffer3 = NULL;
+  chr->ptr_SEbuffer4 = NULL;
+}
+
 void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   s32 ailist_id = -1;
+  bool supported_action = is_supported_chr_action(chr);
   bool has_model_transform =
       chr->model != NULL && chr->model->obj != NULL &&
       chr->model->obj->RootNode != NULL &&
@@ -502,6 +843,22 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_u32(stream, chr->timer60);
   write_u8(stream, (chr->hidden & CHRHIDDEN_TIMER_ACTIVE) != 0);
   write_f32(stream, chr->shotbondsum);
+  write_u8(stream, chr->firecount[0]);
+  write_u8(stream, chr->firecount[1]);
+  write_u8(stream, (u8)chr->aimendcount);
+  write_f32(stream, chr->aimuplshoulder);
+  write_f32(stream, chr->aimuprshoulder);
+  write_f32(stream, chr->aimupback);
+  write_f32(stream, chr->aimsideback);
+  write_f32(stream, chr->aimendlshoulder);
+  write_f32(stream, chr->aimendrshoulder);
+  write_f32(stream, chr->aimendback);
+  write_f32(stream, chr->aimendsideback);
+  write_u32(stream, chr->fireslot_word);
+  write_u32(stream, chr->field_178[0]);
+  write_u32(stream, chr->field_178[1]);
+  write_bytes(stream, chr->unk180, sizeof(chr->unk180));
+  write_u16(stream, chr->hidden & CHR_COMBAT_HIDDEN_MASK);
   write_bytes(stream, &chr->shadecol, sizeof(rgba_u8));
   write_bytes(stream, &chr->nextcol, sizeof(rgba_u8));
 
@@ -533,8 +890,8 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
     write_f32(stream, getsubroty(chr->model));
   }
 
-  write_u8(stream, is_supported_action(chr->actiontype));
-  if (is_supported_action(chr->actiontype)) {
+  write_u8(stream, supported_action);
+  if (supported_action) {
     save_supported_action(stream, chr);
     write_u8(stream, chr->model != NULL);
     if (chr->model != NULL) {
@@ -623,6 +980,25 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
     chr->hidden &= ~CHRHIDDEN_TIMER_ACTIVE;
   }
   chr->shotbondsum = read_f32(stream);
+  chr->firecount[0] = read_u8(stream);
+  chr->firecount[1] = read_u8(stream);
+  chr->aimendcount = (s8)read_u8(stream);
+  chr->aimuplshoulder = read_f32(stream);
+  chr->aimuprshoulder = read_f32(stream);
+  chr->aimupback = read_f32(stream);
+  chr->aimsideback = read_f32(stream);
+  chr->aimendlshoulder = read_f32(stream);
+  chr->aimendrshoulder = read_f32(stream);
+  chr->aimendback = read_f32(stream);
+  chr->aimendsideback = read_f32(stream);
+  chr->fireslot_word = read_u32(stream);
+  chr->field_178[0] = read_u32(stream);
+  chr->field_178[1] = read_u32(stream);
+  read_bytes(stream, chr->unk180, sizeof(chr->unk180));
+  chr->hidden =
+      (chr->hidden & ~CHR_COMBAT_HIDDEN_MASK) |
+      ((u16)read_u16(stream) & CHR_COMBAT_HIDDEN_MASK);
+  clear_chr_transient_sounds(chr);
   read_bytes(stream, &chr->shadecol, sizeof(rgba_u8));
   read_bytes(stream, &chr->nextcol, sizeof(rgba_u8));
 

@@ -487,14 +487,19 @@ The implemented save/load slices restore
 `padpreset1`, `chrpreset1`, `chrseeshot`, `chrseedie`,
 `lastseetarget60`, `lastknowntargetpos`, `targetTile`, `seen_bond_time`, and
 `lastheartarget60`, `chrnum`, `flags2`, `timer60`, the
-`CHRHIDDEN_TIMER_ACTIVE` bit, `shotbondsum`, `shadecol`, and `nextcol`.
+`CHRHIDDEN_TIMER_ACTIVE` bit, `shotbondsum`, combat action/aiming state,
+`firecount`, `aimendcount`, all eight shoulder/back angles, `fireslot_word`,
+`field_178`, both `unk180` beam caches, combat/moving hidden bits, `shadecol`,
+and `nextcol`. Dynamic `ptr_SEbuffer3`/`ptr_SEbuffer4` sound nodes are stopped
+and cleared rather than serialized.
 The AI interpreter fields `ailist`, `aioffset`, `aireturnlist`, and `sleep`
 are also restored. Spatial restoration covers the CHR prop's position, stand
 tile, rooms, model root transform, movement history, ground state, and
 collision bounds. Equipment restoration covers both hand slots, the legacy
 third slot when already valid, the hat pointer, CHR-owned prop hierarchy,
 model attachment nodes, and `RUNTIMEBITFLAG_HASOWNER`. `flags2` is restored
-completely; only the timer-active bit of `hidden` is restored. `targetTile` is
+completely; the timer, firing, tracer, and moving subsets of `hidden` are
+restored. `targetTile` is
 relocated through a stable stand-tile offset, while `ailist` is relocated
 through a stable AI list ID. See `CHR.md` for the fields explicitly deferred
 and the gated replacement architecture.

@@ -11,8 +11,8 @@ Above all, make sure you investigate thoroughly to fully understand where pieces
 ## Current Goal
 
 Currently we want to complete `PROP_TYPE_CHR`, the final prop type. The first
-thirteen conservative field sets, including character/model configuration,
-spatial, movement, equipment, and all pointer-free/model-only actions, are
+fourteen conservative field sets, including character/model configuration,
+spatial, movement, equipment, scripted/model actions, and combat actions, are
 implemented; supporting structures and the remaining restore surface are
 documented in `CHR.md`. Do not broaden the implementation without investigating
 and documenting the additional state coupling.
@@ -44,22 +44,16 @@ The common live model animation identity, frame, speed, looping,
 interpolation, and transform state is implemented for the completed simple
 and navigation batches. Implement the remaining action-specific payloads in
 batches:
-Combat: attack, attack-walk, and attack-roll.
 Payload-bearing player action: bond-multi.
 Death and hit-reaction actions remain with damage/lifecycle below.
-
-Combat aiming state
-firecount, aimendcount, eight shoulder/back aim values, fireslot, and unk180 beam caches.
-These depend on equipped weapons, attack action, and model pose, so they should follow equipment and combat-action support.
 
 Damage and lifecycle
 damage, maxdamage, fadealpha, flinchcnt, chrflags, remaining hidden bits, and die/dead/argh actions.
 Whole chrflags and hidden restoration belongs here. Their bits can trigger initialization, firing, movement, freezing, item drops, or character removal.
 
-Audio and transient runtime allocations
-ptr_SEbuffer3, ptr_SEbuffer4, field_178, and field_20.
-The sound pointers and field_20's dynamically allocated skeletal joint/matrix
-list should be cleared or reconstructed, not serialized as addresses.
+Transient runtime allocation
+field_20's dynamically allocated skeletal joint/matrix list must be cleared or
+reconstructed, not serialized as an address.
 
 Allocation and recreation
 prop, model, missing CHR creation, and removal of characters absent from the save.

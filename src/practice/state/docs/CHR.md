@@ -344,7 +344,8 @@ Model root RW data;          /* Pointer-free animation translation/heading state
 ```
 
 The supported discriminators are `ACT_INIT`, `ACT_STAND`, `ACT_KNEEL`,
-`ACT_ANIM`, `ACT_SIDESTEP`, `ACT_JUMPOUT`, `ACT_RUNPOS`, `ACT_PATROL`, `ACT_GOPOS`,
+`ACT_ANIM`, `ACT_ATTACK`, `ACT_ATTACKWALK`, `ACT_ATTACKROLL`, `ACT_SIDESTEP`,
+`ACT_JUMPOUT`, `ACT_RUNPOS`, `ACT_PATROL`, `ACT_GOPOS`,
 `ACT_SURRENDER`, `ACT_LOOKATTARGET`, `ACT_SURPRISED`, `ACT_STARTALARM`,
 `ACT_THROWGRENADE`, `ACT_TURNDIR`, `ACT_TEST`, `ACT_BONDINTRO`, `ACT_BONDDIE`,
 and `ACT_NULL`. Saving any other action writes no action/model payload, and
@@ -636,21 +637,29 @@ per-hand timing, and aiming interpolation state.
 ```c
 struct act_attack {
     struct weapon_firing_animation_table *animfloats; /* 0x00 - Static table row. */
-    s8  unk30, unk31, unk32, unk33;                   /* 0x04 - TODO. */
-    s8  unk34, unk35, unk36, unk37;                   /* 0x08 - TODO. */
-    s8  unk38[2], unk3a[2];                           /* 0x0c - Per-hand state. */
-    s8  unk3c[2], unk3e, unk3f;                       /* 0x10 - Per-hand/state bytes. */
-    u32 unk40;                                         /* 0x14 - TODO. */
-    s32 unk44;                                         /* 0x18 - Previous/related attack time. */
-    s32 attack_time;                                   /* 0x1c - Attack elapsed/countdown ticks. */
+    s8  unk30;      /* 0x04 - Heading/turn interpolation state. */
+    s8  unk31;      /* 0x05 - Boolean: firing window entered for this phase. */
+    s8  unk32;      /* 0x06 - Active hand index, GUNRIGHT/GUNLEFT (0/1). */
+    s8  unk33;      /* 0x07 - Completed firing-window count. */
+    s8  unk34;      /* 0x08 - Number of firing windows requested. */
+    s8  unk35;      /* 0x09 - Inactive for ACT_ATTACK. */
+    s8  unk36;      /* 0x0a - Boolean attack-animation transition mode. */
+    s8  unk37;      /* 0x0b - Boolean alternate end-frame mode. */
+    s8  unk38[2];   /* 0x0c - Per-hand enabled/aim phase bytes. */
+    s8  unk3a[2];   /* 0x0e - Per-hand firing-window completion bytes. */
+    s8  unk3c[2];   /* 0x10 - Per-hand firing/weapon phase bytes. */
+    s8  unk3e, unk3f; /* 0x12 - Inactive padding in GoldenEye. */
+    u32 unk40;      /* 0x14 - Firing-window tick accumulator. */
+    s32 unk44;      /* 0x18 - Global tick of the latest phase transition. */
+    s32 attack_time;/* 0x1c - Global tick of the latest emitted attack. */
     u32 attacktype;                                    /* 0x20 - ATTACKTYPE bitfield. */
     u32 entityid;                                      /* 0x24 - Target ID for CHR/PAD/DIRECTION. */
-    u32 unk54;                                         /* 0x28 - TODO. */
-    s32 type_of_motion;                                /* 0x2c - Re-aim/motion state. */
-    u32 unk5C, unk60, unk64, unk68, unk6c;             /* 0x30 - TODO. */
-    u32 unk70, unk74, unk78, unk7c;                    /* 0x44 - TODO. */
+    u32 unk54;      /* 0x28 - Boolean: run the retarget transition callback. */
+    s32 type_of_motion; /* 0x2c - Re-aim state: 0 normal, 1 entering, 2 ending. */
+    u32 unk5C, unk60, unk64, unk68, unk6c; /* 0x30 - Inactive tail storage. */
+    u32 unk70, unk74, unk78, unk7c;        /* 0x44 - Inactive tail storage. */
     s8  attack_item;                                   /* 0x54 - ITEM_IDS weapon ID. */
-    u8  unk81, unk82, unk83;                           /* 0x55 - TODO. */
+    u8  unk81, unk82, unk83; /* 0x55 - Inactive tail bytes in GoldenEye. */
 };
 ```
 
@@ -660,11 +669,11 @@ Valid `attacktype` bits are `ATTACKTYPE_BOND` (`0x01`),
 `ATTACKTYPE_AIMONLY` (`0x20`), `ATTACKTYPE_DONTTURN` (`0x40`), and
 `ATTACKTYPE_TARGET` (`0x80`); zero means no attack target.
 
-`animfloats` points into static weapon animation tables, but it must eventually
-be encoded as a stable table identity/index rather than saved as an address.
-
-TODO: Name and determine the possible values of the remaining attack fields
-before this action is serialized.
+`animfloats` is encoded as the stable table/row identity described above.
+Signed phase bytes use their full `-128..127` storage range, though initialized
+Boolean/hand values are normally `0` or `1`. `unk33` and `unk34` are small
+nonnegative volley counters. The fields marked inactive have no GoldenEye
+reads or initialization and are not serialized.
 
 ### `act_attackwalk`
 
@@ -673,28 +682,30 @@ separate clocks.
 
 ```c
 struct act_attackwalk {
-    u32 unk02c;                          /* 0x00 - TODO. */
-    s32 clock_timer30, clock_timer34;    /* 0x04 - Action clocks/timers. */
-    u32 unk038;                          /* 0x0c - TODO. */
+    u32 unk02c;                          /* 0x00 - Inactive overlay storage. */
+    s32 clock_timer30;                   /* 0x04 - Elapsed action ticks. */
+    s32 clock_timer34;                   /* 0x08 - Randomized action deadline. */
+    u32 unk038;                          /* 0x0c - Boolean movement completed/failed. */
     struct weapon_firing_animation_table *animfloats; /* 0x10 - Static table row. */
-    s32 timer40;                         /* 0x14 - Action timer. */
-    s32 unk044;                          /* 0x18 - TODO. */
-    s8  unk48[2], unk4a[2], unk4C[2];   /* 0x1c - Per-hand/action bytes. */
-    u8  flip;                            /* 0x22 - Boolean animation mirror. */
-    s8  unk4f;                           /* 0x23 - TODO. */
-    s32 unk50;                           /* 0x24 - TODO. */
+    s32 timer40;                         /* 0x14 - Next/previous firing phase tick. */
+    s32 unk044;                          /* 0x18 - Active hand index, 0 or 1. */
+    s8  unk48[2], unk4a[2], unk4C[2];   /* 0x1c - Per-hand firing phase bytes. */
+    u8  flip;                            /* 0x22 - Inactive; flip lives in Model. */
+    s8  unk4f;                           /* 0x23 - Inactive overlay storage. */
+    s32 unk50;                           /* 0x24 - Inactive overlay storage. */
     f32 speed;                           /* 0x28 - Current movement speed. */
-    u32 unk58, unk5C, unk60, unk64;      /* 0x2c - TODO. */
-    u32 unk68, unk6c, unk70, unk74;      /* 0x3c - TODO. */
-    u32 unk78, unk7c;                    /* 0x4c - TODO. */
+    u32 unk58, unk5C, unk60, unk64;      /* 0x2c - Inactive tail storage. */
+    u32 unk68, unk6c, unk70, unk74;      /* 0x3c - Inactive tail storage. */
+    u32 unk78, unk7c;                    /* 0x4c - Inactive tail storage. */
     s8  attack_item;                     /* 0x54 - ITEM_IDS weapon ID. */
-    u8  unk81, unk82, unk83;             /* 0x55 - TODO. */
+    u8  unk81, unk82, unk83;             /* 0x55 - Inactive tail bytes. */
 };
 ```
 
-TODO: Determine the meaning and valid ranges of the unnamed fields and how the
-movement state synchronizes with `ChrRecord::prevpos`, `fallspeed`, and the
-model animation.
+The elapsed clock starts at zero and the deadline is initialized to a randomized
+reaction interval. `speed` is updated by `chrlvApplySpeed`; the already restored
+position, `prevpos`, fall state, collision bounds, and model root keep that
+movement coherent. Only the fields consumed by the attack-walk tick are saved.
 
 ### `act_attackroll`
 
@@ -704,22 +715,26 @@ the middle arrays hold roll-specific state.
 ```c
 struct act_attackroll {
     struct weapon_firing_animation_table *animfloats; /* 0x00 - Static table row. */
-    s8  unk30, unk31, unk32, unk33;                   /* 0x04 - TODO. */
-    s8  unk34, unk35, unk36, unk37;                   /* 0x08 - TODO. */
-    s8  unk38[2], unk3a[2];                           /* 0x0c - Per-hand state. */
-    s8  unk3c[2], unk3e, unk3f;                       /* 0x10 - Per-hand/state bytes. */
-    u32 unk40;                                         /* 0x14 - TODO. */
-    s32 unk44;                                         /* 0x18 - Previous/related attack time. */
-    s32 attack_time;                                   /* 0x1c - Attack elapsed/countdown ticks. */
-    s32 unk4c[2], unk54[2];                            /* 0x20 - Roll-specific state. */
-    u32 unk5C, unk60, unk64, unk68, unk6c;             /* 0x30 - TODO. */
-    u32 unk70, unk74, unk78, unk7c;                    /* 0x44 - TODO. */
+    s8  unk30, unk31, unk32, unk33; /* 0x04 - Turn/hand/volley phase bytes. */
+    s8  unk34;                     /* 0x08 - Requested firing-window count. */
+    s8  unk35;                     /* 0x09 - Boolean roll-transition variant. */
+    s8  unk36, unk37;              /* 0x0a - Animation transition mode bytes. */
+    s8  unk38[2], unk3a[2];        /* 0x0c - Per-hand phase bytes. */
+    s8  unk3c[2], unk3e, unk3f;    /* 0x10 - Per-hand bytes then inactive padding. */
+    u32 unk40;                     /* 0x14 - Firing-window tick accumulator. */
+    s32 unk44;                     /* 0x18 - Global tick of latest phase transition. */
+    s32 attack_time;               /* 0x1c - Global tick of latest emitted attack. */
+    s32 unk4c[2], unk54[2];        /* 0x20 - Roll target/re-aim transition words. */
+    u32 unk5C, unk60, unk64, unk68, unk6c; /* 0x30 - Inactive tail storage. */
+    u32 unk70, unk74, unk78, unk7c;        /* 0x44 - Inactive tail storage. */
     s8  attack_item;                                   /* 0x54 - ITEM_IDS weapon ID. */
-    u8  unk81, unk82, unk83;                           /* 0x55 - TODO. */
+    u8  unk81, unk82, unk83; /* 0x55 - Inactive tail bytes in GoldenEye. */
 };
 ```
 
-TODO: Determine the meaning and possible values of all unnamed roll fields.
+The leading bytes share stationary-attack semantics. The four transition words
+are read through both the roll member and compatible stationary-action aliases;
+all four are therefore restored. Tail storage with no readers is omitted.
 
 ### `act_sidestep` and `act_jumpout`
 
@@ -968,6 +983,68 @@ Only this bit is merged into `chrflags`; all unrelated lifecycle and behavior
 bits remain untouched. This is safe for both retained CHRs and newly allocated
 replacement-mode CHRs and does not serialize an audio pointer.
 
+The fourteenth CHR serialization slice adds the three combat actions and their
+shared aiming/firing state:
+
+```c
+ChrRecord::act_attack;      /* Stationary attack phase and target state. */
+ChrRecord::act_attackwalk;  /* Moving attack clocks, hand phases, and speed. */
+ChrRecord::act_attackroll;  /* Roll attack phase and transition state. */
+ChrRecord::firecount[2];    /* Per-hand trigger/update counts, 0-255. */
+ChrRecord::aimendcount;     /* Remaining aim interpolation ticks. */
+Eight shoulder/back angles; /* Current and target upper-body angles, radians. */
+ChrRecord::fireslot_word;   /* Complete legacy per-hand firing-slot storage. */
+ChrRecord::field_178[2];    /* Per-hand absolute sound/tracer throttle ticks. */
+ChrRecord::unk180[2];       /* Per-hand beam/tracer endpoint caches. */
+Combat hidden bits;         /* Fire-left/right, tracer, and moving bits. */
+```
+
+Every `animfloats` pointer is encoded as a 16-bit table/row identity. The high
+byte selects one of the permanent rifle, pistol, dual-weapon, crouched, roll,
+or attack-walk tables, and the low byte selects a validated row. `-1` represents
+`NULL` or an unrecognized pointer. A combat action is serialized only when its
+live pointer maps to a registered row, so loading can never install an
+integer, stale address, or unvalidated pointer. Replacement mode resolves the
+same static row before the first combat tick and does not rely on the previous
+CHR allocation.
+
+The action payload writes only fields initialized or consumed by GoldenEye.
+For stationary attacks these are heading/volley phase bytes, active-hand and
+per-hand phase arrays, phase clocks, last-shot ticks, target selector and ID,
+re-aim state, and the signed `ITEM_IDS` weapon ID. Attack-walk stores its
+elapsed/deadline clocks, movement-result flag, per-hand firing phases, current
+movement speed, and weapon ID. Attack-roll stores the stationary-prefix phase
+bytes plus its four roll/target transition words and weapon ID. Unreferenced
+tail words and padding in the declarations remain omitted.
+
+`firecount[0]` and `[1]` belong to the right and left hands. Automatic weapons
+use them modulo the weapon firing rate; semiautomatic weapons increment and
+decrement them around individual trigger events. `aimendcount` is normally set
+to `10`, decreases by `g_ClockTimer`, and blends the four current angles toward
+the four target angles. The shoulder and back values are radians and may be
+positive or negative within limits supplied by the selected firing table.
+
+`fireslot_word` initializes to zero. Its two named signed-byte slots are legacy
+per-hand firing state; the current C decompilation has no named consumer, so
+the complete 32-bit union storage is preserved rather than inferring which
+bytes are inactive. `field_178[hand]` is compared with `g_GlobalTimer` to
+throttle per-hand firing sounds/tracers and is restored as an absolute tick.
+
+`unk180[hand]` contains an activity byte (`-1` means inactive), the associated
+`ITEM_IDS` value, two small state bytes, two world-space vectors, and five
+floating-point beam length/interpolation values. It contains no pointers, so
+the complete cache is safe to serialize. The restored hidden subset consists
+of `CHRHIDDEN_FIRE_WEAPON_LEFT` (`0x0004`),
+`CHRHIDDEN_FIRE_WEAPON_RIGHT` (`0x0008`), `CHRHIDDEN_FIRE_TRACER` (`0x0080`),
+and `CHRHIDDEN_MOVING` (`0x0100`). Only those bits are merged; destructive and
+lifecycle bits remain live.
+
+`ptr_SEbuffer3` and `ptr_SEbuffer4` are dynamic `ALSoundState` addresses and
+are never serialized. Loading deactivates any currently playing nodes and
+sets both pointers to `NULL`; subsequent combat ticks may allocate fresh sound
+state. The same clearing is safe for a newly allocated CHR, whose pointers
+start as `NULL`.
+
 ### `act_surprised`
 
 ```c
@@ -1049,9 +1126,14 @@ struct weapon_firing_animation_table {
 };
 ```
 
-Rows live in static weapon/stance-specific tables. The pointer is reconstructible
-in principle, but the table and row need stable identifiers. TODO: determine
-the meaning and range of all columns before serializing attack actions.
+Rows live in static weapon/stance-specific tables and are resolved through the
+stable table/row registry used by the combat payload. Columns `anonymous_1`
+through `anonymous_11` are animation phase boundaries/end frames,
+`anonymous_12` and `anonymous_13` are base shoulder/back angular limits,
+`anonymous_14` and `anonymous_15` clamp horizontal aim, and
+`anonymous_16`/`anonymous_17` scale the opposite shoulder for positive and
+negative aim. The action tick consumes the static row directly after load; the
+72-byte table contents are not duplicated in SRAM.
 
 ### `ChrRecord_f180`
 
@@ -1063,16 +1145,16 @@ left-hand cache.
 typedef struct ChrRecord_f180 {
     s8      unk00;   /* Cache/activity state; initialized to -1 (inactive). */
     s8      item_id; /* ITEM_IDS value associated with the cached shot. */
-    char    unk02;   /* TODO: determine purpose and values. */
-    char    unk03;   /* TODO: determine purpose and values. */
+    char    unk02;   /* Small beam/tracer phase byte. */
+    char    unk03;   /* Small beam/tracer phase byte. */
     coord3d pos;     /* Cached beam endpoint/origin position. */
     coord3d delta;   /* Cached beam direction/delta. */
-    f32     unk1c;   /* TODO: beam-length/interpolation value. */
-    f32     unk20;   /* TODO: determine purpose and values. */
-    f32     unk24;   /* TODO: determine purpose and values. */
-    f32     unk28;   /* TODO: determine purpose and values. */
+    f32     unk1c;   /* Beam-length/interpolation value. */
+    f32     unk20;   /* Beam endpoint/interpolation working value. */
+    f32     unk24;   /* Beam endpoint/interpolation working value. */
+    f32     unk28;   /* Beam endpoint/interpolation working value. */
 } ChrRecord_f180;
 ```
 
-This is transient visual/weapon state and is not part of the conservative
-first save/load slice.
+This pointer-free transient visual/weapon state is serialized with the combat
+slice so a loaded tracer resumes with coherent endpoints and interpolation.
