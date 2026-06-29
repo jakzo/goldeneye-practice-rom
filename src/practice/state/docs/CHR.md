@@ -348,7 +348,8 @@ The supported discriminators are `ACT_INIT`, `ACT_STAND`, `ACT_KNEEL`,
 `ACT_JUMPOUT`, `ACT_RUNPOS`, `ACT_PATROL`, `ACT_GOPOS`,
 `ACT_SURRENDER`, `ACT_LOOKATTARGET`, `ACT_SURPRISED`, `ACT_STARTALARM`,
 `ACT_THROWGRENADE`, `ACT_TURNDIR`, `ACT_TEST`, `ACT_BONDINTRO`, `ACT_BONDDIE`,
-and `ACT_NULL`. Saving any other action writes no action/model payload, and
+`ACT_BONDMULTI`, and `ACT_NULL`. Saving any other action writes no
+action/model payload, and
 loading it leaves the destination action live; its union cannot safely be
 interpreted until the corresponding batch is implemented.
 
@@ -946,8 +947,7 @@ likewise branch exclusively on model identity/frame.
 GoldenEye codebase. `ACT_BONDDIE` has a dispatched but empty tick, and
 `ACT_NULL` has no tick case. They are retained enum/layout markers; restoring
 their discriminator and model state exactly preserves their inert behavior.
-`ACT_BONDMULTI` is not included because it contains a table pointer plus
-animation state. Combat and damage/lifecycle actions also remain excluded.
+Damage/lifecycle actions remain excluded.
 
 The thirteenth CHR serialization slice adds `ACT_ANIM`:
 
@@ -1045,6 +1045,34 @@ sets both pointers to `NULL`; subsequent combat ticks may allocate fresh sound
 state. The same clearing is safe for a newly allocated CHR, whose pointers
 start as `NULL`.
 
+The fifteenth CHR serialization slice adds `ACT_BONDMULTI`:
+
+```c
+ChrRecord::act_bondmulti.unk2c; /* Static firing-animation table row, or NULL. */
+```
+
+Despite its name, GoldenEye has no setter or action-tick case for
+`ACT_BONDMULTI`; it appears to be a retained multiplayer-player action from a
+related engine version. Its only GoldenEye consumer is
+`chrlvGetSubrotySideback`, which reads element `3` as the same side/back heading
+offset read from `weapon_firing_animation_table::anonymous_3` for
+`ACT_ATTACK` and `ACT_ATTACKROLL`. The pointer type and access layout therefore
+identify `unk2c` as a pointer to one of the permanent firing-animation table
+rows.
+
+The pointer is serialized with the same validated 16-bit table/row identity
+used by combat actions; `-1` represents `NULL`. An `ACT_BONDMULTI` payload is
+saved only when this pointer is `NULL` or maps to a registered row. Loading
+resolves the identity against the static tables even for a newly allocated
+replacement-mode CHR, so it never depends on a retained action pointer or
+existing prop.
+
+The common model-animation payload separately restores the live animation,
+frames, speeds, interpolation, looping, and root transform. The four following
+named words in `act_bondmulti` have no reads or writes anywhere in GoldenEye
+and are inactive union storage, not live animation state; they are deliberately
+omitted.
+
 ### `act_surprised`
 
 ```c
@@ -1084,14 +1112,15 @@ Multiplayer player-model animation state.
 
 ```c
 struct act_bondmulti {
-    f32 *unk2c; /* Pointer to animation data; exact table type is unknown. */
-    s32  unk30, unk34, unk38, unk3c; /* Animation state; TODO. */
+    f32 *unk2c; /* Static weapon_firing_animation_table row, or NULL. */
+    s32  unk30, unk34, unk38, unk3c; /* Inactive in GoldenEye. */
     int  padding[25];                /* Unnamed remainder of union storage. */
 };
 ```
 
-The animation pointer needs a stable table identity/index. TODO: identify the
-pointed-to table and document the named state fields before serialization.
+`unk2c` is restored by stable table/row identity as described in the fifteenth
+slice. The four named words and padding have no GoldenEye readers or writers,
+so saving them would preserve stale bytes from the preceding union member.
 
 ### Raw action aliases
 

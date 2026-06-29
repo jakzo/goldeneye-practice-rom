@@ -11,7 +11,7 @@ Above all, make sure you investigate thoroughly to fully understand where pieces
 ## Current Goal
 
 Currently we want to complete `PROP_TYPE_CHR`, the final prop type. The first
-fourteen conservative field sets, including character/model configuration,
+fifteen conservative field sets, including character/model configuration,
 spatial, movement, equipment, scripted/model actions, and combat actions, are
 implemented; supporting structures and the remaining restore surface are
 documented in `CHR.md`. Do not broaden the implementation without investigating
@@ -38,14 +38,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 - Right now the code only restores state to existing active props, but eventually once the code supports all types it will replace all props with the restored ones, so if you assume things based on this (like a pointer to a prop being correct already since we only restore to active props) then make sure to include code which does it properly without the assumption behind the ADD_AND_REMOVE_PROPS flag
 
 ## Remaining Groups
-
-Remaining action and model-animation batches
-The common live model animation identity, frame, speed, looping,
-interpolation, and transform state is implemented for the completed simple
-and navigation batches. Implement the remaining action-specific payloads in
-batches:
-Payload-bearing player action: bond-multi.
-Death and hit-reaction actions remain with damage/lifecycle below.
 
 Damage and lifecycle
 damage, maxdamage, fadealpha, flinchcnt, chrflags, remaining hidden bits, and die/dead/argh actions.

@@ -115,6 +115,7 @@ static bool is_supported_action(ACT_TYPE actiontype) {
   case ACT_TEST:
   case ACT_BONDINTRO:
   case ACT_BONDDIE:
+  case ACT_BONDMULTI:
   case ACT_NULL:
     return TRUE;
   default:
@@ -134,6 +135,11 @@ static bool is_supported_chr_action(const ChrRecord *chr) {
     return get_firing_animation_id(chr->act_attackwalk.animfloats) >= 0;
   case ACT_ATTACKROLL:
     return get_firing_animation_id(chr->act_attackroll.animfloats) >= 0;
+  case ACT_BONDMULTI:
+    return chr->act_bondmulti.unk2c == NULL ||
+           get_firing_animation_id(
+               (struct weapon_firing_animation_table *)
+                   chr->act_bondmulti.unk2c) >= 0;
   default:
     return TRUE;
   }
@@ -322,6 +328,12 @@ static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
     save_waydata(stream, &chr->act_gopos.waydata);
     write_u32(stream, chr->act_gopos.unk9c);
     write_f32(stream, chr->act_gopos.speed);
+    break;
+  case ACT_BONDMULTI:
+    write_u16(
+        stream,
+        (u16)get_firing_animation_id(
+            (struct weapon_firing_animation_table *)chr->act_bondmulti.unk2c));
     break;
   default:
     // Payload-free actions are driven entirely by their discriminator, Model
@@ -618,6 +630,15 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
       chr->act_gopos.waydata = waydata;
       chr->act_gopos.unk9c = unk9c;
       chr->act_gopos.speed = speed;
+    }
+    break;
+  }
+  case ACT_BONDMULTI: {
+    s16 animation_id = (s16)read_u16(stream);
+
+    if (chr != NULL) {
+      chr->act_bondmulti.unk2c =
+          (f32 *)get_firing_animation_by_id(animation_id);
     }
     break;
   }
