@@ -411,16 +411,11 @@ common fields stay live until their dependencies are implemented.
 Do not include the following in the implemented slices:
 
 - `damage`, `maxdamage`, unsupported action-union data, unsupported
-  `actiontype` values, or flags. Those values have coupled state which must be
-  investigated and restored together.
+  `actiontype` values, or lifecycle flags. Those values have coupled state
+  which must be investigated and restored together.
 - The complete `hidden` and `chrflags` fields. They contain action-coupled and
   destructive bits which must be restored with character action, model,
   movement, damage, and allocation state.
-- `field_20`. Despite its earlier tentative pathfinding label, its consumers
-  identify it as a dynamically allocated skeletal joint/matrix render list.
-  Its address is process-local and must be reconstructed or cleared with
-  allocation/model support.
-
 The normal testing path still requires the same enabled CHR prop to exist.
 The gated replacement path does not retain its `ChrRecord` or `Model`
 back-pointers: it recreates them first, then applies spatial/model state and
@@ -1072,6 +1067,57 @@ frames, speeds, interpolation, looping, and root transform. The four following
 named words in `act_bondmulti` have no reads or writes anywhere in GoldenEye
 and are inactive union storage, not live animation state; they are deliberately
 omitted.
+
+The sixteenth CHR serialization slice handles the transient render list:
+
+```c
+ChrRecord::field_20; /* Head of the current skeletal joint render-node list. */
+```
+
+`field_20` is either `NULL` or the head of a linked list drawn by
+`drawjointlist`. Each node contains a live `Model *`, a `ModelNode *`, a joint
+size, and pool links. The nodes come from the 600-entry global render-node pool
+initialized by `sub_GAME_7F005450`; their addresses and contents are derived
+from the current model traversal and must not be serialized.
+
+Character rendering returns the preceding list to the pool with
+`sub_GAME_7F06B248`, clears `field_20`, and builds a fresh list from the current
+model and visible joints. Loading now performs the same return-and-clear
+operation before applying saved CHR state. The next render rebuilds the list
+from the restored model. This prevents stale model/node pointers and also
+prevents leaking pool entries across repeated loads.
+
+In replacement mode, `init_GUARDdata_with_set_values` initializes a newly
+created CHR's `field_20` to `NULL`, so the same path is a no-op and does not
+assume a retained character or model allocation. No bytes are added to the
+save payload because this is derived, frame-local state.
+
+The seventeenth CHR serialization slice restores the independent render-flinch
+controller:
+
+```c
+ChrRecord::flinchcnt;   /* Current render-flinch phase, or -1 when inactive. */
+CHRHIDDEN_RAND_FLINCH_MASK; /* Four random flinch-direction bits. */
+```
+
+`flinchcnt` is a signed render-time phase. `-1` means inactive.
+`chrSetHiddenToRandom` starts a flinch at `1`, choosing zero or one bit from
+each of the pairs `0x1000`/`0x2000` and `0x4000`/`0x8000`. The resulting nine
+direction combinations control small procedural rotations applied while
+character matrices are calculated. Visible-character rendering advances the
+counter by `g_ClockTimer` and returns it to `-1` at the terminal phase (30
+NTSC ticks in the practice build).
+
+The counter and all four direction bits are restored together. Only
+`CHRHIDDEN_RAND_FLINCH_MASK` is merged into `hidden`; removal, freezing,
+item-drop, background-AI, and other lifecycle bits remain untouched. A newly
+allocated replacement CHR starts with `flinchcnt == -1` and no hidden bits,
+then receives the same saved scalar/mask pair, so this does not rely on a
+retained prop, model, or previous random choice.
+
+`maxdamage` remains deferred with `damage`: restoring only the threshold could
+leave a retained character's current damage already above it without the
+corresponding fatal action transition.
 
 ### `act_surprised`
 

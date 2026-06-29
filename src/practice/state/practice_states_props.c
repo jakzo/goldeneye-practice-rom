@@ -1002,6 +1002,7 @@ static void skip_prop_data(StateStream *stream, u8 type) {
     temp_chr.hidden = 0;
     temp_chr.chrflags = 0;
     temp_chr.model = NULL;
+    temp_chr.field_20 = NULL;
     temp_chr.ptr_SEbuffer3 = NULL;
     temp_chr.ptr_SEbuffer4 = NULL;
     load_chr_record(stream, &temp_chr, NULL);

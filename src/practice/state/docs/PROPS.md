@@ -315,7 +315,8 @@ typedef struct ChrRecord
     s8          bodynum;                          /* 0x000F - Body mesh configuration index */
     u8          grenadeprob;                      /* 0x0010 - Grenade-attempt threshold, 0-255.
                                                    *          AI compares it with randomGetNext() % 255. */
-    s8          flinchcnt;                        /* 0x0011 */
+    s8          flinchcnt;                        /* 0x0011 - Render-flinch phase; -1 is inactive,
+                                                   *          1 through 29 are active NTSC phases */
     u16         hidden;                           /* 0x0012 - Visibility state tags (CHRHIDDEN):
                                                    *   0x0001: CHRHIDDEN_DROP_HELD_ITEMS (force drop items/weapons)
                                                    *   0x0002: CHRHIDDEN_ALERT_GUARD_RELATED (alerted guard state)
@@ -356,9 +357,9 @@ typedef struct ChrRecord
     PropRecord *prop;                             /* 0x0018 - Pointer to container PropRecord */
     Model      *model;                            /* 0x001C - Pointer to dynamic Model geometry instance */
     void       *field_20;                         /* 0x0020 - Head of a dynamically allocated skeletal
-                                                   *          joint/matrix render list. Never serialize
-                                                   *          this process-local address; reconstruct or
-                                                   *          clear it with model/allocation support. */
+                                                   *          joint/matrix render list. Returned to its
+                                                   *          global pool and cleared on load; the next
+                                                   *          render reconstructs it from the live model. */
     f32         chrwidth;                         /* 0x0024 - Width of character collision cylinder */
     f32         chrheight;                        /* 0x0028 - Height of character collision cylinder */
     union {
@@ -487,7 +488,8 @@ The implemented save/load slices restore
 `padpreset1`, `chrpreset1`, `chrseeshot`, `chrseedie`,
 `lastseetarget60`, `lastknowntargetpos`, `targetTile`, `seen_bond_time`, and
 `lastheartarget60`, `chrnum`, `flags2`, `timer60`, the
-`CHRHIDDEN_TIMER_ACTIVE` bit, `shotbondsum`, combat action/aiming state,
+`CHRHIDDEN_TIMER_ACTIVE` bit, `flinchcnt`, the four
+`CHRHIDDEN_RAND_FLINCH_MASK` direction bits, `shotbondsum`, combat action/aiming state,
 `firecount`, `aimendcount`, all eight shoulder/back angles, `fireslot_word`,
 `field_178`, both `unk180` beam caches, combat/moving hidden bits, `shadecol`,
 and `nextcol`. Dynamic `ptr_SEbuffer3`/`ptr_SEbuffer4` sound nodes are stopped

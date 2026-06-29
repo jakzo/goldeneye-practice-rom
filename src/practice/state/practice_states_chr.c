@@ -14,6 +14,8 @@ extern PathRecord *pathFindById(s32 ID);
   (CHRHIDDEN_FIRE_WEAPON_LEFT | CHRHIDDEN_FIRE_WEAPON_RIGHT |                \
    CHRHIDDEN_FIRE_TRACER | CHRHIDDEN_MOVING)
 
+#define CHR_FLINCH_HIDDEN_MASK CHRHIDDEN_RAND_FLINCH_MASK
+
 typedef struct FiringAnimationTableRef {
   struct weapon_firing_animation_table *table;
   u8 count;
@@ -820,6 +822,13 @@ static void clear_chr_transient_sounds(ChrRecord *chr) {
   chr->ptr_SEbuffer4 = NULL;
 }
 
+static void clear_chr_transient_joint_list(ChrRecord *chr) {
+  if (chr->field_20 != NULL) {
+    sub_GAME_7F06B248(chr->field_20);
+    chr->field_20 = NULL;
+  }
+}
+
 void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   s32 ailist_id = -1;
   bool supported_action = is_supported_chr_action(chr);
@@ -844,6 +853,8 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_u8(stream, chr->alertness);
   write_f32(stream, chr->chrwidth);
   write_f32(stream, chr->chrheight);
+  write_u8(stream, (u8)chr->flinchcnt);
+  write_u16(stream, chr->hidden & CHR_FLINCH_HIDDEN_MASK);
 
   write_u8(stream, (u8)chr->numarghs);
   write_u8(stream, (u8)chr->numclosearghs);
@@ -967,6 +978,8 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   s16 hat_index;
   s32 hand;
 
+  clear_chr_transient_joint_list(chr);
+
   chr->accuracyrating = (s8)read_u8(stream);
   chr->speedrating = (s8)read_u8(stream);
   chr->arghrating = (s8)read_u8(stream);
@@ -977,6 +990,10 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   chr->alertness = read_u8(stream);
   chr->chrwidth = read_f32(stream);
   chr->chrheight = read_f32(stream);
+  chr->flinchcnt = (s8)read_u8(stream);
+  chr->hidden =
+      (chr->hidden & ~CHR_FLINCH_HIDDEN_MASK) |
+      ((u16)read_u16(stream) & CHR_FLINCH_HIDDEN_MASK);
 
   chr->numarghs = (s8)read_u8(stream);
   chr->numclosearghs = (s8)read_u8(stream);
