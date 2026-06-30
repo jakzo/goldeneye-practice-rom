@@ -1,6 +1,9 @@
 ### Unreleased
 
-- Save state support for explosions and smoke
+- Save state support for NPCs, explosions/smoke, bullet/explosion marks
+- Dam door guard load state indicator
+- UI for selecting options when starting a level
+- Fixed memory issues causing crash on load of some levels
 
 # 0.3.0
 

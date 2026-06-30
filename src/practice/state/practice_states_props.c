@@ -45,8 +45,8 @@ extern WeaponObjRecord blank_08_object_preset_1;
 // destination prop can be recreated before the payload is consumed. Mirrors
 // ChrAllocationState for CHR props.
 typedef struct ObjAllocationState {
-  u16 modelnum;     /* ObjectRecord::obj model id, or 0xffff when absent. */
-  u8 objtype;       /* PROPDEF_* object subtype. */
+  u16 modelnum;      /* ObjectRecord::obj model id, or 0xffff when absent. */
+  u8 objtype;        /* PROPDEF_* object subtype. */
   s16 setupCmdIndex; /* Setup-command index owning this object, or -1 when the
                       * object was created dynamically (dropped/thrown). */
 } ObjAllocationState;
@@ -271,7 +271,8 @@ static PropRecord *create_object_prop(PropRecord *prop, u8 propType,
   }
 
   if (alloc->setupCmdIndex >= 0) {
-    obj = setupCommandGetObject(lvlGetCurrentStageToLoad(), alloc->setupCmdIndex);
+    obj =
+        setupCommandGetObject(lvlGetCurrentStageToLoad(), alloc->setupCmdIndex);
     // Only usable if it is the expected object and not already bound to a live
     // prop elsewhere.
     if (obj == NULL || obj->obj != alloc->modelnum || obj->prop != NULL) {
@@ -475,14 +476,14 @@ static bool attach_prop_to_chr(ChrRecord *chr, PropRecord *prop,
 
   // Link the prop as the head of the character's child list. The caller resets
   // chr->prop->child before the first attach, so the list is rebuilt cleanly
-  // here rather than reparented onto a possibly-stale chain. Reparenting via the
-  // engine helper is avoided because it sets prop->prev = host->child, which
-  // produces a self-referential link (and an infinite child-list walk) whenever
-  // the prop is still named by a stale child pointer -- exactly what happens to
-  // equipment that is detached and reattached across repeated save/load cycles.
-  // A prop that is currently a live standalone item must leave the active list
-  // first; a prop that was already a child simply has its stale sibling links
-  // overwritten.
+  // here rather than reparented onto a possibly-stale chain. Reparenting via
+  // the engine helper is avoided because it sets prop->prev = host->child,
+  // which produces a self-referential link (and an infinite child-list walk)
+  // whenever the prop is still named by a stale child pointer -- exactly what
+  // happens to equipment that is detached and reattached across repeated
+  // save/load cycles. A prop that is currently a live standalone item must
+  // leave the active list first; a prop that was already a child simply has its
+  // stale sibling links overwritten.
   if (prop->parent == NULL && (prop->flags & PROPFLAG_ENABLED)) {
     chrpropDeregisterRooms(prop);
     chrpropDelist(prop);
@@ -552,8 +553,8 @@ static void restore_chr_attachments(PropRecord *chr_prop,
     }
   }
   if (saved[3] == NULL && indices->hat_model >= 0) {
-    saved[3] = rebind_chr_attachment(indices->hat, PROPDEF_HAT,
-                                     indices->hat_model);
+    saved[3] =
+        rebind_chr_attachment(indices->hat, PROPDEF_HAT, indices->hat_model);
     if (saved[3] == NULL) {
       saved[3] = hatCreateForChr(chr, indices->hat_model, indices->hat_flags);
     }
@@ -764,8 +765,8 @@ static void save_obj_allocation_state(StateStream *stream, PropRecord *prop) {
   ObjectRecord *obj = prop->obj;
   write_u16(stream, obj != NULL ? (u16)obj->obj : (u16)0xffff);
   write_u8(stream, obj != NULL ? (u8)obj->type : (u8)0);
-  write_u16(stream, obj != NULL ? (u16)(s16)setupGetCommandIndexByProp(prop)
-                                : (u16)-1);
+  write_u16(stream,
+            obj != NULL ? (u16)(s16)setupGetCommandIndexByProp(prop) : (u16)-1);
 }
 
 static void load_obj_allocation_state(StateStream *stream,
@@ -1062,14 +1063,16 @@ static void load_smoke_record(StateStream *stream, struct Smoke *smoke) {
 }
 
 // Scorch marks (explosion burn circles) and bullet holes live in global ring
-// buffers, not in PropRecords. Both are saved sparsely: the ring cursor plus the
-// active entries (identified by a non-negative room id) at their exact buffer
-// index, so future scorches/impacts keep filling the ring in the same order.
+// buffers, not in PropRecords. Both are saved sparsely: the ring cursor plus
+// the active entries (identified by a non-negative room id) at their exact
+// buffer index, so future scorches/impacts keep filling the ring in the same
+// order.
 //
 // Scorch geometry is entirely world space; its `model` pointer is unused by the
 // renderer. Bullet impacts attached to an object/door reference it through its
-// prop index (resolved after every prop is restored); world-surface impacts have
-// no prop. Must run after the prop table is rebuilt so those indices resolve.
+// prop index (resolved after every prop is restored); world-surface impacts
+// have no prop. Must run after the prop table is rebuilt so those indices
+// resolve.
 static void save_decals_state(StateStream *stream) {
   s32 i;
   u16 count;
@@ -1175,8 +1178,9 @@ static void load_decals_state(StateStream *stream) {
     tmp.room_clear_flag = read_u8(stream);
     tmp.unk4E = read_u16(stream);
 
-    // Drop an impact whose owning prop is gone: its stale model_render_pos_index
-    // would index a freed/replaced model on the next render.
+    // Drop an impact whose owning prop is gone: its stale
+    // model_render_pos_index would index a freed/replaced model on the next
+    // render.
     if (propIdx >= 0) {
       tmp.prop = get_enabled_prop_by_index(propIdx);
       if (tmp.prop == NULL) {
@@ -1195,10 +1199,11 @@ static void load_decals_state(StateStream *stream) {
 // Airborne explosion shrapnel/debris (`g_FlyingParticlesBuffer`, ring cursor
 // `g_NumParticleEntries`, capacity `max_particles`). Each entry is a fully
 // world-space, pointer-free quad; `unk00 > 0` marks it live and counts down its
-// lifetime, while `vertex_list` holds the per-particle local geometry/colour set
-// once at spawn (the renderer rebuilds the world matrix from position/rotation
-// each frame). Saved sparsely: only live particles, each whole struct at its
-// exact buffer index, so they resume drifting and fading identically.
+// lifetime, while `vertex_list` holds the per-particle local geometry/colour
+// set once at spawn (the renderer rebuilds the world matrix from
+// position/rotation each frame). Saved sparsely: only live particles, each
+// whole struct at its exact buffer index, so they resume drifting and fading
+// identically.
 static void save_flying_particles_state(StateStream *stream) {
   s32 i;
   u16 count = 0;
@@ -1871,10 +1876,15 @@ bool save_props_state(StateStream *stream) {
 // Free, reparenting) mutate prev/next/parent/child of unrelated slots, so the
 // saved links must be installed only once every such operation has completed.
 typedef struct SavedPropLinks {
-  bool valid;
+  u16 index;
   u16 prev;
   u16 next;
 } SavedPropLinks;
+
+typedef struct PendingChrAttachments {
+  u16 prop_index;
+  ChrAttachmentIndices attachments;
+} PendingChrAttachments;
 
 bool load_props_state(StateStream *stream) {
   u32 dataStart;
@@ -1884,22 +1894,25 @@ bool load_props_state(StateStream *stream) {
   u32 pi;
   s16 projectileOwnerPropIndices[PROJECTILES_ARR_MAX];
   s16 projectileObjPropIndices[PROJECTILES_ARR_MAX];
-  ChrAttachmentIndices pendingChrAttachments[POS_DATA_ENTRY_LEN];
-  bool pendingChrAttachmentsValid[POS_DATA_ENTRY_LEN];
-  // Kept on the stack rather than in .bss so it does not permanently consume
-  // memory the game needs; load runs on the main thread and is not reentrant.
-  SavedPropLinks savedLinks[POS_DATA_ENTRY_LEN];
-
-  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
-    pendingChrAttachmentsValid[i] = FALSE;
-    savedLinks[i].valid = FALSE;
-  }
-
   u32 totalPropsSize = read_u32(stream);
   u16 recordCount = read_u16(stream);
   s16 indexOfFirstEntry = read_u16(stream);
   s16 indexOfCurrentEntry = read_u16(stream);
   s16 indexOfFinalEntry = read_u16(stream);
+  s32 pendingChrCount = 0;
+  s32 pendingChrCapacity = g_NumChrSlots > 0 ? g_NumChrSlots : 1;
+
+  if (recordCount > POS_DATA_ENTRY_LEN) {
+    practiceLogWarn("Invalid prop record count %d", recordCount);
+    return FALSE;
+  }
+  if (pendingChrCapacity > POS_DATA_ENTRY_LEN) {
+    pendingChrCapacity = POS_DATA_ENTRY_LEN;
+  }
+
+  SavedPropLinks savedLinks[recordCount > 0 ? recordCount : 1];
+  PendingChrAttachments
+      pendingChrAttachments[pendingChrCapacity > 0 ? pendingChrCapacity : 1];
 
   dataStart = stream->base_address + stream->total_processed;
 
@@ -1993,10 +2006,11 @@ bool load_props_state(StateStream *stream) {
       // model and attached equipment (held weapons/hats) are disabled child
       // props that are not serialized, so recreating the character would orphan
       // them: their stale parent pointer would still equal the rebuilt prop's
-      // address and restore_chr_attachments could not reattach them. Reuse keeps
-      // that graph intact; load_chr_record and restore_chr_attachments reconcile
-      // the rest. A different (or absent) character is torn down and rebuilt
-      // from the serialized body/head so no stale allocation is retained.
+      // address and restore_chr_attachments could not reattach them. Reuse
+      // keeps that graph intact; load_chr_record and restore_chr_attachments
+      // reconcile the rest. A different (or absent) character is torn down and
+      // rebuilt from the serialized body/head so no stale allocation is
+      // retained.
       if (prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
           (prop->flags & PROPFLAG_ENABLED) &&
           prop->chr->bodynum == savedChrAllocation.bodynum &&
@@ -2118,9 +2132,9 @@ bool load_props_state(StateStream *stream) {
     prop->pos = savedPropPos;
     prop->stan = get_tile_by_offset(savedPropStanOffset);
     prop->zDepth = savedPropZDepth;
-    savedLinks[savedPropIndex].prev = savedPropPrevIdx;
-    savedLinks[savedPropIndex].next = savedPropNextIdx;
-    savedLinks[savedPropIndex].valid = TRUE;
+    savedLinks[i].index = savedPropIndex;
+    savedLinks[i].prev = savedPropPrevIdx;
+    savedLinks[i].next = savedPropNextIdx;
     prop->rooms[0] = savedPropRooms[0];
     prop->rooms[1] = savedPropRooms[1];
     prop->rooms[2] = savedPropRooms[2];
@@ -2261,13 +2275,18 @@ bool load_props_state(StateStream *stream) {
       if (prop->chr == NULL) {
         skip_prop_data(stream, PROP_TYPE_CHR);
       } else {
+        if (pendingChrCount >= pendingChrCapacity) {
+          practiceLogWarn("Too many CHR props in save state");
+          return FALSE;
+        }
         prop->chr->headnum = savedChrAllocation.headnum;
         prop->chr->bodynum = savedChrAllocation.bodynum;
         load_chr_prop_spatial_state(prop, &savedPropPos, savedPropStanOffset,
                                     savedPropRooms, createdChrProp);
+        pendingChrAttachments[pendingChrCount].prop_index = savedPropIndex;
         load_chr_record(stream, prop->chr,
-                        &pendingChrAttachments[savedPropIndex]);
-        pendingChrAttachmentsValid[savedPropIndex] = TRUE;
+                        &pendingChrAttachments[pendingChrCount].attachments);
+        pendingChrCount++;
       }
       break;
 
@@ -2282,12 +2301,11 @@ bool load_props_state(StateStream *stream) {
 
   // Resolve CHR equipment only after every referenced prop has loaded. Indices
   // refer to the rebuilt prop table.
-  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
-    if (pendingChrAttachmentsValid[i]) {
-      PropRecord *chr_prop = get_prop_by_index(i);
-      if (chr_prop != NULL && chr_prop->type == PROP_TYPE_CHR) {
-        restore_chr_attachments(chr_prop, &pendingChrAttachments[i]);
-      }
+  for (i = 0; i < pendingChrCount; i++) {
+    PropRecord *chr_prop =
+        get_prop_by_index(pendingChrAttachments[i].prop_index);
+    if (chr_prop != NULL && chr_prop->type == PROP_TYPE_CHR) {
+      restore_chr_attachments(chr_prop, &pendingChrAttachments[i].attachments);
     }
   }
 
@@ -2327,22 +2345,32 @@ bool load_props_state(StateStream *stream) {
   // not be overwritten from the saved indices here -- doing so would detach a
   // character's recreated equipment whose slot no longer matches the saved
   // child index.
-  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
-    if (savedLinks[i].valid) {
-      PropRecord *p = get_prop_by_index(i);
-      if (p != NULL) {
-        p->prev = get_prop_by_index(savedLinks[i].prev);
-        p->next = get_prop_by_index(savedLinks[i].next);
-      }
+  //
+  // prev/next are overloaded: they are the active-list links for enabled
+  // standalone props, but also the child-sibling links for attached equipment.
+  // A prop that was an enabled standalone record at save time (so it appears in
+  // savedLinks) can be re-attached as a character's child by
+  // restore_chr_attachments above, which repurposes its prev/next as sibling
+  // links. Restoring the saved active-list neighbours onto such a prop would
+  // splice it back into the active list while it is still a child, so the
+  // character teardown walk (disable_sounds_attached_to_player_then_something
+  // follows child -> prev) wanders out of the sibling chain into the active
+  // list and frees an unrelated prop's record as an object. Only re-link props
+  // that are still standalone (no parent) and active.
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *p = get_prop_by_index(savedLinks[i].index);
+    if (p != NULL && p->parent == NULL && (p->flags & PROPFLAG_ENABLED)) {
+      p->prev = get_prop_by_index(savedLinks[i].prev);
+      p->next = get_prop_by_index(savedLinks[i].next);
     }
   }
 
   ptr_obj_pos_list_first_entry = get_prop_by_index(indexOfFirstEntry);
   ptr_obj_pos_list_current_entry = get_prop_by_index(indexOfCurrentEntry);
 
-  // Rebuild the free list (final_entry -> prev -> ... chain) from scratch rather
-  // than trusting the saved head. Only enabled props (the active list, restored
-  // above) and attached equipment (parent != NULL, owned by
+  // Rebuild the free list (final_entry -> prev -> ... chain) from scratch
+  // rather than trusting the saved head. Only enabled props (the active list,
+  // restored above) and attached equipment (parent != NULL, owned by
   // restore_chr_attachments / retained live state) are in use; every other slot
   // is free. The free list cannot be restored from the save because free and
   // disabled/attached props are never serialized, so the prev links that chain
@@ -2350,9 +2378,9 @@ bool load_props_state(StateStream *stream) {
   // points into a chain of stale, pre-load prev pointers: chrpropAllocate would
   // walk it and hand out slots that are actually in use -- or a stale, even
   // misaligned, pointer -- corrupting the prop graph and crashing on the next
-  // hat/weapon allocation. Re-chaining every genuinely-free slot here (mirroring
-  // chrpropFree) guarantees a consistent free list regardless of the saved
-  // indices, so the index read above is intentionally ignored.
+  // hat/weapon allocation. Re-chaining every genuinely-free slot here
+  // (mirroring chrpropFree) guarantees a consistent free list regardless of the
+  // saved indices, so the index read above is intentionally ignored.
   (void)indexOfFinalEntry;
   ptr_obj_pos_list_final_entry = NULL;
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
@@ -2369,8 +2397,8 @@ bool load_props_state(StateStream *stream) {
     return FALSE;
   }
 
-  // Restore scorch marks and bullet holes now that the prop table is rebuilt, so
-  // prop-attached impacts can resolve their saved prop index.
+  // Restore scorch marks and bullet holes now that the prop table is rebuilt,
+  // so prop-attached impacts can resolve their saved prop index.
   load_decals_state(stream);
   load_flying_particles_state(stream);
 

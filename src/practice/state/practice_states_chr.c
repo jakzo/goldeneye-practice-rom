@@ -4,26 +4,36 @@
 #include "initanitable.h"
 #include "objecthandler.h"
 #include "practice_states_utils.h"
+#include "practice_ui.h"
 #include <bondconstants.h>
 #include <snd.h>
+#include <string.h>
 
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern PathRecord *pathFindById(s32 ID);
+extern Vertex *sub_GAME_7F09BE4C(s32 vertexCount, s32 allocationType,
+                                 void *allocationData, s32 arg3);
+extern void sub_GAME_7F09C044(Vertex *vertices);
+extern s32 dword_CODE_bss_8007A0D0;
+extern Vertex *dword_CODE_bss_8007A0E0;
 
-#define CHR_COMBAT_HIDDEN_MASK                                                \
-  (CHRHIDDEN_FIRE_WEAPON_LEFT | CHRHIDDEN_FIRE_WEAPON_RIGHT |                \
+#define CHR_COMBAT_HIDDEN_MASK                                                 \
+  (CHRHIDDEN_FIRE_WEAPON_LEFT | CHRHIDDEN_FIRE_WEAPON_RIGHT |                  \
    CHRHIDDEN_FIRE_TRACER | CHRHIDDEN_MOVING)
 
 #define CHR_FLINCH_HIDDEN_MASK CHRHIDDEN_RAND_FLINCH_MASK
 
 #define CHR_DAMAGE_FLAGS_MASK CHRFLAG_INVINCIBLE
 
-#define CHR_BEHAVIOR_FLAGS_MASK                                               \
-  (CHRSTART_FORCENOBLOOD | CHRFLAG_CAN_SHOOT_CHRS | CHRFLAG_NO_AUTOAIM |     \
-   CHRFLAG_LOCK_Y_POS | CHRFLAG_NO_SHADOW |                                  \
-   CHRFLAG_IGNORE_ANIM_TRANSLATION | CHRFLAG_IMPACT_ALWAYS |                 \
-   CHRFLAG_INCREASE_RUNNING_SPEED | CHRFLAG_COUNT_DEATH_AS_CIVILIAN |        \
-   CHRFLAG_CULL_USING_HITBOX)
+#define MAX_MODEL_BLOOD_NODES 128
+#define MAX_MODEL_TRAVERSAL_DEPTH 64
+#define MAX_MODEL_TRAVERSAL_NODES 512
+
+#define CHR_BEHAVIOR_FLAGS_MASK                                                \
+  (CHRSTART_FORCENOBLOOD | CHRFLAG_CAN_SHOOT_CHRS | CHRFLAG_NO_AUTOAIM |       \
+   CHRFLAG_LOCK_Y_POS | CHRFLAG_NO_SHADOW | CHRFLAG_IGNORE_ANIM_TRANSLATION |  \
+   CHRFLAG_IMPACT_ALWAYS | CHRFLAG_INCREASE_RUNNING_SPEED |                    \
+   CHRFLAG_COUNT_DEATH_AS_CIVILIAN | CHRFLAG_CULL_USING_HITBOX)
 
 typedef struct FiringAnimationTableRef {
   struct weapon_firing_animation_table *table;
@@ -59,8 +69,8 @@ static const FiringAnimationTableRef firing_animation_tables[] = {
     {D_80030660, 10},
 };
 
-static s16 get_firing_animation_id(
-    const struct weapon_firing_animation_table *animation) {
+static s16
+get_firing_animation_id(const struct weapon_firing_animation_table *animation) {
   s32 table;
   s32 row;
 
@@ -68,9 +78,8 @@ static s16 get_firing_animation_id(
     return -1;
   }
 
-  for (table = 0;
-       table < (s32)(sizeof(firing_animation_tables) /
-                     sizeof(firing_animation_tables[0]));
+  for (table = 0; table < (s32)(sizeof(firing_animation_tables) /
+                                sizeof(firing_animation_tables[0]));
        table++) {
     for (row = 0; row < firing_animation_tables[table].count; row++) {
       if (animation == &firing_animation_tables[table].table[row]) {
@@ -94,8 +103,8 @@ get_firing_animation_by_id(s16 id) {
   table = (u16)id >> 8;
   row = id & 0xff;
 
-  if (table >=
-          sizeof(firing_animation_tables) / sizeof(firing_animation_tables[0]) ||
+  if (table >= sizeof(firing_animation_tables) /
+                   sizeof(firing_animation_tables[0]) ||
       row >= firing_animation_tables[table].count) {
     return NULL;
   }
@@ -152,9 +161,8 @@ static bool is_supported_chr_action(const ChrRecord *chr) {
     return get_firing_animation_id(chr->act_attackroll.animfloats) >= 0;
   case ACT_BONDMULTI:
     return chr->act_bondmulti.unk2c == NULL ||
-           get_firing_animation_id(
-               (struct weapon_firing_animation_table *)
-                   chr->act_bondmulti.unk2c) >= 0;
+           get_firing_animation_id((struct weapon_firing_animation_table *)
+                                       chr->act_bondmulti.unk2c) >= 0;
   default:
     return TRUE;
   }
@@ -256,8 +264,8 @@ static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
     // notifychrindex (offset 0) is reused by chrlvIterateGuardSeeShotDie as the
     // guard-notification scan cursor. The thud frames fire one-shot SFX and are
     // set to -1.0 once played, so restoring them prevents replay. timeextra,
-    // elapseextra, extraspeed, and drcarollimagedelay are written at death entry
-    // but never read, so they are omitted.
+    // elapseextra, extraspeed, and drcarollimagedelay are written at death
+    // entry but never read, so they are omitted.
     write_u32(stream, chr->act_die.notifychrindex);
     write_f32(stream, chr->act_die.thudframe1);
     write_f32(stream, chr->act_die.thudframe2);
@@ -569,8 +577,7 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
       chr->act_attackwalk.clock_timer30 = clock_timer30;
       chr->act_attackwalk.clock_timer34 = clock_timer34;
       chr->act_attackwalk.unk038 = unk038;
-      chr->act_attackwalk.animfloats =
-          get_firing_animation_by_id(anim_id);
+      chr->act_attackwalk.animfloats = get_firing_animation_by_id(anim_id);
       chr->act_attackwalk.timer40 = timer40;
       chr->act_attackwalk.unk044 = unk044;
       chr->act_attackwalk.unk48[0] = unk48[0];
@@ -617,8 +624,7 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
     attack_item = (s8)read_u8(stream);
 
     if (chr != NULL) {
-      chr->act_attackroll.animfloats =
-          get_firing_animation_by_id(anim_id);
+      chr->act_attackroll.animfloats = get_firing_animation_by_id(anim_id);
       chr->act_attackroll.unk30 = unk30;
       chr->act_attackroll.unk31 = unk31;
       chr->act_attackroll.unk32 = unk32;
@@ -899,6 +905,228 @@ static void load_model_animation(StateStream *stream, Model *model) {
   }
 }
 
+typedef struct ModelBloodNode {
+  ModelNode *node;
+  union ModelRwData **datas;
+  u16 component_index;
+  u16 rwdata_index;
+} ModelBloodNode;
+
+static bool has_model_blood_node(const ModelBloodNode *nodes, s32 node_count,
+                                 ModelNode *node, union ModelRwData **datas) {
+  s32 i;
+
+  for (i = 0; i < node_count; i++) {
+    if (nodes[i].node == node && nodes[i].datas == datas) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+static void
+collect_model_blood_nodes(ModelNode *node, union ModelRwData **datas,
+                          u16 component_index, ModelBloodNode *blood_nodes,
+                          s32 *blood_node_count, s32 *nodes_seen, s32 depth) {
+  if (depth >= MAX_MODEL_TRAVERSAL_DEPTH) {
+    return;
+  }
+
+  while (node != NULL && *nodes_seen < MAX_MODEL_TRAVERSAL_NODES) {
+    union ModelRwData **child_datas = datas;
+    u16 child_component_index = component_index;
+
+    (*nodes_seen)++;
+
+    if ((node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
+        *blood_node_count < MAX_MODEL_BLOOD_NODES &&
+        !has_model_blood_node(blood_nodes, *blood_node_count, node, datas)) {
+      blood_nodes[*blood_node_count].node = node;
+      blood_nodes[*blood_node_count].datas = datas;
+      blood_nodes[*blood_node_count].component_index = component_index;
+      blood_nodes[*blood_node_count].rwdata_index =
+          node->Data->DisplayListCollisions.RwDataIndex;
+      (*blood_node_count)++;
+    }
+
+    if ((node->Opcode & 0xff) == MODELNODE_OPCODE_HEAD && datas != NULL) {
+      struct ModelRoData_HeadPlaceholderRecord *rodata =
+          &node->Data->HeadPlaceholder;
+      struct ModelRwData_HeadPlaceholderRecord *rwdata =
+          (struct ModelRwData_HeadPlaceholderRecord
+               *)&datas[rodata->RwDataIndex];
+
+      if (rwdata->RwDatas != NULL) {
+        child_datas = (union ModelRwData **)rwdata->RwDatas;
+        child_component_index = rodata->RwDataIndex + 1;
+      }
+    }
+
+    if (node->Child != NULL) {
+      collect_model_blood_nodes(node->Child, child_datas, child_component_index,
+                                blood_nodes, blood_node_count, nodes_seen,
+                                depth + 1);
+    }
+
+    node = node->Next;
+  }
+}
+
+static s32 get_model_blood_nodes(Model *model, ModelBloodNode *blood_nodes) {
+  s32 blood_node_count = 0;
+  s32 nodes_seen = 0;
+
+  if (model != NULL && model->obj != NULL && model->obj->RootNode != NULL &&
+      model->datas != NULL) {
+    collect_model_blood_nodes(model->obj->RootNode, model->datas, 0,
+                              blood_nodes, &blood_node_count, &nodes_seen, 0);
+  }
+
+  return blood_node_count;
+}
+
+static ModelBloodNode *find_model_blood_node(ModelBloodNode *blood_nodes,
+                                             s32 blood_node_count,
+                                             u16 component_index,
+                                             u16 rwdata_index) {
+  s32 i;
+
+  for (i = 0; i < blood_node_count; i++) {
+    if (blood_nodes[i].component_index == component_index &&
+        blood_nodes[i].rwdata_index == rwdata_index) {
+      return &blood_nodes[i];
+    }
+  }
+
+  return NULL;
+}
+
+static bool model_node_has_blood_patch(const ModelBloodNode *blood_node) {
+  struct ModelRoData_DisplayList_CollisionRecord *rodata;
+  struct ModelRwData_DisplayList_CollisionRecord *rwdata;
+  ModelNode *node = blood_node->node;
+
+  if (node == NULL || blood_node->datas == NULL ||
+      (node->Opcode & 0xff) != MODELNODE_OPCODE_DLCOLLISION) {
+    return FALSE;
+  }
+
+  rodata = (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+  rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)&blood_node
+               ->datas[rodata->RwDataIndex];
+
+  return rodata != NULL && rwdata != NULL && rodata->Vertices != NULL &&
+         dword_CODE_bss_8007A0E0 != NULL && dword_CODE_bss_8007A0D0 > 0 &&
+         rwdata->Vertices >= dword_CODE_bss_8007A0E0 &&
+         rwdata->Vertices < &dword_CODE_bss_8007A0E0[dword_CODE_bss_8007A0D0];
+}
+
+static void save_model_blood_patches(StateStream *stream, Model *model) {
+  ModelBloodNode blood_nodes[MAX_MODEL_BLOOD_NODES];
+  u16 patch_count = 0;
+  s32 blood_node_count;
+  s32 i;
+
+  blood_node_count = get_model_blood_nodes(model, blood_nodes);
+
+  for (i = 0; i < blood_node_count; i++) {
+    if (model_node_has_blood_patch(&blood_nodes[i])) {
+      patch_count++;
+    }
+  }
+
+  write_u16(stream, patch_count);
+
+  for (i = 0; i < blood_node_count; i++) {
+    if (model_node_has_blood_patch(&blood_nodes[i])) {
+      ModelNode *node = blood_nodes[i].node;
+      struct ModelRoData_DisplayList_CollisionRecord *rodata =
+          (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+      struct ModelRwData_DisplayList_CollisionRecord *rwdata =
+          (struct ModelRwData_DisplayList_CollisionRecord *)&blood_nodes[i]
+              .datas[rodata->RwDataIndex];
+
+      write_u16(stream, blood_nodes[i].component_index);
+      write_u16(stream, blood_nodes[i].rwdata_index);
+      write_u16(stream, (u16)rodata->numVertices);
+      {
+        s32 vertex;
+        for (vertex = 0; vertex < rodata->numVertices; vertex++) {
+          write_u8(stream, rwdata->Vertices[vertex].a);
+        }
+      }
+    }
+  }
+}
+
+static void clear_model_blood_patches(ModelBloodNode *blood_nodes,
+                                      s32 blood_node_count) {
+  s32 i;
+
+  for (i = 0; i < blood_node_count; i++) {
+    if (model_node_has_blood_patch(&blood_nodes[i])) {
+      ModelNode *node = blood_nodes[i].node;
+      struct ModelRoData_DisplayList_CollisionRecord *rodata =
+          (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+      struct ModelRwData_DisplayList_CollisionRecord *rwdata =
+          (struct ModelRwData_DisplayList_CollisionRecord *)&blood_nodes[i]
+              .datas[rodata->RwDataIndex];
+
+      sub_GAME_7F09C044(rwdata->Vertices);
+      rwdata->Vertices = rodata->Vertices;
+    }
+  }
+}
+
+static void load_model_blood_patches(StateStream *stream, Model *model) {
+  ModelBloodNode blood_nodes[MAX_MODEL_BLOOD_NODES];
+  s32 blood_node_count = get_model_blood_nodes(model, blood_nodes);
+  u16 patch_count = read_u16(stream);
+  u16 patch;
+
+  clear_model_blood_patches(blood_nodes, blood_node_count);
+
+  for (patch = 0; patch < patch_count; patch++) {
+    u16 component_index = read_u16(stream);
+    u16 rwdata_index = read_u16(stream);
+    u16 vertex_count = read_u16(stream);
+    ModelBloodNode *blood_node = find_model_blood_node(
+        blood_nodes, blood_node_count, component_index, rwdata_index);
+    ModelNode *node = blood_node != NULL ? blood_node->node : NULL;
+    struct ModelRoData_DisplayList_CollisionRecord *rodata = NULL;
+    struct ModelRwData_DisplayList_CollisionRecord *rwdata = NULL;
+    Vertex *vertices = NULL;
+
+    if (node != NULL && (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION) {
+      rodata = (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+      rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)&blood_node
+                   ->datas[rodata->RwDataIndex];
+    }
+
+    if (rodata != NULL && rwdata != NULL && rodata->Vertices != NULL &&
+        rodata->numVertices == vertex_count) {
+      vertices = sub_GAME_7F09BE4C(vertex_count, 0xcccc, NULL, 0);
+    }
+
+    if (vertices != NULL) {
+      s32 vertex;
+      memcpy(vertices, rodata->Vertices, vertex_count * sizeof(Vertex));
+      for (vertex = 0; vertex < vertex_count; vertex++) {
+        vertices[vertex].a = read_u8(stream);
+      }
+      rwdata->Vertices = vertices;
+    } else {
+      stream_seek(stream, stream->base_address + stream->total_processed +
+                              vertex_count);
+      practiceLogWarn(
+          "Could not restore blood patch %d (component=%d, rwdata=%d, "
+          "vertices=%d)",
+          patch, component_index, rwdata_index, vertex_count);
+    }
+  }
+}
+
 static void clear_chr_transient_sounds(ChrRecord *chr) {
   ALSoundState *sound3 = (ALSoundState *)chr->ptr_SEbuffer3;
   ALSoundState *sound4 = (ALSoundState *)chr->ptr_SEbuffer4;
@@ -1029,6 +1257,8 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
     }
   }
 
+  save_model_blood_patches(stream, chr->model);
+
   write_u16(stream, get_prop_index(chr->weapons_held[0]));
   write_u16(stream, get_prop_index(chr->weapons_held[1]));
   write_u16(stream, get_prop_index(chr->weapons_held[2]));
@@ -1089,19 +1319,16 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   chr->chrwidth = read_f32(stream);
   chr->chrheight = read_f32(stream);
   chr->flinchcnt = (s8)read_u8(stream);
-  chr->hidden =
-      (chr->hidden & ~CHR_FLINCH_HIDDEN_MASK) |
-      ((u16)read_u16(stream) & CHR_FLINCH_HIDDEN_MASK);
-  chr->chrflags =
-      (chr->chrflags & ~CHR_BEHAVIOR_FLAGS_MASK) |
-      (read_u32(stream) & CHR_BEHAVIOR_FLAGS_MASK);
+  chr->hidden = (chr->hidden & ~CHR_FLINCH_HIDDEN_MASK) |
+                ((u16)read_u16(stream) & CHR_FLINCH_HIDDEN_MASK);
+  chr->chrflags = (chr->chrflags & ~CHR_BEHAVIOR_FLAGS_MASK) |
+                  (read_u32(stream) & CHR_BEHAVIOR_FLAGS_MASK);
 
   chr->fadealpha = read_u8(stream);
   chr->damage = read_f32(stream);
   chr->maxdamage = read_f32(stream);
-  chr->chrflags =
-      (chr->chrflags & ~CHR_DAMAGE_FLAGS_MASK) |
-      (read_u32(stream) & CHR_DAMAGE_FLAGS_MASK);
+  chr->chrflags = (chr->chrflags & ~CHR_DAMAGE_FLAGS_MASK) |
+                  (read_u32(stream) & CHR_DAMAGE_FLAGS_MASK);
 
   chr->numarghs = (s8)read_u8(stream);
   chr->numclosearghs = (s8)read_u8(stream);
@@ -1141,9 +1368,8 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   chr->field_178[0] = read_u32(stream);
   chr->field_178[1] = read_u32(stream);
   read_bytes(stream, chr->unk180, sizeof(chr->unk180));
-  chr->hidden =
-      (chr->hidden & ~CHR_COMBAT_HIDDEN_MASK) |
-      ((u16)read_u16(stream) & CHR_COMBAT_HIDDEN_MASK);
+  chr->hidden = (chr->hidden & ~CHR_COMBAT_HIDDEN_MASK) |
+                ((u16)read_u16(stream) & CHR_COMBAT_HIDDEN_MASK);
   clear_chr_transient_sounds(chr);
   read_bytes(stream, &chr->shadecol, sizeof(rgba_u8));
   read_bytes(stream, &chr->nextcol, sizeof(rgba_u8));
@@ -1187,6 +1413,8 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
       load_model_animation(stream, chr != NULL ? chr->model : NULL);
     }
   }
+
+  load_model_blood_patches(stream, chr->model);
 
   weapon_indices[0] = (s16)read_u16(stream);
   weapon_indices[1] = (s16)read_u16(stream);

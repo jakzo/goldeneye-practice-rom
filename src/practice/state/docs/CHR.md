@@ -1418,3 +1418,32 @@ typedef struct ChrRecord_f180 {
 
 This pointer-free transient visual/weapon state is serialized with the combat
 slice so a loaded tracer resumes with coherent endpoints and interpolation.
+
+### Blood patches
+
+Enemy blood patches are stored as cloned vertex arrays on character model
+`MODELNODE_OPCODE_DLCOLLISION` nodes. A hit allocates a clone from the game's
+tracked vertex pool, redirects the node's writable `Vertices` pointer away from
+the model's original read-only vertices, and changes vertex alpha bytes to
+select the blood shading.
+
+The save records each modified node by its model-component identity (body or
+the owning head-placeholder writable-data index), its writable-data index
+within that component, its vertex count, and the per-vertex alpha values that
+encode the patches. A traversal ordinal is not stable when a dead guard is
+recreated because model relation state can change the nodes visited before the
+patched node.
+
+Traversal does not follow mutable `Parent` links: attached head model nodes are
+shared between character instances, so those links can point into another
+guard's body. Instead, traversal follows `Child`/`Next` and carries the correct
+writable-data base through each head placeholder.
+
+Loading first releases every current clone and restores the original vertex
+pointers, then allocates tracked replacements, copies the original vertices,
+and applies the saved alpha values. This also removes blood added after the
+save and works for recreated characters without retaining model or vertex
+pointers. A node counts as modified only when its writable vertex pointer is
+inside the tracked `0xCCCC` vertex pool; some attached-head writable slots are
+not initialized to the original vertex pointer, so pointer inequality alone
+produces false positives.
