@@ -10847,7 +10847,16 @@ void sub_GAME_7F062B00(ChrRecord_f180* arg0)
             return;
         }
 
+#ifdef PRACTICE_ROM
+        // unk00 is the tracer's rendered age. Advancing it once per rendered
+        // frame makes the beam fade while simulation time is frozen.
+        if (g_ClockTimer > 0)
+        {
+            arg0->unk00++;
+        }
+#else
         arg0->unk00++;
+#endif
     }
 }
 

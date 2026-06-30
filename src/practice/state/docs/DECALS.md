@@ -88,3 +88,24 @@ struct FlyingParticles {
   (~122 bytes on the wire per live particle: 2-byte index + 120-byte struct).
   Saved sparsely, so the cost is ~0 unless the state is captured during the
   brief window an explosion's debris is still airborne.
+
+## Transient gun effects
+
+`save_gun_effects_state` / `load_gun_effects_state` also serialize these
+short-lived global pools:
+
+- `dword_CODE_bss_8007A170[20]`: stationary impact flare/smoke records.
+  `unk04 > 0` is the live/lifetime field.
+- `dword_CODE_bss_8007A4E0[50]` (non-EU): moving spark/dust records. Each
+  0x3c-byte entry extends the 0x2c-byte impact record with drift and a vertical
+  limit; `effect.unk04 > 0` marks it live.
+
+Both impact pools store an image-table pointer at offset `0x0c`. The serializer
+maps it to a stable ID for `flareimage2`, `explosion_smokeimages`, or
+`scattered_explosions`; no absolute pointers are persisted. Live entries retain
+their exact pool index, and every live marker is cleared before loading.
+
+Player/NPC tracer beams are held in the already-serialized hand/CHR records.
+Their `unk00` rendered-age field must only advance when `g_ClockTimer > 0`;
+advancing it per rendered frame makes the orange tracer fade during a practice
+hotkey freeze.

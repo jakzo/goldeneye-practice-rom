@@ -13,6 +13,7 @@
 #include "practice_states_props.h"
 #include "practice_states_utils.h"
 #include "practice_ui.h"
+#include "unk_0A1DA0.h"
 #include <bondconstants.h>
 #include <string.h>
 #include <ultra64.h>
@@ -40,6 +41,53 @@ extern WeaponObjRecord *weaponCreate(bool musthaveprop, bool musthavemodel,
                                      ModelFileHeader *modeldef);
 extern s32 setupGetCommandIndexByProp(PropRecord *prop);
 extern WeaponObjRecord blank_08_object_preset_1;
+extern bondstruct_unk_8007A170 dword_CODE_bss_8007A170[20];
+extern struct sImageTableEntry *explosion_smokeimages;
+extern struct sImageTableEntry *scattered_explosions;
+extern struct sImageTableEntry *flareimage2;
+#if !defined(VERSION_EU)
+extern u8 dword_CODE_bss_8007A4E0[0xBB8];
+#endif
+
+#define BULLET_EFFECT_BUFFER_LEN 20
+#define BULLET_SPARK_BUFFER_LEN 50
+
+/*
+ * The non-EU spark/dust pool uses 0x3c-byte entries. Its first 0x2c bytes have
+ * the same layout as bondstruct_unk_8007A170; the final 0x10 bytes hold drift
+ * and a vertical limit used by sub_GAME_7F0A46A0.
+ */
+typedef struct BulletSparkRecord {
+  bondstruct_unk_8007A170 effect;
+  coord3d drift;
+  f32 vertical_limit;
+} BulletSparkRecord;
+
+static u8 get_bullet_effect_image_id(u32 image) {
+  if (image == (u32)flareimage2) {
+    return 0;
+  }
+  if (image == (u32)explosion_smokeimages) {
+    return 1;
+  }
+  if (image == (u32)scattered_explosions) {
+    return 2;
+  }
+  return 0xff;
+}
+
+static u32 get_bullet_effect_image_by_id(u8 id) {
+  switch (id) {
+  case 0:
+    return (u32)flareimage2;
+  case 1:
+    return (u32)explosion_smokeimages;
+  case 2:
+    return (u32)scattered_explosions;
+  default:
+    return 0;
+  }
+}
 
 // Allocation metadata serialized ahead of an object/door/weapon payload so the
 // destination prop can be recreated before the payload is consumed. Mirrors
@@ -1263,6 +1311,113 @@ static void load_flying_particles_state(StateStream *stream) {
   }
 }
 
+/*
+ * Short-lived gun effects are not props:
+ *
+ * - dword_CODE_bss_8007A170 contains impact flares/smoke.
+ * - On non-EU builds dword_CODE_bss_8007A4E0 contains the larger moving
+ *   spark/dust records.
+ *
+ * Effect image pointers are stored as small stable IDs, never as absolute
+ * addresses. Player and NPC tracer beams are held in hand/ChrRecord firing
+ * state already serialized by practice_states_bond.c and
+ * practice_states_chr.c.
+ */
+static void save_gun_effects_state(StateStream *stream) {
+  s32 i;
+  u16 count = 0;
+
+  for (i = 0; i < BULLET_EFFECT_BUFFER_LEN; i++) {
+    if (dword_CODE_bss_8007A170[i].unk04 > 0) {
+      count++;
+    }
+  }
+  write_u16(stream, count);
+  for (i = 0; i < BULLET_EFFECT_BUFFER_LEN; i++) {
+    if (dword_CODE_bss_8007A170[i].unk04 > 0) {
+      bondstruct_unk_8007A170 effect = dword_CODE_bss_8007A170[i];
+      u8 image_id = get_bullet_effect_image_id(effect.unk0C);
+      write_u8(stream, i);
+      write_u8(stream, image_id);
+      effect.unk0C = 0;
+      write_bytes(stream, &effect, sizeof(bondstruct_unk_8007A170));
+    }
+  }
+
+#if !defined(VERSION_EU)
+  {
+    BulletSparkRecord *sparks =
+        (BulletSparkRecord *)dword_CODE_bss_8007A4E0;
+
+    count = 0;
+    for (i = 0; i < BULLET_SPARK_BUFFER_LEN; i++) {
+      if (sparks[i].effect.unk04 > 0) {
+        count++;
+      }
+    }
+    write_u16(stream, count);
+    for (i = 0; i < BULLET_SPARK_BUFFER_LEN; i++) {
+      if (sparks[i].effect.unk04 > 0) {
+        BulletSparkRecord spark = sparks[i];
+        u8 image_id = get_bullet_effect_image_id(spark.effect.unk0C);
+        write_u8(stream, i);
+        write_u8(stream, image_id);
+        spark.effect.unk0C = 0;
+        write_bytes(stream, &spark, sizeof(BulletSparkRecord));
+      }
+    }
+  }
+#endif
+}
+
+static void load_gun_effects_state(StateStream *stream) {
+  s32 i;
+  u16 count;
+
+  for (i = 0; i < BULLET_EFFECT_BUFFER_LEN; i++) {
+    dword_CODE_bss_8007A170[i].unk04 = 0;
+  }
+  count = read_u16(stream);
+  for (i = 0; i < count; i++) {
+    bondstruct_unk_8007A170 effect;
+    u8 index = read_u8(stream);
+    u8 image_id = read_u8(stream);
+    read_bytes(stream, &effect, sizeof(bondstruct_unk_8007A170));
+    effect.unk0C = get_bullet_effect_image_by_id(image_id);
+    if (effect.unk0C == 0) {
+      effect.unk04 = 0;
+    }
+    if (index < BULLET_EFFECT_BUFFER_LEN) {
+      dword_CODE_bss_8007A170[index] = effect;
+    }
+  }
+
+#if !defined(VERSION_EU)
+  {
+    BulletSparkRecord *sparks =
+        (BulletSparkRecord *)dword_CODE_bss_8007A4E0;
+
+    for (i = 0; i < BULLET_SPARK_BUFFER_LEN; i++) {
+      sparks[i].effect.unk04 = 0;
+    }
+    count = read_u16(stream);
+    for (i = 0; i < count; i++) {
+      BulletSparkRecord spark;
+      u8 index = read_u8(stream);
+      u8 image_id = read_u8(stream);
+      read_bytes(stream, &spark, sizeof(BulletSparkRecord));
+      spark.effect.unk0C = get_bullet_effect_image_by_id(image_id);
+      if (spark.effect.unk0C == 0) {
+        spark.effect.unk04 = 0;
+      }
+      if (index < BULLET_SPARK_BUFFER_LEN) {
+        sparks[index] = spark;
+      }
+    }
+  }
+#endif
+}
+
 static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
   switch (obj->type) {
   case PROPDEF_PROP:
@@ -1868,6 +2023,7 @@ bool save_props_state(StateStream *stream) {
   // after every prop record (and the players) has been written.
   save_decals_state(stream);
   save_flying_particles_state(stream);
+  save_gun_effects_state(stream);
 
   /* Patch the props header with the real size and record count. */
   u32 totalPropsSize = stream->total_processed - dataStart;
@@ -2415,6 +2571,7 @@ bool load_props_state(StateStream *stream) {
   // so prop-attached impacts can resolve their saved prop index.
   load_decals_state(stream);
   load_flying_particles_state(stream);
+  load_gun_effects_state(stream);
 
   return TRUE;
 }
