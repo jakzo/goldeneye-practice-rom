@@ -33,8 +33,7 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining State to Restore
 
-- Music (pause music when timescale is paused, resume when unpaused, save/load music track and position)
-- Audio (prop sound effects and currently playing audio cues)
+- Audio (prop sound effects and currently playing audio cues, not sure how realistic or necessary this is?)
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
 ## Key Learnings
@@ -79,6 +78,16 @@ Add any general advice helpful for future agents working on this feature here. B
   cloud/water texture phase. Restore it together with the complete pointer-free
   current environment (including any interpolated alternative sky) and
   `g_FogSkyIsEnabled`.
+- **Music State**: The three compact-sequence players advance independently of
+  the gameplay clock. Temporary time-scale pause explicitly stops the players
+  and remembers which were active, resumes only those players, and suspends
+  music fades. Save states restore each track ID, sequence tick position,
+  logical playing state, volume/fade progress, tempo, all per-channel
+  instrument/controller state, mission music state, and the four scripted
+  music-slot timers. Sequence positions are rebuilt as `ALCSeqMarker`s after
+  reloading track data; never serialize marker or instrument pointers. Seeking
+  past earlier MIDI program changes without restoring channel state makes every
+  channel use the bank's default instrument.
 - **Transient Gun Effects**: The global impact-flare/spark/dust pools
   (`dword_CODE_bss_8007A170`, plus
   `dword_CODE_bss_8007A4E0` outside EU) are independent of props. Serialize

@@ -1,4 +1,5 @@
 #include "ultratypes.h"
+#include "practice_music.h"
 #include <ultra64.h>
 
 extern u64 g_randomSeed;
@@ -29,9 +30,11 @@ void set_time_scale(f32 scale) {
 void pause() {
   g_IsTimePaused = TRUE;
   set_final_time_scale(0.0f);
+  practice_music_pause();
 }
 
 void unpause() {
+  practice_music_resume();
   g_IsTimePaused = FALSE;
   set_final_time_scale(g_TimeScale);
 }

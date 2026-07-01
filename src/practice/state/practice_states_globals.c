@@ -8,6 +8,7 @@
 #include "player.h"
 #include "player_2.h"
 #include "practice_states_utils.h"
+#include "practice_states_music.h"
 #include "practice_ui.h"
 #include "unk_092E50.h"
 #include <ultra64.h>
@@ -269,6 +270,9 @@ void save_global_state(StateStream *stream) {
 
   // Objectives
   save_objective_state(stream);
+
+  // Music
+  save_music_state(stream);
 }
 
 void load_global_state_pre_props(StateStream *stream) {
@@ -347,6 +351,9 @@ void load_global_state_pre_props(StateStream *stream) {
 
   // Objectives
   load_objective_state(stream);
+
+  // Music
+  load_music_state(stream);
 
   // TODO: We should save the RNG state needed for restoring each prop
   // individually but for now just use the final RNG state when restoring props

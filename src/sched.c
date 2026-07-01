@@ -9,6 +9,7 @@
 #include "fr.h"
 #include "joy.h"
 #include "music.h"
+#include "practice_music.h"
 #include "speed_graph.h"
 #include "thread_config.h"
 
@@ -321,7 +322,11 @@ void __scHandleRetrace(OSSched *sc) {
     sc->frameCount++;
     viVsyncRelated();
     joyPoll();
+#ifdef PRACTICE_ROM
+    practice_music_fade_tick();
+#else
     musicFadeTick();
+#endif
     while (osRecvMesg(&sc->cmdQ, (OSMesg*)&rspTask, OS_MESG_NOBLOCK) != -1) {
         __scAppendList(sc, rspTask);
     }
