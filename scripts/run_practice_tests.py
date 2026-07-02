@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 import os
 import queue
 import re
@@ -14,6 +15,7 @@ from pathlib import Path
 
 
 TEST_COMPLETE = "TEST_COMPLETE"
+TEST_FAILED = "TEST_FAILED"
 TEST_TIMEOUT_SECONDS = 90
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +23,18 @@ ROM = ROOT / "build/u/ge007.u.z64"
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 DOCKER_IMAGE = os.environ.get("GOLDENEYE_DOCKER_IMAGE", "goldeneye")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Build and run GoldenEye practice ROM tests."
+    )
+    parser.add_argument(
+        "--test",
+        metavar="TEST_CASE",
+        help="run only the named test case",
+    )
+    return parser.parse_args()
 
 
 def read_test_cases():
@@ -172,6 +186,8 @@ def run_test(command):
                 return False, f"emulator exited with status {process.wait()}"
 
             print(line, end="", flush=True)
+            if TEST_FAILED in line:
+                return False, "failed"
             if TEST_COMPLETE in line:
                 return True, "completed"
     finally:
@@ -191,11 +207,23 @@ def print_summary(results):
 
 
 def main():
+    args = parse_args()
+
     try:
         test_cases = read_test_cases()
     except (OSError, ValueError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+
+    if args.test:
+        if args.test not in test_cases:
+            print(
+                f"error: unknown test case {args.test!r}; "
+                f"choose from: {', '.join(test_cases)}",
+                file=sys.stderr,
+            )
+            return 2
+        test_cases = [args.test]
 
     command = emulator_command()
     if command is None:

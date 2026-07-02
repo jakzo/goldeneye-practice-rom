@@ -357,7 +357,7 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, objectiveregisters1);
 
   // Background AI
-  // save_background_ai_state(stream);
+  save_background_ai_state(stream);
 
   // Sky
   save_sky_state(stream);
@@ -442,7 +442,7 @@ void load_global_state_pre_props(StateStream *stream) {
   ptr_alarm_sfx = NULL;
 
   // Background AI
-  // load_background_ai_state(stream);
+  load_background_ai_state(stream);
 
   // Sky
   load_sky_state(stream);

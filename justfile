@@ -50,9 +50,12 @@ ares-dev BOOT_LEVEL="TITLE":
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}
     ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 ./build/u/ge007.u.z64
 
-test TEST_CASE="STATE_DOOR":
+test-debug TEST_CASE:
     docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1 TEST_CASE="{{ TEST_CASE }}"
     ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 ./build/u/ge007.u.z64
+
+test TEST_CASE:
+    ./scripts/run_practice_tests.py --test "{{ TEST_CASE }}"
 
 test-all:
     ./scripts/run_practice_tests.py

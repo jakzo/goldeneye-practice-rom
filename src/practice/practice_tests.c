@@ -110,6 +110,7 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
   } break;
+
   case STATE_GRENADE:
     if (after_frames(20)) {
       emu_log("TRIGGER_SAVE");
@@ -159,29 +160,17 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+
   case STATE_BUNKER: {
     static s32 previous_chr_count = -1;
+    static bool chars_must_not_spawn = FALSE;
     s32 i;
     s32 chr_count = 0;
-    ChrRecord *controller = NULL;
 
     for (i = 0; i < g_NumChrSlots; i++) {
       if (g_ChrSlots[i].model != NULL) {
         chr_count++;
-        if (g_ChrSlots[i].chrnum == 25) {
-          controller = &g_ChrSlots[i];
-        }
       }
-    }
-
-    if (g_save_test_timer % 300 == 0) {
-      emu_log("BUNKER frame=%d alarm=%d flags=%08x chrs=%d ctrl=%p "
-              "timer=%d hidden=%04x aioffset=%d action=%d",
-              g_save_test_timer, alarm_timer, objectiveregisters1, chr_count,
-              controller, controller != NULL ? controller->timer60 : -1,
-              controller != NULL ? controller->hidden : 0,
-              controller != NULL ? controller->aioffset : -1,
-              controller != NULL ? controller->actiontype : -1);
     }
 
     if (chr_count != previous_chr_count) {
@@ -201,9 +190,12 @@ void practice_tests_tick() {
                   chr->actiontype);
         }
       }
+      if (chars_must_not_spawn && chr_count > previous_chr_count) {
+        emu_log("TEST_FAILED");
+        chars_must_not_spawn = FALSE;
+      }
       previous_chr_count = chr_count;
     }
-  }
 
     if (after_frames(30)) {
       emu_log("TRIGGER_SAVE");
@@ -213,17 +205,20 @@ void practice_tests_tick() {
       emu_log("TRIGGER_ALARM");
       alarmActivate();
       objectiveregisters1 |= 0x100;
-    } else if (after_frames(600)) {
+    } else if (after_frames(30)) {
       emu_log("PRE_LOAD alarm=%d flags=%08x", alarm_timer, objectiveregisters1);
       emu_log("TRIGGER_LOAD");
       load_game_state();
       emu_log("LOAD_DONE");
       emu_log("POST_LOAD alarm=%d flags=%08x", alarm_timer,
               objectiveregisters1);
-    } else if (after_frames(1200)) {
+      chars_must_not_spawn = TRUE;
+    } else if (after_frames(1200) && chars_must_not_spawn) {
       emu_log("TEST_COMPLETE");
     }
     break;
+  }
+
   case STATE_DAM:
     if (after_frames(30)) {
       emu_log("TRIGGER_SAVE");
@@ -237,6 +232,7 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+
   case FIRE_SLOWMO:
     // The first-person gun must fire only when simulation time advances. A shot
     // (ammo decrement) on a frame where no time passed (prev_clock == 0) means
@@ -275,6 +271,7 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+
   default:
     break;
   }
