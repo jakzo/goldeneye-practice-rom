@@ -97,6 +97,7 @@ The codebase heavily utilizes standard decompilation patterns to bridge C with y
     - `just test TEST_CASE_NAME`
     - See practice_debug.c for the implementation of each test case
     - Don't be afraid to add new temporary test cases for debugging to verify the state of things at runtime
+    - If adding a new regression test, make sure to do red-green where it fails when your fix is inactive but passes when active
 2. View logs
     - This will start the ares emulator and immediately do some action in a level
     - ares is nearly cycle-accurate so if it has an issue, even a low-level hardware or timing one, it is almost certainly an issue on real hardware as well

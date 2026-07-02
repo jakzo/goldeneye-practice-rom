@@ -554,6 +554,29 @@ static bool prop_is_active_list_member(PropRecord *prop) {
   return FALSE;
 }
 
+/*
+ * Script-equipped objects which are not held weapons or hats are concealed
+ * inventory. They are disabled and removed from the active list while attached
+ * to a CHR, but chrDropItems walks the CHR child list to drop them on death.
+ * Serialize them as prop records so their object payload and ownership can be
+ * reconstructed even if they were dropped or collected after the save.
+ */
+static bool prop_is_concealed_chr_item(PropRecord *prop) {
+  ChrRecord *chr;
+
+  if (prop == NULL || prop->parent == NULL ||
+      prop->parent->type != PROP_TYPE_CHR || prop->parent->chr == NULL ||
+      (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON) ||
+      prop->obj == NULL) {
+    return FALSE;
+  }
+
+  chr = prop->parent->chr;
+  return prop != chr->weapons_held[GUNRIGHT] &&
+         prop != chr->weapons_held[GUNLEFT] &&
+         prop != chr->handle_positiondata_hat;
+}
+
 static void detach_old_chr_attachment(ChrRecord *chr, PropRecord *prop,
                                       PropRecord *saved_attachments[4]) {
   if (prop == NULL || prop_is_chr_attachment(prop, saved_attachments) ||
@@ -726,6 +749,33 @@ static void restore_chr_attachments(PropRecord *chr_prop,
     weaponSetGunfireVisible(chr->weapons_held[GUNLEFT],
                             indices->gunfire_visible[GUNLEFT]);
   }
+}
+
+static void restore_concealed_chr_item(PropRecord *prop,
+                                       PropRecord *chr_prop) {
+  ObjectRecord *obj;
+
+  if (prop == NULL || chr_prop == NULL || chr_prop->type != PROP_TYPE_CHR ||
+      chr_prop->chr == NULL ||
+      (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON) ||
+      prop->obj == NULL) {
+    return;
+  }
+
+  obj = prop->obj;
+
+  if (prop->parent == NULL && (prop->flags & PROPFLAG_ENABLED)) {
+    chrpropDeregisterRooms(prop);
+    chrpropDelist(prop);
+  } else if (prop->parent != NULL) {
+    chrpropDetach(prop);
+  }
+
+  chrpropReparent(prop, chr_prop);
+  chrpropDisable(prop);
+  obj->runtime_bitflags &= ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
+  obj->runtime_bitflags |= RUNTIMEBITFLAG_HASOWNER;
+  obj->projectile = NULL;
 }
 
 static void removePropAtIndex(s16 index) {
@@ -1759,7 +1809,9 @@ bool save_props_state(StateStream *stream) {
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
     PropRecord *prop = get_prop_by_index(i);
 
-    if (prop == NULL || !prop_is_active_list_member(prop)) {
+    if (prop == NULL ||
+        (!prop_is_active_list_member(prop) &&
+         !prop_is_concealed_chr_item(prop))) {
       continue;
     }
 
@@ -2101,6 +2153,7 @@ bool save_props_state(StateStream *stream) {
 // saved links must be installed only once every such operation has completed.
 typedef struct SavedPropLinks {
   u16 index;
+  u16 parent;
   u16 prev;
   u16 next;
 } SavedPropLinks;
@@ -2362,20 +2415,29 @@ bool load_props_state(StateStream *stream) {
     // final pass, after every create/remove/attach operation has finished
     // mutating the lists. Setting them here would let later operations on other
     // slots clobber this prop's links.
+    // A concealed item may currently be a dropped active prop. Remove that live
+    // registration before replacing its room list and flags with the saved
+    // concealed state.
+    if ((s16)savedPropParentIdx >= 0 && prop->parent == NULL &&
+        prop_is_active_list_member(prop)) {
+      chrpropDeregisterRooms(prop);
+      chrpropDelist(prop);
+    }
     prop->type = savedPropType;
     prop->flags = savedPropFlags;
     prop->timetoregen = savedPropTimetoregen;
     prop->pos = savedPropPos;
     prop->stan = get_tile_by_offset(savedPropStanOffset);
     prop->zDepth = savedPropZDepth;
-    // Every serialized prop came from the active list and was therefore a
-    // standalone root at save time. Detach a live parent retained after the
-    // save (for example, an object collected into Bond's inventory), otherwise
-    // the final active-list relink skips this record and severs the list.
+    // Active-list records were standalone roots at save time, while concealed
+    // CHR items are reparented in a final pass. Detach any live parent retained
+    // after the save (for example, an object collected into Bond's inventory)
+    // before either relationship is rebuilt.
     if (prop->parent != NULL) {
       chrpropDetach(prop);
     }
     savedLinks[i].index = savedPropIndex;
+    savedLinks[i].parent = savedPropParentIdx;
     savedLinks[i].prev = savedPropPrevIdx;
     savedLinks[i].next = savedPropNextIdx;
     prop->rooms[0] = savedPropRooms[0];
@@ -2552,6 +2614,22 @@ bool load_props_state(StateStream *stream) {
     }
   }
 
+  // Concealed CHR inventory is not represented by weapons_held or the hat
+  // pointer. Reattach those saved child props after normal equipment has
+  // rebuilt the CHR child chain.
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *prop;
+    PropRecord *parent;
+
+    if ((s16)savedLinks[i].parent < 0) {
+      continue;
+    }
+
+    prop = get_prop_by_index(savedLinks[i].index);
+    parent = get_prop_by_index(savedLinks[i].parent);
+    restore_concealed_chr_item(prop, parent);
+  }
+
   /* Resolve projectile references only after all saved props are processed. */
   for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
     Projectile *proj = &g_Projectiles[pi];
@@ -2580,14 +2658,10 @@ bool load_props_state(StateStream *stream) {
     removePropAtIndex(c);
   }
 
-  // Rebuild the active list now that all prop creation, teardown, and equipment
-  // attachment is complete. Only prev/next are restored: saved props are
-  // active-list roots, so these are their active-list links. The attachment
-  // graph (parent/child, and the sibling links of disabled held weapons/hats)
-  // is owned by restore_chr_attachments and the retained live state, so it must
-  // not be overwritten from the saved indices here -- doing so would detach a
-  // character's recreated equipment whose slot no longer matches the saved
-  // child index.
+  // Rebuild the active list now that all prop creation, teardown, and
+  // attachments are complete. Only standalone records receive their saved
+  // prev/next links; concealed items and equipment already use those fields
+  // for the CHR child-sibling graph.
   //
   // prev/next are overloaded: they are the active-list links for standalone
   // props, but also the child-sibling links for attached equipment.

@@ -26,6 +26,7 @@ extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
 #define STATE_DAM 4
 #define FIRE_SLOWMO 5
 #define RNG_LOAD 6
+#define STATE_ARCHIVES_KEY 7
 // --- end test cases ---
 
 static s32 g_save_test_timer = -1;
@@ -49,6 +50,8 @@ s32 practice_tests_boot_level(s32 test_case) {
     return LEVELID_BUNKER1;
   case STATE_DAM:
     return LEVELID_DAM;
+  case STATE_ARCHIVES_KEY:
+    return LEVELID_ARCHIVES;
   default:
     return LEVELID_NONE;
   }
@@ -232,6 +235,58 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+
+  case STATE_ARCHIVES_KEY: {
+    static PropRecord *key;
+    s32 i;
+
+    if (after_frames(30)) {
+      key = NULL;
+      for (i = 0; i < g_NumChrSlots && key == NULL; i++) {
+        ChrRecord *chr = &g_ChrSlots[i];
+        PropRecord *child;
+
+        if (chr->prop == NULL) {
+          continue;
+        }
+        for (child = chr->prop->child; child != NULL; child = child->prev) {
+          if (child->obj != NULL && child->obj->type == PROPDEF_KEY) {
+            key = child;
+            break;
+          }
+        }
+      }
+
+      if (key == NULL) {
+        emu_log("KEY_NOT_FOUND");
+        emu_log("TEST_FAILED");
+      } else {
+        emu_log("TRIGGER_SAVE");
+        save_game_state();
+        emu_log("SAVE_DONE");
+      }
+    } else if (after_frames(2)) {
+      if (key != NULL) {
+        objDetach(key);
+        chrpropActivate(key);
+        chrpropEnable(key);
+        chrpropRegisterRooms(key);
+      }
+    } else if (after_frames(2)) {
+      emu_log("TRIGGER_LOAD");
+      load_game_state();
+      emu_log("LOAD_DONE");
+    } else if (after_frames(2)) {
+      if (key != NULL && key->parent != NULL &&
+          key->parent->type == PROP_TYPE_CHR) {
+        emu_log("KEY_RESTORED_TO_CHR");
+        emu_log("TEST_COMPLETE");
+      } else {
+        emu_log("KEY_NOT_RESTORED");
+        emu_log("TEST_FAILED");
+      }
+    }
+  } break;
 
   case FIRE_SLOWMO:
     // The first-person gun must fire only when simulation time advances. A shot

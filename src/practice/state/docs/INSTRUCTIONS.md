@@ -32,7 +32,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining State to Restore
 
-- In the level Archives there is a guard in the starting room that holds a key to the door you need to leave through but when saving then loading state immediately at the start of the level and killing the guard, he does not drop the key
 - Loading state back from the end to the start of Train crashes
 - Dialogue text at top of screen is not affected by save/load state
 - Audio
@@ -125,6 +124,14 @@ Add any general advice helpful for future agents working on this feature here. B
   always clear and is not serialized. The player's own first-person muzzle flash
   is a separate view-model effect driven each frame from the saved hand firing
   state, not this prop flag.
+- **Concealed CHR Items**: Stage scripts can equip non-weapon objects (such as
+  the starting-room key in Archives) by disabling the object prop, removing it
+  from the active list, and parenting it to a CHR. These objects are not named
+  by `weapons_held` or the hat pointer; `chrDropItems` discovers them by walking
+  the CHR child chain. Serialize concealed child props alongside active-list
+  props, then reattach them after held weapons and hats rebuild that chain.
+  Otherwise loading erases the ownership link and the item is not dropped when
+  the guard dies.
 - **Object Projectile/Embedment Union**: `ObjectRecord::projectile` and `ObjectRecord::embedment` occupy the same union slot. On load, restore only the member selected by `RUNTIMEBITFLAG_DEPOSIT` or `RUNTIMEBITFLAG_EMBEDDED`. Restoring one and then clearing the other overwrites the shared pointer; a deposited object will retain its flag and crash on the next tick when the engine dereferences the null projectile.
 - **Resolve Projectile Prop Indices After Loading All Props**: Do not temporarily store saved prop indices in `Projectile::ownerprop` or `Projectile::obj`. If a referenced prop was collected or otherwise removed after the save, its record is skipped and the integer remains disguised as a pointer; a later tick or second save will dereference it and crash. Keep indices in separate arrays, resolve them after all prop records are processed, and free projectiles whose object prop no longer exists.
 - **Adding/Removing Props on Load**: The loader rebuilds the prop array to match the save exactly. Props are processed in ascending slot order; before each saved record, every enabled prop in the skipped slots is removed (`removePropAtIndex`), and after the last record all trailing enabled slots are removed. Each saved prop is restored into its _exact_ original slot so all index-based references (parent/child/prev/next, `weapons_held`, projectile `obj`) stay valid. When the current world has no compatible prop in a slot, it is recreated there:
