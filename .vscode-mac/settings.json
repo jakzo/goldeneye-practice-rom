@@ -1,8 +1,9 @@
 {
+    "editor.defaultFormatter": "oxc.oxc-vscode",
     "[c]": {
-        "editor.defaultFormatter": "seaube.clangformat"
+        "editor.defaultFormatter": "xaver.clang-format"
     },
     "[h]": {
-        "editor.defaultFormatter": "seaube.clangformat"
+        "editor.defaultFormatter": "xaver.clang-format"
     }
 }

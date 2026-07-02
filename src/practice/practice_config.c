@@ -25,6 +25,7 @@ struct PracticeConfig practice = {
     TRUE,          // splits_enabled
     TRUE,          // gate_guard_status
     FALSE,         // dam_gate_intro_enabled
+    FALSE,         // log_splits
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -169,12 +170,14 @@ static s32 boot_level_options(s32 stage_id, s32 option_index,
 }
 
 static const struct PracticeSetting s_level_settings[] = {
-    OPTIONS_SETTING("Splits", splits_enabled, s_enabled_disabled, splits_apply),
     OPTIONS_SETTING("Gate guard status", gate_guard_status, s_enabled_disabled,
                     dam_apply),
     OPTIONS_SETTING("Gate intro cutscene", dam_gate_intro_enabled,
                     s_disabled_enabled, dam_apply),
     DYNAMIC_OPTIONS_SETTING("Boot into level", boot_level, boot_level_options),
+    OPTIONS_SETTING("Splits", splits_enabled, s_enabled_disabled, splits_apply),
+    OPTIONS_SETTING("Log on split", log_splits, s_disabled_enabled,
+                    splits_apply),
 };
 
 static const struct PracticeSetting s_global_settings[] = {

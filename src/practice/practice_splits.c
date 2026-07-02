@@ -280,20 +280,20 @@ static void splits_find_current_list(void) {
 void splits_init(void) { splits_find_current_list(); }
 
 void trigger_split() {
-  char time_buf[16];
-  char delta_buf[16];
   s32 last_split_time = s_CurrentSplitIndex > 0
                             ? s_SplitCumulativeTimes[s_CurrentSplitIndex - 1]
                             : 0;
-  s32 delta = mission_timer - last_split_time;
 
   if (s_CurrentSplitIndex < MAX_SPLITS) {
     s_SplitCumulativeTimes[s_CurrentSplitIndex] = mission_timer;
   }
 
-  // Log the split
-  {
+  if (practice.log_splits) {
+    char time_buf[16];
+    char delta_buf[16];
+    s32 delta = mission_timer - last_split_time;
     const Split *split = &s_CurrentSplitList->splits[s_CurrentSplitIndex];
+
     format_time(mission_timer, time_buf, TRUE);
     format_time(delta, delta_buf, FALSE);
     practiceLogInfo("SPLIT %d/%d: %s - %s (delta: %s)", s_CurrentSplitIndex + 1,
@@ -437,7 +437,8 @@ Gfx *splits_render_final(Gfx *DL) {
 
 extern char *langGet(s32 id);
 
-static bool item_names_match(const char *inventoryName, const char *splitItemName) {
+static bool item_names_match(const char *inventoryName,
+                             const char *splitItemName) {
   s32 i;
   for (i = 0; i < 64; i++) {
     char a = inventoryName[i];

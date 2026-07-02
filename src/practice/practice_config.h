@@ -39,6 +39,7 @@ struct PracticeConfig {
   s32 splits_enabled;
   s32 gate_guard_status;
   s32 dam_gate_intro_enabled;
+  s32 log_splits;
 };
 
 extern struct PracticeConfig practice;
