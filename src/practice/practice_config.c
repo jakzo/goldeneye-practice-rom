@@ -7,6 +7,7 @@
 #include <fr.h>
 #include <joy.h>
 #include <lvl_text.h>
+#include <ramrom.h>
 #include <textrelated.h>
 #include <ultra64.h>
 
@@ -233,12 +234,38 @@ static void save_config(void) {
   }
 }
 
-static void apply_build_overrides(void) {
-#ifdef PRACTICE_TEST_BOOT_LEVEL
-  practice.boot_level = PRACTICE_TEST_BOOT_LEVEL;
-#endif
-#ifdef PRACTICE_TEST_SKIP_INTRO
-  practice.disable_intro_cutscenes = PRACTICE_TEST_SKIP_INTRO;
+static u32 rom_config_checksum(const struct PracticeRomConfig *config) {
+  return config->magic ^ config->version ^ config->size ^
+         (u32)config->test_case ^ (u32)config->boot_level ^ config->flags ^
+         PRACTICE_ROM_CONFIG_CHECKSUM_SALT;
+}
+
+static void apply_rom_config(void) {
+  union {
+    u64 alignment;
+    struct PracticeRomConfig config;
+  } buffer;
+  struct PracticeRomConfig *config = &buffer.config;
+
+  romCopy(config, (void *)PRACTICE_ROM_CONFIG_OFFSET, sizeof(*config));
+  if (config->magic != PRACTICE_ROM_CONFIG_MAGIC ||
+      config->version != PRACTICE_ROM_CONFIG_VERSION ||
+      config->size != sizeof(*config) ||
+      config->checksum != rom_config_checksum(config)) {
+    return;
+  }
+
+  if (config->boot_level != LEVELID_NONE) {
+    practice.boot_level = config->boot_level;
+  }
+
+#ifdef DEV
+  practice_tests_set_case(config->test_case);
+  s32 test_boot_level = practice_tests_boot_level(config->test_case);
+  if (test_boot_level != LEVELID_NONE) {
+    practice.boot_level = test_boot_level;
+  }
+  practice.disable_intro_cutscenes = TRUE;
 #endif
 }
 
@@ -260,7 +287,7 @@ void practice_config_load(void) {
     }
   }
 
-  apply_build_overrides();
+  apply_rom_config();
 }
 
 static s32 setting_applies(const struct PracticeSetting *setting,

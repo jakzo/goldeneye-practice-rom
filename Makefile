@@ -125,11 +125,6 @@ ifeq ($(DEV), 1)
  ASMDEFS += --defsym DEV=1
 endif
 
-ifdef TEST_CASE
- LCDEFS += -DTEST_CASE=$(TEST_CASE)
- ASMDEFS += --defsym TEST_CASE=$(TEST_CASE)
-endif
-
 ALLOWED_VERSIONS := US EU JP DEBUG USB
 ALLOWED_COUNTRYCODE := u e j
 
@@ -220,35 +215,14 @@ else
   CC := $(IRIX_ROOT)/cc
 endif
 
-ifneq ($(origin BOOT_LEVEL),undefined)
-  LCDEFS += -DPRACTICE_BOOT_LEVEL_OVERRIDE
-endif
-ifneq ($(origin PRACTICE_TEST_BOOT_LEVEL),undefined)
-  LCDEFS += -DPRACTICE_TEST_BOOT_LEVEL=$(PRACTICE_TEST_BOOT_LEVEL)
-endif
-ifneq ($(origin PRACTICE_TEST_SKIP_INTRO),undefined)
-  LCDEFS += -DPRACTICE_TEST_SKIP_INTRO=$(PRACTICE_TEST_SKIP_INTRO)
-endif
-
-BOOT_LEVEL ?= TITLE
-BOOT_LEVELID := LEVELID_$(BOOT_LEVEL)
-
-CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL) -DBOOT_LEVELID=$(BOOT_LEVELID)
+CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM
 
 CC_GCC := $(TOOLCHAIN)gcc
-CFLAGS_GCC := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -fms-extensions -fno-stack-protector -G 0 -g $(GCC_OPTIMIZATION) $(INCLUDE) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM -DBOOT_LEVEL=$(BOOT_LEVEL) -DBOOT_LEVELID=$(BOOT_LEVELID)
+CFLAGS_GCC := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -fms-extensions -fno-stack-protector -G 0 -g $(GCC_OPTIMIZATION) $(INCLUDE) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM
 LIBGCC := $(shell $(CC_GCC) -print-libgcc-file-name)
 
 # Ensure the build directory for practice files exists
 $(shell mkdir -p $(BUILD_DIR)/src/practice)
-
-# Force recompilation of practice_config.o if the BOOT_LEVEL changes
-OLD_BOOT_LEVEL := $(shell cat $(BUILD_DIR)/src/practice/boot_level.txt 2>/dev/null)
-ifneq ($(OLD_BOOT_LEVEL),$(BOOT_LEVEL))
-  $(shell echo "$(BOOT_LEVEL)" > $(BUILD_DIR)/src/practice/boot_level.txt)
-  $(shell rm -f $(BUILD_DIR)/src/practice/practice_config.o)
-  $(shell rm -f $(APPELF) $(APPROM) $(APPBIN))
-endif
 
 LD := $(TOOLCHAIN)ld
 LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld
@@ -287,7 +261,7 @@ BUILD_CONFIG_TMP := $(BUILD_CONFIG_STAMP).tmp
 .NOTPARALLEL: print_info create_directories $(APPROM) checksum
 
 # Phony Recipes - These targets are not files, Get Make to do something
-.PHONY: FORCE print_info create_directories build_tools prerequisites checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test  context extractassets textures
+.PHONY: FORCE print_info create_directories build_tools prerequisites runtime_config checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test context extractassets textures
 
 
 # this file references variables defined above: BUILD_DIR, CFLAGWARNING, INCLUDE, LCDEFS
@@ -310,9 +284,7 @@ $(BUILD_CONFIG_STAMP): FORCE
 		printf '%s\n' 'FINAL=$(FINAL)'; \
 		printf '%s\n' 'VERSION=$(VERSION)'; \
 		printf '%s\n' 'IDO_RECOMP=$(IDO_RECOMP)'; \
-		printf '%s\n' 'BOOT_LEVEL=$(BOOT_LEVEL)'; \
 		printf '%s\n' 'DEV=$(DEV)'; \
-		printf '%s\n' 'TEST_CASE=$(TEST_CASE)'; \
 		printf '%s\n' 'GCC_OPTIMIZATION=$(GCC_OPTIMIZATION)'; \
 		printf '%s\n' 'OPTIMIZATION=$(OPTIMIZATION)'; \
 		printf '%s\n' 'LCDEFS=$(LCDEFS)'; \
@@ -423,6 +395,10 @@ $(APPROM):	$(APPBIN)
 	@echo "Finalizing ROM"
 	$(N64CKSUM) $< $@
 
+runtime_config: $(APPROM)
+	@python3 scripts/patch_practice_rom.py $(APPROM) \
+		--test-case "$(TEST_CASE)" --boot-level "$(BOOT_LEVEL)"
+
 
 ## Phony Recipes below - Get Make to do something ##
 
@@ -439,7 +415,7 @@ build_tools:
 
 prerequisites: print_info create_directories build_tools extractassets
 
-checksum: $(APPROM)
+checksum: runtime_config
 ifeq ($(COMPARE), 1)
 	scripts/make/checksum.sh "$(SHA1SUM)" "$(OUTCODE)" "$(BUILD_DIR)"
 endif

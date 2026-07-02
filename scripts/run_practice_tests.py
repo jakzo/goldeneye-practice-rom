@@ -14,11 +14,12 @@ from pathlib import Path
 
 
 TEST_COMPLETE = "TEST_COMPLETE"
-TEST_TIMEOUT_SECONDS = 30
+TEST_TIMEOUT_SECONDS = 90
 
 ROOT = Path(__file__).resolve().parent.parent
 ROM = ROOT / "build/u/ge007.u.z64"
-TEST_CASES_HEADER = ROOT / "src/practice/practice_tests.h"
+TESTS_FILE = ROOT / "src/practice/practice_tests.c"
+PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 DOCKER_IMAGE = os.environ.get("GOLDENEYE_DOCKER_IMAGE", "goldeneye")
 
 
@@ -31,7 +32,7 @@ def read_test_cases():
     found_start = False
     found_end = False
 
-    for line in TEST_CASES_HEADER.read_text().splitlines():
+    for line in TESTS_FILE.read_text().splitlines():
         if line.strip() == start_marker:
             found_start = True
             inside_test_cases = True
@@ -47,12 +48,12 @@ def read_test_cases():
 
     if not found_start or not found_end:
         raise ValueError(
-            f"test case markers are missing from {TEST_CASES_HEADER}"
+            f"test case markers are missing from {TESTS_FILE}"
         )
     if not test_cases:
-        raise ValueError(f"no test case defines found in {TEST_CASES_HEADER}")
+        raise ValueError(f"no test case defines found in {TESTS_FILE}")
     if len(test_cases) != len(set(test_cases)):
-        raise ValueError(f"duplicate test case defines found in {TEST_CASES_HEADER}")
+        raise ValueError(f"duplicate test case defines found in {TESTS_FILE}")
 
     return test_cases
 
@@ -73,7 +74,7 @@ def emulator_command():
     return None
 
 
-def build_test(test_case):
+def build_tests():
     jobs = os.cpu_count() or 1
     command = [
         "docker",
@@ -85,7 +86,6 @@ def build_test(test_case):
         "make",
         f"-j{jobs}",
         "DEV=1",
-        f"TEST_CASE={test_case}",
     ]
     with tempfile.TemporaryFile(mode="w+") as build_log:
         try:
@@ -106,6 +106,20 @@ def build_test(test_case):
         for line in deque(build_log):
             print(line, end="", file=sys.stderr)
         return False
+
+
+def select_test(test_case):
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(PATCH_ROM_SCRIPT),
+            str(ROM),
+            "--test-case",
+            test_case,
+        ],
+        cwd=ROOT,
+    )
+    return result.returncode == 0
 
 
 def stream_output(process, output_queue):
@@ -191,12 +205,16 @@ def main():
         )
         return 1
 
+    print("=== building test ROM ===", flush=True)
+    if not build_tests():
+        return 1
+
     results = []
     try:
         for test_case in test_cases:
-            print(f"\n=== {test_case}: building ===", flush=True)
-            if not build_test(test_case):
-                results.append((test_case, False, "build failed"))
+            print(f"\n=== {test_case}: patching ===", flush=True)
+            if not select_test(test_case):
+                results.append((test_case, False, "ROM patch failed"))
                 continue
 
             print(f"=== {test_case}: running ===", flush=True)

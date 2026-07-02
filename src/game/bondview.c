@@ -11746,7 +11746,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
             mission_timer += g_ClockTimer;
         }
 
-#ifdef PRACTICE_ROM
+#ifdef DEV
         practice_tests_tick();
 #endif
 
@@ -11829,6 +11829,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 
     g_CurrentPlayer->buttons_pressed = buttons;
 }
+
 
 
 /**
@@ -20486,6 +20487,4 @@ void SurroundWithExplosions(int delay)
     g_SurroundBondWithExplosionsTicks = delay + g_GlobalTimer;
     g_PlayerTickExplodeCreatePosition = 0;
 }
-
-
 

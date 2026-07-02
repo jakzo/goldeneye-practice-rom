@@ -16,15 +16,55 @@ extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern u64 g_randomSeed;
 extern u64 g_chrObjRandomSeed;
 extern u64 g_tlbRandomSeed;
+extern s32 propdoorInteract(PropRecord *doorprop);
+extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
+
+// --- start test cases ---
+#define STATE_DOOR 1
+#define STATE_GRENADE 2
+#define STATE_BUNKER 3
+#define STATE_DAM 4
+#define FIRE_SLOWMO 5
+#define RNG_LOAD 6
+// --- end test cases ---
 
 static s32 g_save_test_timer = -1;
 static u32 case_delta = 0;
+static s32 g_practice_test_case;
+
+void practice_tests_set_case(s32 test_case) {
+  g_practice_test_case = test_case;
+  g_save_test_timer = -1;
+  case_delta = 0;
+}
+
+s32 practice_tests_boot_level(s32 test_case) {
+  switch (test_case) {
+  case STATE_DOOR:
+  case STATE_GRENADE:
+  case FIRE_SLOWMO:
+  case RNG_LOAD:
+    return LEVELID_RUNWAY;
+  case STATE_BUNKER:
+    return LEVELID_BUNKER1;
+  case STATE_DAM:
+    return LEVELID_DAM;
+  default:
+    return LEVELID_NONE;
+  }
+}
+
 static bool after_frames(u32 num_frames) {
   case_delta += num_frames;
   return g_save_test_timer == case_delta;
 }
 
 void practice_tests_tick() {
+#ifdef DEV
+  if (g_practice_test_case == 0) {
+    return;
+  }
+
   if (g_save_test_timer == -1 && g_CameraMode == CAMERAMODE_FP) {
     g_save_test_timer = 0;
     emu_log("TEST_STARTED");
@@ -36,8 +76,8 @@ void practice_tests_tick() {
   g_save_test_timer++;
   case_delta = 0;
 
-  {
-#if TEST_CASE == STATE_DOOR
+  switch (g_practice_test_case) {
+  case STATE_DOOR: {
     PropRecord *door = NULL;
     PropRecord *p = NULL;
     u32 door_num = 4; // roller door in front of bond at start of runway
@@ -69,7 +109,8 @@ void practice_tests_tick() {
     } else if (after_frames(2)) {
       emu_log("TEST_COMPLETE");
     }
-#elif TEST_CASE == STATE_GRENADE
+  } break;
+  case STATE_GRENADE:
     if (after_frames(20)) {
       emu_log("TRIGGER_SAVE");
       save_game_state();
@@ -117,52 +158,52 @@ void practice_tests_tick() {
     } else if (after_frames(2)) {
       emu_log("TEST_COMPLETE");
     }
-#elif TEST_CASE == STATE_BUNKER
-    {
-      static s32 previous_chr_count = -1;
-      s32 i;
-      s32 chr_count = 0;
-      ChrRecord *controller = NULL;
+    break;
+  case STATE_BUNKER: {
+    static s32 previous_chr_count = -1;
+    s32 i;
+    s32 chr_count = 0;
+    ChrRecord *controller = NULL;
 
-      for (i = 0; i < g_NumChrSlots; i++) {
-        if (g_ChrSlots[i].model != NULL) {
-          chr_count++;
-          if (g_ChrSlots[i].chrnum == 25) {
-            controller = &g_ChrSlots[i];
-          }
+    for (i = 0; i < g_NumChrSlots; i++) {
+      if (g_ChrSlots[i].model != NULL) {
+        chr_count++;
+        if (g_ChrSlots[i].chrnum == 25) {
+          controller = &g_ChrSlots[i];
         }
-      }
-
-      if (g_save_test_timer % 300 == 0) {
-        emu_log("BUNKER frame=%d alarm=%d flags=%08x chrs=%d ctrl=%p "
-                "timer=%d hidden=%04x aioffset=%d action=%d",
-                g_save_test_timer, alarm_timer, objectiveregisters1, chr_count,
-                controller, controller != NULL ? controller->timer60 : -1,
-                controller != NULL ? controller->hidden : 0,
-                controller != NULL ? controller->aioffset : -1,
-                controller != NULL ? controller->actiontype : -1);
-      }
-
-      if (chr_count != previous_chr_count) {
-        emu_log("CHR_COUNT_CHANGED frame=%d old=%d new=%d", g_save_test_timer,
-                previous_chr_count, chr_count);
-        for (i = 0; i < g_NumChrSlots; i++) {
-          ChrRecord *chr = &g_ChrSlots[i];
-          if (chr->model != NULL) {
-            bool is_global = FALSE;
-            s32 ailist_id = chr->ailist != NULL
-                                ? chraiGetAIListID(chr->ailist, &is_global)
-                                : -1;
-            emu_log("CHR slot=%d num=%d body=%d ai=%04x off=%d flags=%08x "
-                    "hidden=%04x hear=%d action=%d",
-                    i, chr->chrnum, chr->bodynum, ailist_id, chr->aioffset,
-                    chr->chrflags, chr->hidden, chr->lastheartarget60,
-                    chr->actiontype);
-          }
-        }
-        previous_chr_count = chr_count;
       }
     }
+
+    if (g_save_test_timer % 300 == 0) {
+      emu_log("BUNKER frame=%d alarm=%d flags=%08x chrs=%d ctrl=%p "
+              "timer=%d hidden=%04x aioffset=%d action=%d",
+              g_save_test_timer, alarm_timer, objectiveregisters1, chr_count,
+              controller, controller != NULL ? controller->timer60 : -1,
+              controller != NULL ? controller->hidden : 0,
+              controller != NULL ? controller->aioffset : -1,
+              controller != NULL ? controller->actiontype : -1);
+    }
+
+    if (chr_count != previous_chr_count) {
+      emu_log("CHR_COUNT_CHANGED frame=%d old=%d new=%d", g_save_test_timer,
+              previous_chr_count, chr_count);
+      for (i = 0; i < g_NumChrSlots; i++) {
+        ChrRecord *chr = &g_ChrSlots[i];
+        if (chr->model != NULL) {
+          bool is_global = FALSE;
+          s32 ailist_id = chr->ailist != NULL
+                              ? chraiGetAIListID(chr->ailist, &is_global)
+                              : -1;
+          emu_log("CHR slot=%d num=%d body=%d ai=%04x off=%d flags=%08x "
+                  "hidden=%04x hear=%d action=%d",
+                  i, chr->chrnum, chr->bodynum, ailist_id, chr->aioffset,
+                  chr->chrflags, chr->hidden, chr->lastheartarget60,
+                  chr->actiontype);
+        }
+      }
+      previous_chr_count = chr_count;
+    }
+  }
 
     if (after_frames(30)) {
       emu_log("TRIGGER_SAVE");
@@ -182,7 +223,8 @@ void practice_tests_tick() {
     } else if (after_frames(1200)) {
       emu_log("TEST_COMPLETE");
     }
-#elif TEST_CASE == STATE_DAM
+    break;
+  case STATE_DAM:
     if (after_frames(30)) {
       emu_log("TRIGGER_SAVE");
       save_game_state();
@@ -194,7 +236,8 @@ void practice_tests_tick() {
     } else if (after_frames(2)) {
       emu_log("TEST_COMPLETE");
     }
-#elif TEST_CASE == FIRE_SLOWMO
+    break;
+  case FIRE_SLOWMO:
     // The first-person gun must fire only when simulation time advances. A shot
     // (ammo decrement) on a frame where no time passed (prev_clock == 0) means
     // the gun fired while frozen/slowed -- the bug.
@@ -231,11 +274,14 @@ void practice_tests_tick() {
     } else if (after_frames(20)) {
       emu_log("TEST_COMPLETE");
     }
-#endif
+    break;
+  default:
+    break;
   }
+#endif
 }
 
-#if TEST_CASE == RNG_LOAD
+#ifdef DEV
 extern s32 speedgraphframes; // finalized per-frame delta
 
 // Determinism check for loading a save state. Save once, then repeatedly load
@@ -248,7 +294,7 @@ extern s32 speedgraphframes; // finalized per-frame delta
 //
 // Runs from updateFrameCounters (via practice_tests_frame) once the frame delta
 // and RNG seeds are finalized for the frame, before gameplay consumes any RNG.
-void practice_tests_frame() {
+void practice_tests_frame(void) {
   enum { PH_WAIT_FP, PH_SETTLE, PH_RUN, PH_DONE };
   static s32 phase = PH_WAIT_FP;
   static s32 iteration = 0;
@@ -257,6 +303,10 @@ void practice_tests_frame() {
   const s32 SETTLE_FRAMES = 30;
   const s32 LOG_FRAMES = 30;
   const s32 NUM_ITERATIONS = 10;
+
+  if (g_practice_test_case != RNG_LOAD) {
+    return;
+  }
 
   switch (phase) {
   case PH_WAIT_FP:

@@ -1,6 +1,7 @@
 #Git and VS files
 .*~
 __pycache__/*
+*.pyc
 .vscode
 .[vV][sS]/
 
