@@ -34,6 +34,7 @@
 #include "initmenus.h"
 #include "cheat_buttons.h"
 #include "practice/practice_grenade_cam.h"
+#include "practice/practice_dialog.h"
 #include "practice/practice_ui.h"
 #include "practice/practice_splits.h"
 #include "practice/practice_replay.h"
@@ -510,6 +511,7 @@ void lvlStageLoad(s32 stage)
     D_80048368 = 1.0f;
     lvlSetControlsLockedFlag(0);
 #ifdef PRACTICE_ROM
+    practice_dialog_reset();
     if (g_CurrentStageToLoad != LEVELID_TITLE) {
         practice_replay_on_stage_load();
         splits_init();

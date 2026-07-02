@@ -46,6 +46,7 @@
 #include "unk_0B3200.h"
 #include "practice/practice_timescale.h"
 #include "practice/practice_hotkeys.h"
+#include "practice/practice_dialog.h"
 #include "practice/practice_splits.h"
 #include "practice/practice_ui.h"
 #include "practice/state/practice_states_utils.h"
@@ -17245,6 +17246,9 @@ void bondviewResetUpperTextDisplay(void)
     display_upper_text_window = 0;
     upper_text_buffer_index = 0;
     g_UpperTextDisplayFlag = 0;
+#ifdef PRACTICE_ROM
+    practice_dialog_reset();
+#endif
 }
 
 
@@ -17262,7 +17266,11 @@ void bondviewSetUpperTextDisplayFlag(PLAYERFLAG flag)
 }
 
 
+#ifdef PRACTICE_ROM
+void hudmsgTopShow(char* string, u16 text_id)
+#else
 void hudmsgTopShow(char* string)
+#endif
 {
     s32 index;
     #ifdef DEBUG
@@ -17271,6 +17279,9 @@ void hudmsgTopShow(char* string)
     if (display_upper_text_window >= 2) { return; }
 
     index = (upper_text_buffer_index + display_upper_text_window) % 2;
+#ifdef PRACTICE_ROM
+    practice_dialog_enqueue(index, text_id);
+#endif
 #if defined(LEFTOVERDEBUG)
     strncpy(stringbuffer_top[index], string, (BONDVIEW_HUD_MSG_TOP_BUFFER_LENGTH-1));
     display_upper_text_window += 1;
@@ -17296,6 +17307,9 @@ void bondviewUpperTextWindowTimerTick(void)
 
             if (upper_text_window_timer < 0)
             {
+#ifdef PRACTICE_ROM
+                practice_dialog_remove(upper_text_buffer_index);
+#endif
                 upper_text_buffer_index = (s32) (upper_text_buffer_index + 1) % 2;
                 display_upper_text_window += -1;
             }

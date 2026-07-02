@@ -3745,8 +3745,11 @@ void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     osSyncPrintf("USING HUD MESSAGE Stringy = %d, ai->txt = %d\n", CharArrayTo16(ai->val,0), text);
 
 #endif
-
+#ifdef PRACTICE_ROM
+                    hudmsgTopShow(text, CharArrayTo16(ai->val,0));
+#else
                     hudmsgTopShow(text);
+#endif
                     Offset += AI_TextPrintTop_LENGTH;
                     break;
                 }

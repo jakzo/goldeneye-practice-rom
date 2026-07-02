@@ -9340,7 +9340,11 @@ _AI_CMD(
     {
         AIRecord * ai = AiListp + Offset;
         char *text = langGet(CharArrayTo16(ai->val,0));
+#ifdef PRACTICE_ROM
+        hudmsgTopShow(text, CharArrayTo16(ai->val,0));
+#else
         hudmsgTopShow(text);
+#endif
         Offset += CAT(CAT(AI_, CMDNAME), _LENGTH);
         break;
     })

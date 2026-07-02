@@ -32,11 +32,11 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining State to Restore
 
-- Loading state back from the end to the start of Train crashes
-- Dialogue text at top of screen is not affected by save/load state
 - Audio
   - Prop sound effects and currently playing audio cues
   - Not sure how realistic or necessary this is?
+- Some audio effects like sliding doors are continuous and don't stop while time is paused
+  - Can we find all instances of this or do we have to manually notice each sound and handle them one-by-one
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
 ## Key Learnings
@@ -69,6 +69,14 @@ Add any general advice helpful for future agents working on this feature here. B
   status and must agree with restored progress to avoid false HUD transition
   messages. Civilian casualties live in `g_playerPlayerData`, outside the main
   player struct, and can drive mission-failure AI.
+- **Mission Dialogue State**: Top-of-screen mission dialogue is a two-entry
+  circular text queue populated exclusively by the `AI_TextPrintTop` command.
+  Track its stable 16-bit language text IDs alongside the runtime buffers,
+  clearing slots on dequeue, display reset, and level start. Restore the text
+  through `langGet` together with `upper_text_buffer_index`,
+  `display_upper_text_window`, `upper_text_window_timer`, and
+  `g_UpperTextDisplayFlag`; the last two control message lifetime and temporary
+  suppression independently of the queue.
 - **Watch Clock Hands**: The analog watch hands are derived from the global
   `watch_time_0`, which advances every gameplay tick and is initialized from an
   optional stage `INTROTYPE_WATCH` record. Its representation is version

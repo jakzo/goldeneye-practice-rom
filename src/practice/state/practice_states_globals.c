@@ -8,6 +8,7 @@
 #include "objective_status.h"
 #include "player.h"
 #include "player_2.h"
+#include "practice_dialog.h"
 #include "practice_states_music.h"
 #include "practice_states_utils.h"
 #include "practice_timescale.h"
@@ -293,6 +294,11 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, status_bar_text_buffer_index);
   write_u32(stream, display_statusbar);
   write_bytes(stream, stringbuffer_lowerleft, sizeof(stringbuffer_lowerleft));
+  write_u32(stream, upper_text_buffer_index);
+  write_u32(stream, display_upper_text_window);
+  write_u32(stream, upper_text_window_timer);
+  write_u32(stream, g_UpperTextDisplayFlag);
+  practice_dialog_save(stream);
 
   // Font
 #if defined(VERSION_JP) || defined(VERSION_EU)
@@ -375,6 +381,11 @@ void load_global_state_pre_props(StateStream *stream) {
   status_bar_text_buffer_index = read_u32(stream);
   display_statusbar = read_u32(stream);
   read_bytes(stream, stringbuffer_lowerleft, sizeof(stringbuffer_lowerleft));
+  upper_text_buffer_index = read_u32(stream);
+  display_upper_text_window = read_u32(stream);
+  upper_text_window_timer = read_u32(stream);
+  g_UpperTextDisplayFlag = read_u32(stream);
+  practice_dialog_load(stream);
 
   // Font
 #if defined(VERSION_JP) || defined(VERSION_EU)

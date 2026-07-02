@@ -2748,7 +2748,11 @@ void     bondviewClearUpperTextDisplayFlag(int param_1);
 void     bondviewSetUpperTextDisplayFlag(PLAYERFLAG flag);
 void     bondviewSetCameraMode(s32 arg0);
 bool     isBondInTank(void);
+#ifdef PRACTICE_ROM
+void     hudmsgTopShow(char* string, u16 text_id);
+#else
 void     hudmsgTopShow(char* string);
+#endif
 void     SurroundWithExplosions(int delay);
 s32 check_watch_page_transistion_running(void);
 f32 bondviewWatchAnimationRelated(void);
