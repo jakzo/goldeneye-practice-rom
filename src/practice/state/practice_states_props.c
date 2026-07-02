@@ -32,6 +32,7 @@ extern void projectileFree(Projectile *projectile);
 extern void embedmentFree(Embedment *embedment);
 extern void projectileReset(Projectile *projectile);
 extern void chrpropDelist(PropRecord *prop);
+extern void chrpropDetach(PropRecord *prop);
 extern s32 chrGetNumFree(void);
 extern void clear_aircraft_model_obj(Model *model);
 extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
@@ -507,6 +508,47 @@ static bool prop_is_chr_attachment(PropRecord *prop,
     if (attachments[i] == prop) {
       return TRUE;
     }
+  }
+
+  return FALSE;
+}
+
+/*
+ * PROPFLAG_ENABLED does not mean that a slot is allocated. Respawning pickups
+ * are disabled without being delisted, and collected/hidden setup objects can
+ * remain bound to their ObjectRecord while inactive. Neither kind may be
+ * returned to the prop free list.
+ */
+static bool prop_slot_has_live_owner(PropRecord *prop) {
+  if (prop == NULL) {
+    return FALSE;
+  }
+
+  switch ((PROP_TYPE)prop->type) {
+  case PROP_TYPE_OBJ:
+  case PROP_TYPE_DOOR:
+  case PROP_TYPE_WEAPON:
+    return prop->obj != NULL && prop->obj->prop == prop;
+  case PROP_TYPE_CHR:
+    return prop->chr != NULL && prop->chr->prop == prop;
+  case PROP_TYPE_EXPLOSION:
+    return prop->explosion != NULL && prop->explosion->prop == prop;
+  case PROP_TYPE_SMOKE:
+    return prop->smoke != NULL && prop->smoke->prop == prop;
+  default:
+    return FALSE;
+  }
+}
+
+static bool prop_is_active_list_member(PropRecord *prop) {
+  PropRecord *current = ptr_obj_pos_list_first_entry;
+  s32 count = 0;
+
+  while (current != NULL && count++ < POS_DATA_ENTRY_LEN) {
+    if (current == prop) {
+      return TRUE;
+    }
+    current = current->next;
   }
 
   return FALSE;
@@ -1717,7 +1759,7 @@ bool save_props_state(StateStream *stream) {
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
     PropRecord *prop = get_prop_by_index(i);
 
-    if (prop == NULL || !(prop->flags & PROPFLAG_ENABLED)) {
+    if (prop == NULL || !prop_is_active_list_member(prop)) {
       continue;
     }
 
@@ -2163,6 +2205,18 @@ bool load_props_state(StateStream *stream) {
     bool createdChrProp = FALSE;
     bool createdObjProp = FALSE;
 
+    for (c = 0; c < i; c++) {
+      if (savedLinks[c].index == savedPropIndex) {
+        practiceLogWarn("Duplicate saved prop index %d", savedPropIndex);
+        return FALSE;
+      }
+    }
+    if (savedPropIndex >= POS_DATA_ENTRY_LEN) {
+      practiceLogWarn("Invalid saved prop index %d", savedPropIndex);
+      return FALSE;
+    }
+    savedLinks[i].index = savedPropIndex;
+
     if (hasChrAllocation) {
       load_chr_allocation_state(stream, &savedChrAllocation);
     }
@@ -2314,6 +2368,13 @@ bool load_props_state(StateStream *stream) {
     prop->pos = savedPropPos;
     prop->stan = get_tile_by_offset(savedPropStanOffset);
     prop->zDepth = savedPropZDepth;
+    // Every serialized prop came from the active list and was therefore a
+    // standalone root at save time. Detach a live parent retained after the
+    // save (for example, an object collected into Bond's inventory), otherwise
+    // the final active-list relink skips this record and severs the list.
+    if (prop->parent != NULL) {
+      chrpropDetach(prop);
+    }
     savedLinks[i].index = savedPropIndex;
     savedLinks[i].prev = savedPropPrevIdx;
     savedLinks[i].next = savedPropNextIdx;
@@ -2528,8 +2589,8 @@ bool load_props_state(StateStream *stream) {
   // character's recreated equipment whose slot no longer matches the saved
   // child index.
   //
-  // prev/next are overloaded: they are the active-list links for enabled
-  // standalone props, but also the child-sibling links for attached equipment.
+  // prev/next are overloaded: they are the active-list links for standalone
+  // props, but also the child-sibling links for attached equipment.
   // A prop that was an enabled standalone record at save time (so it appears in
   // savedLinks) can be re-attached as a character's child by
   // restore_chr_attachments above, which repurposes its prev/next as sibling
@@ -2538,10 +2599,11 @@ bool load_props_state(StateStream *stream) {
   // character teardown walk (disable_sounds_attached_to_player_then_something
   // follows child -> prev) wanders out of the sibling chain into the active
   // list and frees an unrelated prop's record as an object. Only re-link props
-  // that are still standalone (no parent) and active.
+  // that are still standalone. This intentionally includes disabled,
+  // respawning pickups, which remain active so timetoregen keeps ticking.
   for (i = 0; i < recordCount; i++) {
     PropRecord *p = get_prop_by_index(savedLinks[i].index);
-    if (p != NULL && p->parent == NULL && (p->flags & PROPFLAG_ENABLED)) {
+    if (p != NULL && p->parent == NULL) {
       p->prev = get_prop_by_index(savedLinks[i].prev);
       p->next = get_prop_by_index(savedLinks[i].next);
     }
@@ -2551,23 +2613,24 @@ bool load_props_state(StateStream *stream) {
   ptr_obj_pos_list_current_entry = get_prop_by_index(indexOfCurrentEntry);
 
   // Rebuild the free list (final_entry -> prev -> ... chain) from scratch
-  // rather than trusting the saved head. Only enabled props (the active list,
-  // restored above) and attached equipment (parent != NULL, owned by
-  // restore_chr_attachments / retained live state) are in use; every other slot
-  // is free. The free list cannot be restored from the save because free and
-  // disabled/attached props are never serialized, so the prev links that chain
-  // free entries together were never written. The saved head index therefore
-  // points into a chain of stale, pre-load prev pointers: chrpropAllocate would
-  // walk it and hand out slots that are actually in use -- or a stale, even
-  // misaligned, pointer -- corrupting the prop graph and crashing on the next
-  // hat/weapon allocation. Re-chaining every genuinely-free slot here
-  // (mirroring chrpropFree) guarantees a consistent free list regardless of the
-  // saved indices, so the index read above is intentionally ignored.
+  // rather than trusting the saved head. A slot is in use when it belongs to
+  // the saved active list (including disabled respawning props), is attached,
+  // or remains bound to a live backing record. The latter covers inactive
+  // setup objects which are not active-list records. The free-list prev links
+  // are not serialized, so the saved head is intentionally ignored.
   (void)indexOfFinalEntry;
   ptr_obj_pos_list_final_entry = NULL;
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
     PropRecord *p = get_prop_by_index(i);
-    if (p != NULL && !(p->flags & PROPFLAG_ENABLED) && p->parent == NULL) {
+    bool wasSavedActive = FALSE;
+    for (c = 0; c < recordCount; c++) {
+      if (savedLinks[c].index == i) {
+        wasSavedActive = TRUE;
+        break;
+      }
+    }
+    if (p != NULL && !wasSavedActive && p->parent == NULL &&
+        !prop_slot_has_live_owner(p)) {
       p->prev = ptr_obj_pos_list_final_entry;
       p->next = NULL;
       p->stan = NULL;

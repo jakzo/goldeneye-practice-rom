@@ -18,7 +18,10 @@ In GoldenEye 007, everything in the level that is not static level geometry (the
     extern PropRecord *ptr_obj_pos_list_first_entry; // Head
     extern PropRecord *ptr_obj_pos_list_current_entry; // Tail
     ```
-- A prop is considered active/in-use if the `PROPFLAG_ENABLED` (value `0x00000004`) flag is set in its `flags` byte.
+- Active-list membership and `PROPFLAG_ENABLED` are distinct. Most active props
+  are enabled, but a respawning pickup is disabled without being delisted so
+  its `timetoregen` continues to tick. Inactive setup objects may also retain a
+  live `obj->prop` binding. Save/free-list code must account for both cases.
 
 ---
 
@@ -56,7 +59,9 @@ typedef struct PropRecord
     f32                zDepth;                          /* 0x18 - Render depth sorting value */
     struct PropRecord *parent;                          /* 0x1c - Attachment owner, or NULL for a root/
                                                          *        active-list prop. CHR equipment points
-                                                         *        back to the owning character prop. */
+                                                         *        back to the owning character prop.
+                                                         *        Serialized active records authoritatively
+                                                         *        restore this to NULL. */
     struct PropRecord *child;                           /* 0x20 - Newest child in the attachment sibling
                                                          *        chain, or NULL when there are no children. */
     struct PropRecord *prev;                            /* 0x24 - Previous active prop when parent is NULL;
