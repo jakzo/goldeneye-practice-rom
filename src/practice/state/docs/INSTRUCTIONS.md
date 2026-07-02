@@ -14,8 +14,6 @@ Props are fully implemented for save and restore, including adding props that
 the save contains but the current world does not, and removing props that exist
 but are absent from the save. The next goal is global state.
 
-When implementing support for some state, if you notice some other global state that is not supported, implement it immediately if simple, otherwise add it to the list of remaining state to restore to do it later.
-
 ### Next Goals
 
 - [done] Bond
@@ -30,10 +28,18 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 - See `practice_states_*.c` files for the current state of the code
 - Remove the item from the "Remaining State to Restore" section once implemented
 - No need to update the changelog or SAVE_STATE_VERSION
+- If you notice some other global state that is not supported yet, implement it immediately if simple, otherwise add it to the list of remaining state to restore to do it later
 
 ## Remaining State to Restore
 
-- Audio (prop sound effects and currently playing audio cues, not sure how realistic or necessary this is?)
+- In Silo and Archives (and probably other levels), when you save then load state several props are unloaded
+- Not sure if it's related but pausing after loading in Silo crashed the game
+- Archives starting door key is missing from guard after state load
+- Loading state back from the end to the start of Train crashes
+- Dialogue text at top of screen is not affected by save/load state
+- Audio
+  - Prop sound effects and currently playing audio cues
+  - Not sure how realistic or necessary this is?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
 ## Key Learnings
@@ -78,6 +84,11 @@ Add any general advice helpful for future agents working on this feature here. B
   gameplay state while the watch is open immediately resumes rendering,
   controls, and timers. `g_ClockTimer` itself is derived each frame and does not
   need serialization.
+- **Level Exit State**: `stop_time_flag` is the global latch used by
+  `AI_TriggerFadeAndExitLevelOnButtonPress`: `0` is inactive, `1` waits for
+  player input, and `2` is fading to the title stage. Restore its exact value;
+  otherwise loading a state from before the end sequence leaves a later exit
+  armed and the next button press fades out the level.
 - **Sky State**: Cloud and water geometry is rebuilt every frame from the
   player camera and `CurrentEnvironmentRecord`; there are no persistent vertex
   or shape buffers to restore. `g_SkyCloudOffset` is the independently advancing

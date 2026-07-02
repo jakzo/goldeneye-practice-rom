@@ -331,6 +331,7 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, g_CameraAfterCinema);
   write_f32(stream, camera_transition_timer);
   write_u32(stream, camera_fade_active);
+  write_u32(stream, stop_time_flag);
   write_u32(stream, intro_camera_index);
   write_u32(stream, is_timer_active);
   write_u32(stream, g_PlayerInvincible);
@@ -412,6 +413,7 @@ void load_global_state_pre_props(StateStream *stream) {
   g_CameraAfterCinema = read_u32(stream);
   camera_transition_timer = read_f32(stream);
   camera_fade_active = read_u32(stream);
+  stop_time_flag = read_u32(stream);
   intro_camera_index = read_u32(stream);
   is_timer_active = read_u32(stream);
   g_PlayerInvincible = read_u32(stream);
