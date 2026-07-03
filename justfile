@@ -1,4 +1,5 @@
 image := "goldeneye"
+test_image := "goldeneye-test"
 
 _default:
     just -l
@@ -55,10 +56,12 @@ test-debug TEST_CASE:
     ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 ./build/u/ge007.u.z64
 
 test TEST_CASE:
-    ./scripts/run_practice_tests.py --test "{{ TEST_CASE }}"
+    if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
+    docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test "{{ TEST_CASE }}"
 
 test-all:
-    ./scripts/run_practice_tests.py
+    if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
+    docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh
 
 sc64-dev BOOT_LEVEL="TITLE":
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}

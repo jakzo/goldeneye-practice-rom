@@ -4,6 +4,7 @@ import argparse
 import os
 import queue
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -22,7 +23,6 @@ ROOT = Path(__file__).resolve().parent.parent
 ROM = ROOT / "build/u/ge007.u.z64"
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
-DOCKER_IMAGE = os.environ.get("GOLDENEYE_DOCKER_IMAGE", "goldeneye")
 
 
 def parse_args():
@@ -73,34 +73,25 @@ def read_test_cases():
 
 
 def emulator_command():
+    extra_args = shlex.split(os.environ.get("ARES_ARGS", ""))
     configured_emulator = os.environ.get("ARES")
     if configured_emulator:
-        return [configured_emulator, str(ROM)]
+        return [configured_emulator, *extra_args, str(ROM)]
 
     emulator = shutil.which("ares")
     if emulator:
-        return [emulator, str(ROM)]
+        return [emulator, *extra_args, str(ROM)]
 
     macos_emulator = Path("/Applications/ares.app/Contents/MacOS/ares")
     if macos_emulator.is_file():
-        return [str(macos_emulator), str(ROM)]
+        return [str(macos_emulator), *extra_args, str(ROM)]
 
     return None
 
 
 def build_tests():
     jobs = os.cpu_count() or 1
-    command = [
-        "docker",
-        "run",
-        "--rm",
-        "-v",
-        f"{ROOT}:/home/dev",
-        DOCKER_IMAGE,
-        "make",
-        f"-j{jobs}",
-        "DEV=1",
-    ]
+    command = ["make", f"-j{jobs}", "DEV=1"]
     with tempfile.TemporaryFile(mode="w+") as build_log:
         try:
             result = subprocess.run(
