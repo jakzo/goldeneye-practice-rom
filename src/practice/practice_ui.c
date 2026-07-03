@@ -372,8 +372,13 @@ Gfx *practice_ui_render(Gfx *gdl) {
     struct fontchar *charP = &fontCharsZurich['P'];
     s32 p_x = MARGIN_RIGHT;
     s32 p_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
+#if DEV
+    u32 p_color = 0xCC3300FF;
+#else
+    u32 p_color = 0x00CC00FF;
+#endif
     gdl = renderText(gdl, &p_x, &p_y, "P", (s32)fontCharsZurich,
-                     ptrFontZurichBold, 0x00CC00FF, viGetX(), viGetY());
+                     ptrFontZurichBold, p_color, viGetX(), viGetY());
 
     // Render mission timer next to the "P" indicator
     if (practice.show_mission_timer) {
