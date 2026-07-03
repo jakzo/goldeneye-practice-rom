@@ -36,8 +36,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 - Audio
   - Prop sound effects and currently playing audio cues
   - Not sure how realistic or necessary this is?
-- Some audio effects like sliding doors are continuous and don't stop while time is paused
-  - Can we find all instances of this or do we have to manually notice each sound and handle them one-by-one
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
 ## Key Learnings
@@ -122,6 +120,11 @@ Add any general advice helpful for future agents working on this feature here. B
   reloading track data; never serialize marker or instrument pointers. Seeking
   past earlier MIDI program changes without restoring channel state makes every
   channel use the bank's default instrument.
+- **SFX During Practice Pause**: Sound effects advance on the audio clock, not
+  `g_ClockTimer`. Practice pause snapshots and mutes all seven SFX slot volumes,
+  then restores each slot on resume. The active sound graph keeps running
+  silently, so continuous effects such as sliding doors, alarms, vehicles, and
+  toxic gas remain available without maintaining an owner-by-owner list.
 - **Transient Gun Effects**: The global impact-flare/spark/dust pools
   (`dword_CODE_bss_8007A170`, plus
   `dword_CODE_bss_8007A4E0` outside EU) are independent of props. Serialize

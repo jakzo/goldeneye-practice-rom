@@ -1,4 +1,5 @@
 #include "practice_music.h"
+#include "practice_sfx.h"
 #include "ultratypes.h"
 #include <ultra64.h>
 
@@ -33,6 +34,7 @@ void set_time_scale(f32 scale) {
 void pause() {
   if (!g_IsTimePaused) {
     g_PrePauseDeltaFrames = speedgraphframes;
+    practice_sfx_pause();
   }
   g_IsTimePaused = TRUE;
   set_final_time_scale(0.0f);
@@ -41,6 +43,7 @@ void pause() {
 
 void unpause() {
   practice_music_resume();
+  practice_sfx_resume();
   if (g_IsTimePaused) {
     // Drop the wall-clock time spent paused so it isn't counted as elapsed
     // game frames (catch-up) when time resumes
