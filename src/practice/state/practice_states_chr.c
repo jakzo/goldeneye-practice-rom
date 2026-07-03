@@ -940,6 +940,7 @@ collect_model_blood_nodes(ModelNode *node, union ModelRwData **datas,
   while (node != NULL && *nodes_seen < MAX_MODEL_TRAVERSAL_NODES) {
     union ModelRwData **child_datas = datas;
     u16 child_component_index = component_index;
+    ModelNode *child = node->Child;
 
     (*nodes_seen)++;
 
@@ -954,21 +955,40 @@ collect_model_blood_nodes(ModelNode *node, union ModelRwData **datas,
       (*blood_node_count)++;
     }
 
-    if ((node->Opcode & 0xff) == MODELNODE_OPCODE_HEAD && datas != NULL) {
+    if ((node->Opcode & 0xff) == MODELNODE_OPCODE_LOD) {
+      child = node->Data->LOD.Affects;
+    } else if ((node->Opcode & 0xff) == MODELNODE_OPCODE_SWITCH) {
+      child = node->Data->Switch.Controls;
+    } else if ((node->Opcode & 0xff) == MODELNODE_OPCODE_BSP) {
+      ModelNode *left_child = node->Data->BSP.leftChild;
+      ModelNode *right_child = node->Data->BSP.rightChild;
+
+      if (left_child != NULL) {
+        collect_model_blood_nodes(left_child, datas, component_index,
+                                  blood_nodes, blood_node_count, nodes_seen,
+                                  depth + 1);
+      }
+      child = right_child;
+    } else if ((node->Opcode & 0xff) == MODELNODE_OPCODE_HEAD &&
+               datas != NULL) {
       struct ModelRoData_HeadPlaceholderRecord *rodata =
           &node->Data->HeadPlaceholder;
       struct ModelRwData_HeadPlaceholderRecord *rwdata =
           (struct ModelRwData_HeadPlaceholderRecord
                *)&datas[rodata->RwDataIndex];
 
+      child = NULL;
       if (rwdata->RwDatas != NULL) {
         child_datas = (union ModelRwData **)rwdata->RwDatas;
         child_component_index = rodata->RwDataIndex + 1;
+        if (rwdata->ModelFileHeader != NULL) {
+          child = rwdata->ModelFileHeader->RootNode;
+        }
       }
     }
 
-    if (node->Child != NULL) {
-      collect_model_blood_nodes(node->Child, child_datas, child_component_index,
+    if (child != NULL) {
+      collect_model_blood_nodes(child, child_datas, child_component_index,
                                 blood_nodes, blood_node_count, nodes_seen,
                                 depth + 1);
     }
