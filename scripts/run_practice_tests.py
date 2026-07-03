@@ -6,12 +6,15 @@ import queue
 import re
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import xml.etree.ElementTree as ET
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -25,6 +28,15 @@ TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 
 
+@dataclass
+class TestResult:
+    name: str
+    passed: bool
+    detail: str
+    duration: float
+    output: str = ""
+
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Build and run GoldenEye practice ROM tests."
@@ -33,6 +45,12 @@ def parse_args():
         "--test",
         metavar="TEST_CASE",
         help="run only the named test case",
+    )
+    parser.add_argument(
+        "--junit-xml",
+        metavar="PATH",
+        type=Path,
+        help="write test results as JUnit XML",
     )
     return parser.parse_args()
 
@@ -161,40 +179,201 @@ def run_test(command):
     )
     output_thread.start()
     deadline = time.monotonic() + TEST_TIMEOUT_SECONDS
+    output = []
 
     try:
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return False, f"timed out after {TEST_TIMEOUT_SECONDS}s"
+                return (
+                    False,
+                    f"timed out after {TEST_TIMEOUT_SECONDS}s",
+                    "".join(output),
+                )
 
             try:
                 line = output_queue.get(timeout=remaining)
             except queue.Empty:
-                return False, f"timed out after {TEST_TIMEOUT_SECONDS}s"
+                return (
+                    False,
+                    f"timed out after {TEST_TIMEOUT_SECONDS}s",
+                    "".join(output),
+                )
 
             if line is None:
-                return False, f"emulator exited with status {process.wait()}"
+                return (
+                    False,
+                    f"emulator exited with status {process.wait()}",
+                    "".join(output),
+                )
 
+            output.append(line)
             print(line, end="", flush=True)
             if TEST_FAILED in line:
-                return False, "failed"
+                return False, "failed", "".join(output)
             if TEST_COMPLETE in line:
-                return True, "completed"
+                return True, "completed", "".join(output)
     finally:
         stop_emulator(process)
         output_thread.join(timeout=1)
 
 
+def start_video_capture(test_case):
+    video_dir = os.environ.get("PRACTICE_TEST_VIDEO_DIR")
+    if not video_dir:
+        return None, None
+
+    display = os.environ.get("DISPLAY")
+    ffmpeg = shutil.which("ffmpeg")
+    if not display or not ffmpeg:
+        print(
+            "warning: video capture requires DISPLAY and ffmpeg",
+            file=sys.stderr,
+        )
+        return None, None
+
+    output_dir = Path(video_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    video_path = output_dir / f"{test_case}.mp4"
+    video_size = os.environ.get("PRACTICE_TEST_VIDEO_SIZE", "1024x768")
+    process = subprocess.Popen(
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "x11grab",
+            "-draw_mouse",
+            "0",
+            "-framerate",
+            "60",
+            "-video_size",
+            video_size,
+            "-i",
+            display,
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            str(video_path),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return process, video_path
+
+
+def stop_video_capture(process):
+    if process is None or process.poll() is not None:
+        return
+
+    process.send_signal(signal.SIGINT)
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
 def print_summary(results):
     print("\nTest summary")
     print("------------")
-    for test_case, passed, detail in results:
-        status = "PASS" if passed else "FAIL"
-        print(f"{status:4}  {test_case}: {detail}")
+    for result in results:
+        status = "PASS" if result.passed else "FAIL"
+        print(
+            f"{status:4}  {result.name}: {result.detail} "
+            f"({result.duration:.2f}s)"
+        )
 
-    passed_count = sum(passed for _, passed, _ in results)
+    passed_count = sum(result.passed for result in results)
     print(f"\n{passed_count} passed, {len(results) - passed_count} failed")
+
+
+def write_junit_xml(results, output_path):
+    failures = sum(not result.passed for result in results)
+    total_time = sum(result.duration for result in results)
+    suite = ET.Element(
+        "testsuite",
+        {
+            "name": "practice",
+            "tests": str(len(results)),
+            "failures": str(failures),
+            "errors": "0",
+            "time": f"{total_time:.3f}",
+        },
+    )
+    for result in results:
+        case = ET.SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": "practice",
+                "name": result.name,
+                "time": f"{result.duration:.3f}",
+            },
+        )
+        if not result.passed:
+            failure = ET.SubElement(
+                case,
+                "failure",
+                {"message": result.detail, "type": "PracticeTestFailure"},
+            )
+            failure.text = result.output
+        elif result.output:
+            ET.SubElement(case, "system-out").text = result.output
+
+    tree = ET.ElementTree(suite)
+    ET.indent(tree, space="  ")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(output_path, encoding="utf-8", xml_declaration=True)
+
+
+def write_github_summary(results):
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+
+    passed_count = sum(result.passed for result in results)
+    lines = [
+        "## Practice ROM test results",
+        "",
+        f"**{passed_count} passed, {len(results) - passed_count} failed**",
+        "",
+        "| Test | Result | Duration |",
+        "| --- | --- | ---: |",
+    ]
+    for result in results:
+        status = "✅ Passed" if result.passed else "❌ Failed"
+        lines.append(
+            f"| `{result.name}` | {status} | {result.duration:.2f}s |"
+        )
+
+    with open(summary_path, "a", encoding="utf-8") as summary:
+        summary.write("\n".join(lines) + "\n")
+
+
+def print_github_annotations(results):
+    if not os.environ.get("GITHUB_ACTIONS"):
+        return
+
+    for result in results:
+        if not result.passed:
+            detail = result.detail.replace("%", "%25")
+            detail = detail.replace("\r", "%0D").replace("\n", "%0A")
+            print(
+                f"::error title=Practice test failed::{result.name}: {detail}"
+            )
 
 
 def main():
@@ -233,21 +412,39 @@ def main():
         for test_case in test_cases:
             print(f"\n=== {test_case}: patching ===", flush=True)
             if not select_test(test_case):
-                results.append((test_case, False, "ROM patch failed"))
+                results.append(
+                    TestResult(test_case, False, "ROM patch failed", 0.0)
+                )
                 continue
 
             print(f"=== {test_case}: running ===", flush=True)
+            video_process, video_path = start_video_capture(test_case)
+            started_at = time.monotonic()
             try:
-                passed, detail = run_test(command)
+                passed, detail, output = run_test(command)
             except OSError as error:
-                passed, detail = False, f"could not start emulator: {error}"
-            results.append((test_case, passed, detail))
+                passed = False
+                detail = f"could not start emulator: {error}"
+                output = ""
+            finally:
+                stop_video_capture(video_process)
+            duration = time.monotonic() - started_at
+            if passed and video_path:
+                video_path.unlink(missing_ok=True)
+            results.append(
+                TestResult(test_case, passed, detail, duration, output)
+            )
     except KeyboardInterrupt:
         print("\nTest run interrupted.", file=sys.stderr)
         return 130
 
     print_summary(results)
-    return 0 if all(passed for _, passed, _ in results) else 1
+    if args.junit_xml:
+        write_junit_xml(results, args.junit_xml)
+        print(f"JUnit XML written to {args.junit_xml}")
+    write_github_summary(results)
+    print_github_annotations(results)
+    return 0 if all(result.passed for result in results) else 1
 
 
 if __name__ == "__main__":

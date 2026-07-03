@@ -52,6 +52,7 @@ jobs:
             cmake \
             g++-mips-linux-gnu \
             gcc-mips-linux-gnu \
+            ffmpeg \
             libcanberra-gtk3-module \
             libcapstone-dev \
             libgl-dev \
@@ -105,7 +106,20 @@ jobs:
             --setting Input/Driver=None
           XDG_CONFIG_HOME: /tmp/ares-config
           XDG_DATA_HOME: /tmp/ares-data
+          PRACTICE_TEST_VIDEO_DIR: ${{ runner.temp }}/practice-test-artifacts/videos
+          PRACTICE_TEST_VIDEO_SIZE: 1024x768
         run: |
           xvfb-run --auto-servernum \
-            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
-            ./scripts/run_practice_tests.py
+            --server-args="-screen 0 1024x768x24 -nolisten tcp -ac" \
+            ./scripts/run_practice_tests.py \
+              --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
+
+      - name: Upload failed test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: practice-test-failures-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/practice-test-artifacts
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0

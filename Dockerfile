@@ -31,6 +31,7 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt -y install \
     ca-certificates \
     cmake \
     curl \
+    ffmpeg \
     g++-mips-linux-gnu \
     gcc-mips-linux-gnu \
     git \
