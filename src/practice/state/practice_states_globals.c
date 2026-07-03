@@ -136,6 +136,41 @@ static void load_sky_state(StateStream *stream) {
              sizeof(CurrentEnvironmentRecord));
 }
 
+static void save_level_timer_state(StateStream *stream) {
+  write_u32(stream, clock_drawn_flag);
+  write_u32(stream, clock_enable);
+  write_f32(stream, clock_time);
+}
+
+static void load_level_timer_state(StateStream *stream) {
+  clock_drawn_flag = read_u32(stream);
+  clock_enable = read_u32(stream);
+  clock_time = read_f32(stream);
+}
+
+static void save_toxic_gas_state(StateStream *stream) {
+  write_f32(stream, toxic_gas_sound_timer);
+  write_u32(stream, activate_gas_sound_timer);
+  write_bytes(stream, &D_80030AD0, sizeof(D_80030AD0));
+  write_u32(stream, D_80030ADC);
+  write_f32(stream, D_80030AE0);
+  write_f32(stream, gasTimeToFullOpacity);
+  write_u32(stream, gasDoesDamageFlag);
+}
+
+static void load_toxic_gas_state(StateStream *stream) {
+  toxic_gas_sound_timer = read_f32(stream);
+  activate_gas_sound_timer = read_u32(stream);
+  read_bytes(stream, &D_80030AD0, sizeof(D_80030AD0));
+  D_80030ADC = read_u32(stream);
+  D_80030AE0 = read_f32(stream);
+  gasTimeToFullOpacity = read_f32(stream);
+  gasDoesDamageFlag = read_u32(stream);
+  // SFX handles are dynamically allocated and all SFX are stopped before
+  // loading. Let the gas update create a fresh handle when it next runs.
+  ptr_gas_sound = NULL;
+}
+
 static s32 count_room_objective_criteria(void) {
   struct criteria_roomentered *criteria;
   s32 count = 0;
@@ -363,6 +398,12 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, alarm_timer);
   write_u32(stream, objectiveregisters1);
 
+  // Level timers
+  save_level_timer_state(stream);
+
+  // Toxic gas
+  save_toxic_gas_state(stream);
+
   // Background AI
   save_background_ai_state(stream);
 
@@ -453,6 +494,12 @@ void load_global_state_pre_props(StateStream *stream) {
   // Sound states are dynamically allocated and all SFX are stopped before
   // loading. Let the alarm update create a fresh handle when it next runs.
   ptr_alarm_sfx = NULL;
+
+  // Level timers
+  load_level_timer_state(stream);
+
+  // Toxic gas
+  load_toxic_gas_state(stream);
 
   // Background AI
   load_background_ai_state(stream);

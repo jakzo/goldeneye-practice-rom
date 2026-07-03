@@ -32,7 +32,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining State to Restore
 
-- The level Train has a timer that appears on screen and starts counting down at the end when reaching Natalya and the train blows up after it reaches 0, if this timer is started before loading state, it stays on screen and keeps counting
 - After finishing the level (specifically Caverns) and loading during the ending cutscene most of the enemies are despawned after load
 - Audio
   - Prop sound effects and currently playing audio cues
@@ -96,6 +95,17 @@ Add any general advice helpful for future agents working on this feature here. B
   player input, and `2` is fading to the title stage. Restore its exact value;
   otherwise loading a state from before the end sequence leaves a later exit
   armed and the next button press fades out the level.
+- **Level Countdown Timer State**: Scripted HUD countdowns used by Train,
+  Streets, and any other `AI_HudCountdown*` command all share the globals
+  `clock_drawn_flag`, `clock_enable`, and `clock_time` in `chrobjhandler.c`.
+  Restore all three together; `clock_drawn_flag == 0` means visible,
+  `clock_enable` controls ticking, and `clock_time` is the current tick value.
+- **Toxic Gas State**: Toxic gas is another small global effect in
+  `chrobjhandler.c`. Restore `toxic_gas_sound_timer`,
+  `activate_gas_sound_timer`, `D_80030AD0`, `D_80030ADC`, `D_80030AE0`,
+  `gasTimeToFullOpacity`, and `gasDoesDamageFlag`. `ptr_gas_sound` is a
+  dynamic sound handle; clear it on load so active restored gas creates a fresh
+  sound.
 - **Sky State**: Cloud and water geometry is rebuilt every frame from the
   player camera and `CurrentEnvironmentRecord`; there are no persistent vertex
   or shape buffers to restore. `g_SkyCloudOffset` is the independently advancing
