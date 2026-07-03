@@ -20,6 +20,8 @@ from pathlib import Path
 
 TEST_COMPLETE = "TEST_COMPLETE"
 TEST_FAILED = "TEST_FAILED"
+WARNING_PREFIX = "WARN: "
+ERROR_PREFIX = "ERROR: "
 TEST_TIMEOUT_SECONDS = 90
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -209,6 +211,8 @@ def run_test(command):
 
             output.append(line)
             print(line, end="", flush=True)
+            if line.startswith(WARNING_PREFIX) or line.startswith(ERROR_PREFIX):
+                return False, line.strip(), "".join(output)
             if TEST_FAILED in line:
                 return False, "failed", "".join(output)
             if TEST_COMPLETE in line:

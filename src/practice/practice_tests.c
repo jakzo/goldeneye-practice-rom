@@ -20,6 +20,7 @@ extern u64 g_chrObjRandomSeed;
 extern u64 g_tlbRandomSeed;
 extern s32 propdoorInteract(PropRecord *doorprop);
 extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
+extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 
 // --- start test cases ---
 #define STATE_DOOR 1
@@ -453,6 +454,7 @@ void practice_tests_tick() {
   case STATE_CAVERNS_ATTACHMENTS: {
     static s16 saved_chr_prop_index;
     static s16 saved_child_head_index;
+    static s16 saved_hat_index;
     static s32 saved_child_count;
     static TestChildLink saved_children[MAX_SAVED_TEST_CHILDREN];
     static ChrRecord *test_chr;
@@ -465,6 +467,7 @@ void practice_tests_tick() {
       test_chr = NULL;
       saved_chr_prop_index = -1;
       saved_child_head_index = -1;
+      saved_hat_index = -1;
       saved_child_count = 0;
 
       for (prop = ptr_obj_pos_list_first_entry; prop != NULL;
@@ -486,8 +489,14 @@ void practice_tests_tick() {
       chrGiveWeapon(test_chr, PROP_CHRUZI, ITEM_UZI,
                     PROPFLAG_WEAPON_LEFTHANDED);
       chrGiveWeapon(test_chr, PROP_CHRWPPK, ITEM_WPPK, PROPFLAG_CONCEAL_GUN);
+      hatCreateForChr(test_chr, PROP_HATBERET, 0);
+      if (test_chr->handle_positiondata_hat != NULL &&
+          test_chr->handle_positiondata_hat->obj != NULL) {
+        test_chr->handle_positiondata_hat->obj->flags2 = 0x5A1700DE;
+      }
 
-      if (count_chr_child_links(test_chr) < 2) {
+      if (count_chr_child_links(test_chr) < 3 ||
+          test_chr->handle_positiondata_hat == NULL) {
         emu_log("NOT_ENOUGH_CHILDREN");
         emu_log("TEST_FAILED");
         break;
@@ -520,6 +529,7 @@ void practice_tests_tick() {
 
       saved_chr_prop_index = get_prop_index(test_chr->prop);
       saved_child_head_index = get_prop_index(test_chr->prop->child);
+      saved_hat_index = get_prop_index(test_chr->handle_positiondata_hat);
       for (child = test_chr->prop->child; child != NULL &&
                                          saved_child_count <
                                              MAX_SAVED_TEST_CHILDREN;
@@ -536,11 +546,18 @@ void practice_tests_tick() {
       emu_log("SAVE_DONE");
     } else if (after_frames(2)) {
       PropRecord *child;
+      PropRecord *hat = get_prop_by_index(saved_hat_index);
 
       if (test_chr != NULL && test_chr->prop != NULL) {
         chrGiveWeapon(test_chr, PROP_CHRMP5K, ITEM_MP5K,
                       PROPFLAG_CONCEAL_GUN);
         chrDropItems(test_chr);
+
+        if (hat != NULL && hat->obj != NULL) {
+          ObjectRecord *hat_obj = hat->obj;
+          objFreePermanently(hat->obj, TRUE);
+          hat_obj->flags2 = 0;
+        }
 
         child = test_chr->prop->child;
         if (child != NULL && child->prev != NULL) {
@@ -566,6 +583,16 @@ void practice_tests_tick() {
       } else if (get_prop_index(chr_prop->child) != saved_child_head_index) {
         emu_log("CHILD_HEAD_CHANGED got=%d saved=%d",
                 get_prop_index(chr_prop->child), saved_child_head_index);
+        ok = FALSE;
+      } else if (chr_prop->chr->handle_positiondata_hat == NULL ||
+                 get_prop_index(chr_prop->chr->handle_positiondata_hat) !=
+                     saved_hat_index ||
+                 chr_prop->chr->handle_positiondata_hat->obj == NULL ||
+                 chr_prop->chr->handle_positiondata_hat->obj->type !=
+                     PROPDEF_HAT ||
+                 chr_prop->chr->handle_positiondata_hat->obj->flags2 !=
+                     0x5A1700DE) {
+        emu_log("HAT_NOT_RESTORED");
         ok = FALSE;
       } else {
         for (i = 0; i < saved_child_count; i++) {

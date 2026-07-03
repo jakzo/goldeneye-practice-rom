@@ -179,6 +179,38 @@ static int practice_vsnprintf(char *dst, const char *fmt, va_list args) {
   return (LOG_MESSAGE_MAX_LEN - 3) - buf.remaining;
 }
 
+static const char *get_emu_log_prefix(LogLevel level) {
+  switch (level) {
+  case LOG_LEVEL_WARN:
+    return "WARN: ";
+  case LOG_LEVEL_ERROR:
+    return "ERROR: ";
+  default:
+    return "";
+  }
+}
+
+static void write_log_message_to_emu(LogLevel level, const char *text) {
+#ifdef DEV
+  char emu_text[LOG_MESSAGE_MAX_LEN + 8];
+  const char *prefix = get_emu_log_prefix(level);
+  s32 len = 0;
+  s32 i = 0;
+
+  while (prefix[i] != '\0' && len < (s32)sizeof(emu_text) - 1) {
+    emu_text[len++] = prefix[i++];
+  }
+
+  i = 0;
+  while (text[i] != '\0' && len < (s32)sizeof(emu_text) - 1) {
+    emu_text[len++] = text[i++];
+  }
+
+  emu_text[len] = '\0';
+  emu_log_write(emu_text);
+#endif
+}
+
 static void add_to_log_queue(LogLevel level, const char *fmt, va_list args) {
   LogMessage *msg;
   s32 write_idx;
@@ -210,10 +242,11 @@ static void add_to_log_queue(LogLevel level, const char *fmt, va_list args) {
   g_LogQueueCount++;
 
   // Also forward to emulator log (ISViewer protocol)
-  emu_log_write(msg->text);
+  write_log_message_to_emu(level, msg->text);
 }
 
 void practiceLogDebug(const char *fmt, ...) {
+#ifdef DEV
   char text[LOG_MESSAGE_MAX_LEN];
   va_list args;
   s32 len;
@@ -225,6 +258,9 @@ void practiceLogDebug(const char *fmt, ...) {
   text[len] = '\n';
   text[len + 1] = '\0';
   emu_log_write(text);
+#else
+  (void)fmt;
+#endif
 }
 
 void practiceLogInfo(const char *fmt, ...) {

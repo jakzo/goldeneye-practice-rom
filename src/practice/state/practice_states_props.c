@@ -288,7 +288,8 @@ static PropRecord *create_chr_prop(PropRecord *prop,
 // thrown, or collected. Both kinds can therefore disappear from their saved
 // prop slot and must be recreated on load.
 static bool can_recreate_object(const ObjAllocationState *alloc) {
-  return alloc->setupCmdIndex >= 0 || alloc->objtype == PROPDEF_COLLECTABLE;
+  return alloc->setupCmdIndex >= 0 || alloc->objtype == PROPDEF_COLLECTABLE ||
+         alloc->objtype == PROPDEF_HAT;
 }
 
 // True when the prop currently at this slot already is the object the save
@@ -345,6 +346,15 @@ static PropRecord *create_object_prop(PropRecord *prop, u8 propType,
     }
     *weapon = blank_08_object_preset_1;
     obj = (ObjectRecord *)weapon;
+    obj->obj = alloc->modelnum;
+    obj->type = alloc->objtype;
+  } else if (alloc->objtype == PROPDEF_HAT) {
+    HatRecord *hat = hatCreate(FALSE, FALSE, header);
+    if (hat == NULL) {
+      return NULL;
+    }
+    bzero(hat, sizeof(*hat));
+    obj = (ObjectRecord *)hat;
     obj->obj = alloc->modelnum;
     obj->type = alloc->objtype;
   } else {
