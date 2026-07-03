@@ -547,6 +547,15 @@ To restore guard attachments correctly:
     object/guard ownership, active-list membership, parent, and backing record
     pointers.
 
+The practice loader resolves CHR equipment in two phases. First it restores
+held weapon and hat convenience pointers and model attachment nodes, then it
+reattaches concealed children. Those helpers necessarily rewrite `child`,
+`prev`, and `next`, and can produce a coherent but different child order. A
+final graph pass must therefore reinstall the serialized CHR child links after
+all equipment and concealed-item helpers have run. This keeps `parent->child`
+and every child `prev`/`next` pair identical to the save while preserving the
+already-restored `weapons_held[]`, hat pointer, and model attachments.
+
 ## Minimal Attachment Classifier
 
 For a child prop `p` whose parent is a guard prop `gprop`:
@@ -581,6 +590,9 @@ For restoration, verify the inverse relationships:
   dropped or enabled.
 - Re-enabling an attached prop as a root prop makes it tick/render in world
   space while still owned by the guard.
+- Rebuilding a valid child chain in a different order changes `child`/`prev`
+  traversal. Drop and teardown code walks that order, so save/load must restore
+  the serialized graph rather than relying on helper insertion order.
 - Ignoring `RUNTIMEBITFLAG_EMBEDDED` treats stuck projectiles as ordinary
   concealed items, but the engine uses embedment matrices and intentionally
   excludes embedded items from normal drop behavior.

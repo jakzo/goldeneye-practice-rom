@@ -9,6 +9,7 @@
 #include "player.h"
 #include "practice_timescale.h"
 #include "state/practice_states.h"
+#include "state/practice_states_utils.h"
 #include <bondgame.h>
 #include <ultra64.h>
 
@@ -29,6 +30,7 @@ extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
 #define RNG_LOAD 6
 #define STATE_ARCHIVES_KEY 7
 #define STATE_TRAIN_HATCH 8
+#define STATE_CAVERNS_ATTACHMENTS 9
 // --- end test cases ---
 
 static s32 g_save_test_timer = -1;
@@ -56,9 +58,39 @@ s32 practice_tests_boot_level(s32 test_case) {
     return LEVELID_ARCHIVES;
   case STATE_TRAIN_HATCH:
     return LEVELID_TRAIN;
+  case STATE_CAVERNS_ATTACHMENTS:
+    return LEVELID_CAVERNS;
   default:
     return LEVELID_NONE;
   }
+}
+
+#define MAX_SAVED_TEST_CHILDREN 8
+
+typedef struct TestChildLink {
+  s16 index;
+  s16 prev;
+  s16 next;
+} TestChildLink;
+
+static s32 count_chr_child_links(ChrRecord *chr) {
+  PropRecord *child;
+  PropRecord *newer = NULL;
+  s32 count = 0;
+
+  if (chr == NULL || chr->prop == NULL) {
+    return -1;
+  }
+
+  for (child = chr->prop->child; child != NULL; child = child->prev) {
+    if (count++ >= POS_DATA_ENTRY_LEN || child->parent != chr->prop ||
+        child->next != newer) {
+      return -1;
+    }
+    newer = child;
+  }
+
+  return count;
 }
 
 static bool after_frames(u32 num_frames) {
@@ -411,6 +443,145 @@ void practice_tests_tick() {
           owner_chr_prop->chr->prop != owner_chr_prop ||
           alias_chr_prop->chr == owner_chr_prop->chr) {
         emu_log("CROSS_LINKED_CHR_NOT_REPAIRED");
+        emu_log("TEST_FAILED");
+      }
+    } else if (after_frames(30)) {
+      emu_log("TEST_COMPLETE");
+    }
+  } break;
+
+  case STATE_CAVERNS_ATTACHMENTS: {
+    static s16 saved_chr_prop_index;
+    static s16 saved_child_head_index;
+    static s32 saved_child_count;
+    static TestChildLink saved_children[MAX_SAVED_TEST_CHILDREN];
+    static ChrRecord *test_chr;
+    s32 i;
+
+    if (after_frames(60)) {
+      PropRecord *prop;
+      PropRecord *child;
+
+      test_chr = NULL;
+      saved_chr_prop_index = -1;
+      saved_child_head_index = -1;
+      saved_child_count = 0;
+
+      for (prop = ptr_obj_pos_list_first_entry; prop != NULL;
+           prop = prop->next) {
+        if (prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
+            prop->chr->prop == prop && prop->chr->model != NULL) {
+          test_chr = prop->chr;
+          break;
+        }
+      }
+
+      if (test_chr == NULL) {
+        emu_log("CHR_NOT_FOUND");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      chrGiveWeapon(test_chr, PROP_CHRKALASH, ITEM_AK47, 0);
+      chrGiveWeapon(test_chr, PROP_CHRUZI, ITEM_UZI,
+                    PROPFLAG_WEAPON_LEFTHANDED);
+      chrGiveWeapon(test_chr, PROP_CHRWPPK, ITEM_WPPK, PROPFLAG_CONCEAL_GUN);
+
+      if (count_chr_child_links(test_chr) < 2) {
+        emu_log("NOT_ENOUGH_CHILDREN");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      {
+        PropRecord *right = test_chr->weapons_held[GUNRIGHT];
+        PropRecord *left = test_chr->weapons_held[GUNLEFT];
+        PropRecord *concealed = NULL;
+
+        for (child = test_chr->prop->child; child != NULL;
+             child = child->prev) {
+          if (child != right && child != left &&
+              child != test_chr->handle_positiondata_hat) {
+            concealed = child;
+            break;
+          }
+        }
+
+        if (right != NULL && left != NULL && concealed != NULL) {
+          test_chr->prop->child = right;
+          right->prev = concealed;
+          right->next = NULL;
+          concealed->prev = left;
+          concealed->next = right;
+          left->prev = NULL;
+          left->next = concealed;
+        }
+      }
+
+      saved_chr_prop_index = get_prop_index(test_chr->prop);
+      saved_child_head_index = get_prop_index(test_chr->prop->child);
+      for (child = test_chr->prop->child; child != NULL &&
+                                         saved_child_count <
+                                             MAX_SAVED_TEST_CHILDREN;
+           child = child->prev) {
+        saved_children[saved_child_count].index = get_prop_index(child);
+        saved_children[saved_child_count].prev = get_prop_index(child->prev);
+        saved_children[saved_child_count].next = get_prop_index(child->next);
+        saved_child_count++;
+      }
+
+      emu_log("ATTACHMENTS_BEFORE=%d", saved_child_count);
+      emu_log("TRIGGER_SAVE");
+      save_game_state();
+      emu_log("SAVE_DONE");
+    } else if (after_frames(2)) {
+      PropRecord *child;
+
+      if (test_chr != NULL && test_chr->prop != NULL) {
+        chrGiveWeapon(test_chr, PROP_CHRMP5K, ITEM_MP5K,
+                      PROPFLAG_CONCEAL_GUN);
+        chrDropItems(test_chr);
+
+        child = test_chr->prop->child;
+        if (child != NULL && child->prev != NULL) {
+          test_chr->prop->child = child->prev;
+        }
+      }
+    } else if (after_frames(2)) {
+      emu_log("TRIGGER_LOAD");
+      load_game_state();
+      emu_log("LOAD_DONE");
+    } else if (after_frames(2)) {
+      PropRecord *chr_prop = get_prop_by_index(saved_chr_prop_index);
+      bool ok = TRUE;
+
+      if (chr_prop == NULL || chr_prop->type != PROP_TYPE_CHR ||
+          chr_prop->chr == NULL || chr_prop->chr->prop != chr_prop) {
+        emu_log("CHR_NOT_RESTORED");
+        ok = FALSE;
+      } else if (count_chr_child_links(chr_prop->chr) != saved_child_count) {
+        emu_log("CHILD_CHAIN_INVALID count=%d saved=%d",
+                count_chr_child_links(chr_prop->chr), saved_child_count);
+        ok = FALSE;
+      } else if (get_prop_index(chr_prop->child) != saved_child_head_index) {
+        emu_log("CHILD_HEAD_CHANGED got=%d saved=%d",
+                get_prop_index(chr_prop->child), saved_child_head_index);
+        ok = FALSE;
+      } else {
+        for (i = 0; i < saved_child_count; i++) {
+          PropRecord *child = get_prop_by_index(saved_children[i].index);
+
+          if (child == NULL || child->parent != chr_prop ||
+              get_prop_index(child->prev) != saved_children[i].prev ||
+              get_prop_index(child->next) != saved_children[i].next) {
+            emu_log("CHILD_LINK_CHANGED child=%d", saved_children[i].index);
+            ok = FALSE;
+            break;
+          }
+        }
+      }
+
+      if (!ok) {
         emu_log("TEST_FAILED");
       }
     } else if (after_frames(30)) {

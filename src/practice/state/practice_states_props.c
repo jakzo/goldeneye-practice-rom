@@ -2143,6 +2143,7 @@ bool save_props_state(StateStream *stream) {
 typedef struct SavedPropLinks {
   u16 index;
   u16 parent;
+  u16 child;
   u16 prev;
   u16 next;
 } SavedPropLinks;
@@ -2199,6 +2200,77 @@ static void cleanup_live_chr_children(PropRecord *chr_prop,
   }
 
   chr_prop->child = NULL;
+}
+
+static bool saved_link_names_chr_child(const SavedPropLinks *savedLinks,
+                                       s32 recordCount, u16 childIndex,
+                                       u16 chrIndex) {
+  s32 i;
+
+  for (i = 0; i < recordCount; i++) {
+    if (savedLinks[i].index == childIndex && savedLinks[i].parent == chrIndex) {
+      PropRecord *child = get_prop_by_index(childIndex);
+      return child != NULL && child->parent == get_prop_by_index(chrIndex);
+    }
+  }
+
+  return FALSE;
+}
+
+static PropRecord *get_saved_chr_child_link(const SavedPropLinks *savedLinks,
+                                            s32 recordCount, u16 childIndex,
+                                            u16 chrIndex) {
+  if ((s16)childIndex < 0 ||
+      !saved_link_names_chr_child(savedLinks, recordCount, childIndex,
+                                  chrIndex)) {
+    return NULL;
+  }
+
+  return get_prop_by_index(childIndex);
+}
+
+static void rebuild_saved_chr_child_links(const SavedPropLinks *savedLinks,
+                                          s32 recordCount) {
+  s32 i;
+
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *parent;
+
+    if ((s16)savedLinks[i].parent >= 0) {
+      continue;
+    }
+
+    parent = get_prop_by_index(savedLinks[i].index);
+    if (parent != NULL && parent->type == PROP_TYPE_CHR &&
+        parent->chr != NULL && parent->chr->prop == parent) {
+      parent->child = get_saved_chr_child_link(
+          savedLinks, recordCount, savedLinks[i].child, savedLinks[i].index);
+    }
+  }
+
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *prop;
+    PropRecord *parent;
+
+    if ((s16)savedLinks[i].parent < 0) {
+      continue;
+    }
+
+    prop = get_prop_by_index(savedLinks[i].index);
+    parent = get_prop_by_index(savedLinks[i].parent);
+    if (prop == NULL || parent == NULL || parent->type != PROP_TYPE_CHR ||
+        parent->chr == NULL || parent->chr->prop != parent ||
+        prop->parent != parent) {
+      continue;
+    }
+
+    prop->prev = get_saved_chr_child_link(savedLinks, recordCount,
+                                          savedLinks[i].prev,
+                                          savedLinks[i].parent);
+    prop->next = get_saved_chr_child_link(savedLinks, recordCount,
+                                          savedLinks[i].next,
+                                          savedLinks[i].parent);
+  }
 }
 
 bool load_props_state(StateStream *stream) {
@@ -2480,6 +2552,7 @@ bool load_props_state(StateStream *stream) {
     }
     savedLinks[i].index = savedPropIndex;
     savedLinks[i].parent = savedPropParentIdx;
+    savedLinks[i].child = savedPropChildIdx;
     savedLinks[i].prev = savedPropPrevIdx;
     savedLinks[i].next = savedPropNextIdx;
     prop->rooms[0] = savedPropRooms[0];
@@ -2679,6 +2752,12 @@ bool load_props_state(StateStream *stream) {
     parent = get_prop_by_index(savedLinks[i].parent);
     restore_concealed_chr_item(prop, parent);
   }
+
+  // Attachment restoration uses engine helpers that freely rewrite prev/next
+  // while moving objects between active-list and child-list states. Reinstall
+  // the saved CHR child graph afterward so prev remains the child-walk link and
+  // next remains its reverse link for drop/teardown code.
+  rebuild_saved_chr_child_links(savedLinks, recordCount);
 
   /* Resolve projectile references only after all saved props are processed. */
   for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {

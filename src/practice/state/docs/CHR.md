@@ -87,6 +87,7 @@ ChrRecord::padpreset1;    /* Resolved stage pad ID, or -1 when unset. */
 ChrRecord::chrpreset1;    /* Resolved character ID, or -1 when unset. */
 ChrRecord::chrseeshot;    /* Character seen being shot, or CHR_FREE (-1). */
 ChrRecord::chrseedie;     /* Character seen dying, or CHR_FREE (-1). */
+CHRHIDDEN_REMOVE;         /* Pending deletion on the next CHR tick. */
 ```
 
 `numarghs` increments when a character enters a confirmed damage reaction and
@@ -108,6 +109,13 @@ guards when a character is shot or dies. AI resolves `CHR_SEE_SHOT` (`-6`) and
 `CHR_SEE_DIE` (`-5`) through these fields. Both initialize to and are reset to
 `CHR_FREE` (`-1`) after an AI action tick, so nonnegative values are transient
 but valid save-state data.
+
+`CHRHIDDEN_REMOVE` is set by AI-driven teardown paths, including level-end
+cutscenes. It is restored exactly so loading an earlier state during an ending
+cutscene clears any live post-save removal that would otherwise delete the
+restored CHR on the next tick. If a state is saved after removal has been queued
+but before the CHR is actually reaped, loading that state preserves the queued
+deletion.
 
 The fourth CHR serialization slice restores the character's perception memory:
 
@@ -322,6 +330,16 @@ these pointers independently. Equipment held after the save but absent from
 the saved slots is detached and returned to the active list; saved equipment
 which was dropped later is removed from its rooms and active list before being
 reattached.
+
+After all held, hat, and concealed children are resolved, the prop loader
+reinstalls the serialized CHR child graph from the saved `parent`, `child`,
+`prev`, and `next` indices. This is intentionally a final pass: equipment and
+concealed-item helpers mutate the sibling links while moving props out of the
+active list and back under the CHR, and their insertion order is not guaranteed
+to match the saved graph. The final graph pass only links children that still
+belong to the same saved CHR, so `prev` remains the newest-to-oldest traversal
+link and `next` remains the reverse link without splicing active-list records
+into the child chain.
 
 The equipment model's `attachedto` points to the live CHR model.
 `attachedto_objinst` selects model switch `3` for the right hand, `5` for the
@@ -1223,17 +1241,19 @@ whether incoming hits accumulate `damage`. It is a plain behaviour bit that the
 gunfire and explosion damage paths test before applying damage, and AI scripts
 may set or clear it; it carries no pointer, allocation result, or one-shot
 semantics. Restoring it with `damage`/`maxdamage` keeps the "did intervening hits
-count" decision consistent with the saved snapshot. Every other unlisted
-`chrflags` bit is preserved.
+count" decision consistent with the saved snapshot. `CHRFLAG_HIDDEN`
+(`0x00000400`) is restored with the durable behaviour flags so level-end
+cutscenes and `HideAllChrs` cannot leave a restored pre-cutscene CHR invisible.
+Every other unlisted `chrflags` bit is preserved.
 
 These values work identically for retained and replacement-mode CHRs: a
 replacement CHR receives `damage = 0`, `maxdamage = health_mod * 4.0`,
 `fadealpha = 0xFF`, and default flags from `init_GUARDdata_with_set_values`, then
 the saved values, without depending on the previous allocation.
 
-The one-shot/destructive `chrflags` and the remaining `hidden` bits remain
-deferred. They drive item drops, character removal, freezing, and cloning, and
-must be restored together with allocation/teardown state.
+The remaining one-shot/destructive `chrflags` and `hidden` bits remain deferred.
+They drive item drops, freezing, and cloning, and must be restored together with
+allocation/teardown state.
 
 The twentieth CHR serialization slice restores the two hit-reaction actions:
 

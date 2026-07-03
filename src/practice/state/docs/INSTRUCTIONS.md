@@ -29,10 +29,10 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 - Remove the item from the "Remaining State to Restore" section once implemented
 - No need to update the changelog or SAVE_STATE_VERSION
 - If you notice some other global state that is not supported yet, implement it immediately if simple, otherwise add it to the list of remaining state to restore to do it later
+- If there is a case that might need to be considered but you are not sure (for example, if a field is normally null or a pointer but theoretically the object pointed to could have been freed, though there is no evidence of this) then add an invariant assertion and emit an error log if it fails, no need to handle the case gracefully
 
 ## Remaining State to Restore
 
-- After finishing the level (specifically Caverns) and loading during the ending cutscene most of the enemies are despawned after load
 - Audio
   - Prop sound effects and currently playing audio cues
   - Not sure how realistic or necessary this is?
@@ -152,6 +152,12 @@ Add any general advice helpful for future agents working on this feature here. B
   props, then reattach them after held weapons and hats rebuild that chain.
   Otherwise loading erases the ownership link and the item is not dropped when
   the guard dies.
+- **Ending Cutscene CHR Lifecycle State**: Some level-end AI queues normal CHRs
+  for teardown or hides them while the exit cutscene is active. Loading an
+  earlier state during that cutscene must overwrite the live `CHRHIDDEN_REMOVE`
+  and `CHRFLAG_HIDDEN` bits; otherwise restored CHRs are removed or left
+  invisible on the next tick. These bits are pointer-free and are restored with
+  the CHR record rather than global state.
 - **Object Projectile/Embedment Union**: `ObjectRecord::projectile` and `ObjectRecord::embedment` occupy the same union slot. On load, restore only the member selected by `RUNTIMEBITFLAG_DEPOSIT` or `RUNTIMEBITFLAG_EMBEDDED`. Restoring one and then clearing the other overwrites the shared pointer; a deposited object will retain its flag and crash on the next tick when the engine dereferences the null projectile.
 - **Resolve Projectile Prop Indices After Loading All Props**: Do not temporarily store saved prop indices in `Projectile::ownerprop` or `Projectile::obj`. If a referenced prop was collected or otherwise removed after the save, its record is skipped and the integer remains disguised as a pointer; a later tick or second save will dereference it and crash. Keep indices in separate arrays, resolve them after all prop records are processed, and free projectiles whose object prop no longer exists.
 - **Adding/Removing Props on Load**: The loader rebuilds the prop array to match the save exactly. Props are processed in ascending slot order; before each saved record, every enabled prop in the skipped slots is removed (`removePropAtIndex`), and after the last record all trailing enabled slots are removed. Each saved prop is restored into its _exact_ original slot so all index-based references (parent/child/prev/next, `weapons_held`, projectile `obj`) stay valid. When the current world has no compatible prop in a slot, it is recreated there:

@@ -22,6 +22,8 @@ extern Vertex *dword_CODE_bss_8007A0E0;
   (CHRHIDDEN_FIRE_WEAPON_LEFT | CHRHIDDEN_FIRE_WEAPON_RIGHT |                  \
    CHRHIDDEN_FIRE_TRACER | CHRHIDDEN_MOVING)
 
+#define CHR_LIFECYCLE_HIDDEN_MASK CHRHIDDEN_REMOVE
+
 #define CHR_FLINCH_HIDDEN_MASK CHRHIDDEN_RAND_FLINCH_MASK
 
 #define CHR_DAMAGE_FLAGS_MASK CHRFLAG_INVINCIBLE
@@ -34,7 +36,8 @@ extern Vertex *dword_CODE_bss_8007A0E0;
   (CHRSTART_FORCENOBLOOD | CHRFLAG_CAN_SHOOT_CHRS | CHRFLAG_NO_AUTOAIM |       \
    CHRFLAG_LOCK_Y_POS | CHRFLAG_NO_SHADOW | CHRFLAG_IGNORE_ANIM_TRANSLATION |  \
    CHRFLAG_IMPACT_ALWAYS | CHRFLAG_INCREASE_RUNNING_SPEED |                    \
-   CHRFLAG_COUNT_DEATH_AS_CIVILIAN | CHRFLAG_CULL_USING_HITBOX)
+   CHRFLAG_COUNT_DEATH_AS_CIVILIAN | CHRFLAG_CULL_USING_HITBOX |              \
+   CHRFLAG_HIDDEN)
 
 typedef struct FiringAnimationTableRef {
   struct weapon_firing_animation_table *table;
@@ -1190,6 +1193,7 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_u16(stream, (u16)chr->chrpreset1);
   write_u16(stream, (u16)chr->chrseeshot);
   write_u16(stream, (u16)chr->chrseedie);
+  write_u16(stream, chr->hidden & CHR_LIFECYCLE_HIDDEN_MASK);
 
   write_u32(stream, chr->lastseetarget60);
   write_bytes(stream, &chr->lastknowntargetpos, sizeof(coord3d));
@@ -1342,6 +1346,8 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   chr->chrpreset1 = (s16)read_u16(stream);
   chr->chrseeshot = (s16)read_u16(stream);
   chr->chrseedie = (s16)read_u16(stream);
+  chr->hidden = (chr->hidden & ~CHR_LIFECYCLE_HIDDEN_MASK) |
+                ((u16)read_u16(stream) & CHR_LIFECYCLE_HIDDEN_MASK);
 
   chr->lastseetarget60 = read_u32(stream);
   read_bytes(stream, &chr->lastknowntargetpos, sizeof(coord3d));

@@ -20,7 +20,10 @@ extern void used_to_load_1st_person_model_on_demand(enum GUNHAND hand);
 
 extern void bondviewApplyVertaTheta(void);
 extern void chrpropDelist(PropRecord *prop);
+extern void disable_sounds_attached_to_player_then_something(PropRecord *prop);
 extern int bondinvAddPropToInv(PropRecord *prop);
+extern void solo_char_load(void);
+extern void sub_GAME_7F07DE9C(struct player *player);
 extern s32 g_EnterTankAudioState;
 extern void *memcpy(void *dst, const void *src, size_t count);
 
@@ -32,6 +35,108 @@ static const struct {
     {0x11B8, 0x06C0}, {0x29B8, 0x00B8},
 };
 
+#ifdef DEV
+static bool is_rdram_range(const void *ptr, u32 size) {
+  u32 addr = (u32)ptr;
+  u32 end = addr + size;
+  u32 rdram_end = 0x80000000 + osMemSize;
+
+  return addr >= 0x80000000 && end >= addr && end <= rdram_end;
+}
+
+static void validate_current_player_model_invariant(bool saved_had_model) {
+  PropRecord *prop;
+  ChrRecord *chr;
+  Model *model;
+
+  if (g_CurrentPlayer == NULL) {
+    return;
+  }
+
+  prop = g_CurrentPlayer->prop;
+  model = g_CurrentPlayer->ptr_char_objectinstance;
+
+  if (saved_had_model != (model != NULL)) {
+    practiceLogError("Bond model presence mismatch saved=%d live=%08x",
+                     saved_had_model, model);
+  }
+
+  if (model == NULL) {
+    return;
+  }
+
+  if (prop == NULL) {
+    practiceLogError("Bond model live without viewer prop model=%08x", model);
+    return;
+  }
+
+  if (prop->chr == NULL) {
+    practiceLogError("Bond model live without viewer chr model=%08x prop=%08x",
+                     model, prop);
+    return;
+  }
+
+  if (!is_rdram_range(model, sizeof(Model))) {
+    practiceLogError("Bond model pointer outside RDRAM model=%08x", model);
+    return;
+  }
+
+  chr = prop->chr;
+
+  if (chr->model != model || model->chr != chr) {
+    practiceLogError(
+        "Bond model/chr mismatch model=%08x chr=%08x chrmodel=%08x modelchr=%08x",
+        model, chr, chr->model, model->chr);
+  }
+
+  if (!is_rdram_range(model->obj, sizeof(ModelFileHeader))) {
+    practiceLogError("Bond model header invalid model=%08x obj=%08x", model,
+                     model->obj);
+    return;
+  }
+
+  if (!is_rdram_range(model->obj->RootNode, sizeof(ModelNode))) {
+    practiceLogError("Bond model root invalid model=%08x obj=%08x root=%08x",
+                     model, model->obj, model->obj->RootNode);
+  }
+}
+#endif
+
+static void reconcile_current_player_model_presence(bool saved_had_model) {
+  bool live_has_model;
+
+  if (g_CurrentPlayer == NULL) {
+    return;
+  }
+
+  live_has_model = g_CurrentPlayer->ptr_char_objectinstance != NULL;
+  if (saved_had_model == live_has_model) {
+    return;
+  }
+
+  if (saved_had_model) {
+    if (g_CurrentPlayer->prop != NULL) {
+      // A teardown can leave the viewer prop holding a ChrRecord whose model was
+      // cleared. solo_char_load() only rebuilds when prop->chr is NULL.
+      if (g_CurrentPlayer->prop->chr != NULL &&
+          g_CurrentPlayer->prop->chr->model == NULL) {
+        g_CurrentPlayer->prop->chr = NULL;
+      }
+      solo_char_load();
+    }
+    return;
+  }
+
+  if (g_CurrentPlayer->prop != NULL && g_CurrentPlayer->prop->chr != NULL) {
+    // Mirror the game's viewer-model teardown, but do not set
+    // g_bondviewForceDisarm because this is state reconciliation, not gameplay.
+    disable_sounds_attached_to_player_then_something(g_CurrentPlayer->prop);
+    g_CurrentPlayer->prop->chr = NULL;
+    sub_GAME_7F07DE9C(g_CurrentPlayer);
+  }
+  g_CurrentPlayer->ptr_char_objectinstance = NULL;
+}
+
 static void save_player_state_direct(StateStream *stream, struct player *src) {
   u8 *src_bytes = (u8 *)src;
   s32 i;
@@ -41,7 +146,7 @@ static void save_player_state_direct(StateStream *stream, struct player *src) {
   }
 }
 
-static void load_player_state_direct(StateStream *stream, struct player *dst) {
+static bool load_player_state_direct(StateStream *stream, struct player *dst) {
   u8 *dst_bytes = (u8 *)dst;
   s32 backup_field_5C = dst->field_5C;
   s32 backup_field_60 = dst->field_60;
@@ -55,6 +160,7 @@ static void load_player_state_direct(StateStream *stream, struct player *dst) {
       dst->ptr_inventory_first_in_cycle;
   InvItem *backup_p_itemcur = dst->p_itemcur;
   textoverride *backup_textoverrides = dst->textoverrides;
+  bool saved_had_model;
   s32 i;
 
   backup_hand_rocket[0] = dst->hands[0].rocket;
@@ -64,6 +170,8 @@ static void load_player_state_direct(StateStream *stream, struct player *dst) {
     read_bytes(stream, dst_bytes + player_blocks[i].srcoff,
                player_blocks[i].size);
   }
+
+  saved_had_model = dst->ptr_char_objectinstance != NULL;
 
   dst->field_5C = backup_field_5C;
   dst->field_60 = backup_field_60;
@@ -77,6 +185,8 @@ static void load_player_state_direct(StateStream *stream, struct player *dst) {
   dst->ptr_inventory_first_in_cycle = backup_ptr_inventory_first_in_cycle;
   dst->p_itemcur = backup_p_itemcur;
   dst->textoverrides = backup_textoverrides;
+
+  return saved_had_model;
 }
 
 static void save_current_player_state(StateStream *stream) {
@@ -158,6 +268,7 @@ static void save_current_player_state(StateStream *stream) {
 static void load_current_player_state(StateStream *stream) {
   s32 preload_hand_item[2];
   textoverride *live_textoverrides;
+  bool saved_had_model;
 
   if (g_CurrentPlayer == NULL) {
     return;
@@ -169,7 +280,7 @@ static void load_current_player_state(StateStream *stream) {
   live_textoverrides = g_CurrentPlayer->textoverrides;
 
   /* 2. Read player blocks directly into live struct. */
-  load_player_state_direct(stream, g_CurrentPlayer);
+  saved_had_model = load_player_state_direct(stream, g_CurrentPlayer);
 
   /* 3. Read and apply bond helper section. */
   {
@@ -241,6 +352,10 @@ static void load_current_player_state(StateStream *stream) {
     }
 
     /* Sync 3D visual Model instance. */
+    reconcile_current_player_model_presence(saved_had_model);
+#ifdef DEV
+    validate_current_player_model_invariant(saved_had_model);
+#endif
     if (g_CurrentPlayer->ptr_char_objectinstance != NULL) {
       setsuboffset(g_CurrentPlayer->ptr_char_objectinstance,
                    &g_CurrentPlayer->pos);
