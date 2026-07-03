@@ -235,7 +235,7 @@ def start_video_capture(test_case):
     output_dir = Path(video_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     video_path = output_dir / f"{test_case}.mp4"
-    video_size = os.environ.get("PRACTICE_TEST_VIDEO_SIZE", "1024x768")
+    video_size = os.environ.get("PRACTICE_TEST_VIDEO_SIZE", "640x480")
     process = subprocess.Popen(
         [
             ffmpeg,

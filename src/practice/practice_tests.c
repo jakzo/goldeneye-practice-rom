@@ -160,9 +160,7 @@ void practice_tests_tick() {
       save_game_state();
       emu_log("SECOND_SAVE_DONE");
     } else if (after_frames(2)) {
-      // Temporarily failed to test CI
-      // emu_log("TEST_COMPLETE");
-      emu_log("TEST_FAILED");
+      emu_log("TEST_COMPLETE");
     }
     break;
 

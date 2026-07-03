@@ -101,16 +101,17 @@ jobs:
         env:
           ARES: ${{ env.ARES_PREFIX }}/bin/ares
           ARES_ARGS: >-
+            --fullscreen
             --no-file-prompt
             --setting Audio/Driver=None
             --setting Input/Driver=None
           XDG_CONFIG_HOME: /tmp/ares-config
           XDG_DATA_HOME: /tmp/ares-data
           PRACTICE_TEST_VIDEO_DIR: ${{ runner.temp }}/practice-test-artifacts/videos
-          PRACTICE_TEST_VIDEO_SIZE: 1024x768
+          PRACTICE_TEST_VIDEO_SIZE: 640x480
         run: |
           xvfb-run --auto-servernum \
-            --server-args="-screen 0 1024x768x24 -nolisten tcp -ac" \
+            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
             ./scripts/run_practice_tests.py \
               --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
 
@@ -121,5 +122,4 @@ jobs:
           name: practice-test-failures-${{ github.run_attempt }}
           path: ${{ runner.temp }}/practice-test-artifacts
           if-no-files-found: warn
-          retention-days: 7
           compression-level: 0

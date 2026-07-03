@@ -73,7 +73,7 @@ RUN curl --fail --location --retry 3 \
     rm -rf /tmp/ares-build "/tmp/ares-${ARES_VERSION#v}"
 
 ENV ARES="/opt/ares/bin/ares"
-ENV ARES_ARGS="--no-file-prompt --setting Audio/Driver=None --setting Input/Driver=None"
+ENV ARES_ARGS="--fullscreen --no-file-prompt --setting Audio/Driver=None --setting Input/Driver=None"
 ENV TERM="xterm"
 ENV XDG_CONFIG_HOME="/tmp/ares-config"
 ENV XDG_DATA_HOME="/tmp/ares-data"
