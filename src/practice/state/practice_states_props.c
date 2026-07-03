@@ -283,23 +283,12 @@ static PropRecord *create_chr_prop(PropRecord *prop,
   return result;
 }
 
-// Object subtypes which gameplay can fully remove from their prop slot
-// (collected pickups, hats knocked off a character, dropped weapons). These
-// must be recreated when a saved state contains one whose slot is now empty or
-// occupied by a different prop. Every other object subtype is level geometry
-// that is never freed, so its slot is assumed to persist.
-static bool is_removable_object_subtype(u8 objtype) {
-  switch (objtype) {
-  case PROPDEF_KEY:
-  case PROPDEF_MAGAZINE:
-  case PROPDEF_COLLECTABLE:
-  case PROPDEF_HAT:
-  case PROPDEF_AMMO:
-  case PROPDEF_ARMOUR:
-    return TRUE;
-  default:
-    return FALSE;
-  }
+// Setup-backed objects can be destroyed permanently (notably the cuttable
+// floor strips in Train), while runtime-created collectables can be dropped,
+// thrown, or collected. Both kinds can therefore disappear from their saved
+// prop slot and must be recreated on load.
+static bool can_recreate_object(const ObjAllocationState *alloc) {
+  return alloc->setupCmdIndex >= 0 || alloc->objtype == PROPDEF_COLLECTABLE;
 }
 
 // True when the prop currently at this slot already is the object the save
@@ -555,15 +544,13 @@ static bool prop_is_active_list_member(PropRecord *prop) {
 }
 
 /*
- * Script-equipped objects which are not held weapons or hats are concealed
- * inventory. They are disabled and removed from the active list while attached
- * to a CHR, but chrDropItems walks the CHR child list to drop them on death.
- * Serialize them as prop records so their object payload and ownership can be
- * reconstructed even if they were dropped or collected after the save.
+ * CHR child objects are disabled and removed from the active list while held,
+ * worn, embedded, or concealed. They still own real ObjectRecords/Models and
+ * their prev/next fields are the child-sibling graph, so serialize them as full
+ * prop records instead of reconstructing guard equipment from convenience
+ * pointers alone.
  */
-static bool prop_is_concealed_chr_item(PropRecord *prop) {
-  ChrRecord *chr;
-
+static bool prop_is_chr_child_object(PropRecord *prop) {
   if (prop == NULL || prop->parent == NULL ||
       prop->parent->type != PROP_TYPE_CHR || prop->parent->chr == NULL ||
       (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON) ||
@@ -571,10 +558,7 @@ static bool prop_is_concealed_chr_item(PropRecord *prop) {
     return FALSE;
   }
 
-  chr = prop->parent->chr;
-  return prop != chr->weapons_held[GUNRIGHT] &&
-         prop != chr->weapons_held[GUNLEFT] &&
-         prop != chr->handle_positiondata_hat;
+  return TRUE;
 }
 
 static void detach_old_chr_attachment(ChrRecord *chr, PropRecord *prop,
@@ -584,13 +568,11 @@ static void detach_old_chr_attachment(ChrRecord *chr, PropRecord *prop,
     return;
   }
 
-  objDetach(prop);
-  if (prop->obj->model != NULL) {
-    prop->obj->model->attachedto = NULL;
-  }
-  chrpropActivate(prop);
-  chrpropEnable(prop);
-  chrpropRegisterRooms(prop);
+  // This attachment was acquired after the save. It is absent from the saved
+  // world, so remove it instead of dropping it as a new standalone prop.
+  // Dropping it here also appends it to the active list while its prev/next
+  // fields are still used by the CHR child chain, splitting the active list.
+  objFreePermanently(prop->obj, TRUE);
 }
 
 static bool attach_prop_to_chr(ChrRecord *chr, PropRecord *prop,
@@ -754,11 +736,19 @@ static void restore_chr_attachments(PropRecord *chr_prop,
 static void restore_concealed_chr_item(PropRecord *prop,
                                        PropRecord *chr_prop) {
   ObjectRecord *obj;
+  ChrRecord *chr;
 
   if (prop == NULL || chr_prop == NULL || chr_prop->type != PROP_TYPE_CHR ||
       chr_prop->chr == NULL ||
       (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON) ||
       prop->obj == NULL) {
+    return;
+  }
+
+  chr = chr_prop->chr;
+  if (prop == chr->weapons_held[GUNRIGHT] ||
+      prop == chr->weapons_held[GUNLEFT] ||
+      prop == chr->handle_positiondata_hat) {
     return;
   }
 
@@ -1810,8 +1800,7 @@ bool save_props_state(StateStream *stream) {
     PropRecord *prop = get_prop_by_index(i);
 
     if (prop == NULL ||
-        (!prop_is_active_list_member(prop) &&
-         !prop_is_concealed_chr_item(prop))) {
+        (!prop_is_active_list_member(prop) && !prop_is_chr_child_object(prop))) {
       continue;
     }
 
@@ -2163,6 +2152,55 @@ typedef struct PendingChrAttachments {
   ChrAttachmentIndices attachments;
 } PendingChrAttachments;
 
+static bool saved_links_name_chr_child(const SavedPropLinks *savedLinks,
+                                       s32 recordCount, u16 childIndex,
+                                       u16 chrIndex) {
+  s32 i;
+
+  for (i = 0; i < recordCount; i++) {
+    if (savedLinks[i].index == childIndex && savedLinks[i].parent == chrIndex) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+static void cleanup_live_chr_children(PropRecord *chr_prop,
+                                      const SavedPropLinks *savedLinks,
+                                      s32 recordCount) {
+  PropRecord *child;
+  u16 chrIndex;
+
+  if (chr_prop == NULL || chr_prop->type != PROP_TYPE_CHR ||
+      chr_prop->chr == NULL) {
+    return;
+  }
+
+  chrIndex = get_prop_index(chr_prop);
+  child = chr_prop->child;
+
+  while (child != NULL) {
+    PropRecord *next = child->prev;
+    u16 childIndex = get_prop_index(child);
+
+    if (saved_links_name_chr_child(savedLinks, recordCount, childIndex,
+                                   chrIndex)) {
+      chrpropDetach(child);
+    } else if ((child->type == PROP_TYPE_OBJ ||
+                child->type == PROP_TYPE_WEAPON) &&
+               child->obj != NULL) {
+      objFreePermanently(child->obj, TRUE);
+    } else {
+      chrpropDetach(child);
+    }
+
+    child = next;
+  }
+
+  chr_prop->child = NULL;
+}
+
 bool load_props_state(StateStream *stream) {
   u32 dataStart;
   s32 i;
@@ -2257,6 +2295,7 @@ bool load_props_state(StateStream *stream) {
                             savedPropType == PROP_TYPE_WEAPON;
     bool createdChrProp = FALSE;
     bool createdObjProp = FALSE;
+    bool shouldRebuildObjectRooms = FALSE;
 
     for (c = 0; c < i; c++) {
       if (savedLinks[c].index == savedPropIndex) {
@@ -2291,17 +2330,15 @@ bool load_props_state(StateStream *stream) {
     // with the save so every index-based reference stays valid.
     switch ((PROP_TYPE)savedPropType) {
     case PROP_TYPE_CHR:
-      // If the same character still occupies this slot, reuse it in place. Its
-      // model and attached equipment (held weapons/hats) are disabled child
-      // props that are not serialized, so recreating the character would orphan
-      // them: their stale parent pointer would still equal the rebuilt prop's
-      // address and restore_chr_attachments could not reattach them. Reuse
-      // keeps that graph intact; load_chr_record and restore_chr_attachments
-      // reconcile the rest. A different (or absent) character is torn down and
-      // rebuilt from the serialized body/head so no stale allocation is
-      // retained.
+      // If the same character still owns this slot, reuse it in place. Body and
+      // head IDs alone are insufficient: a freed/reused prop can retain a stale
+      // ChrRecord pointer whose actual chr->prop owner is another slot. Reusing
+      // that alias restores collision at this prop while leaving the model at
+      // the owner's position, producing an invisible blocking guard.
       if (prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
           (prop->flags & PROPFLAG_ENABLED) &&
+          prop->chr->prop == prop && prop->chr->model != NULL &&
+          prop->chr->model->chr == prop->chr &&
           prop->chr->bodynum == savedChrAllocation.bodynum &&
           prop->chr->headnum == savedChrAllocation.headnum) {
         break;
@@ -2309,7 +2346,14 @@ bool load_props_state(StateStream *stream) {
 
       if (prop->type == PROP_TYPE_CHR &&
           (prop->chr != NULL || (prop->flags & PROPFLAG_ENABLED))) {
-        destroy_chr_prop(prop, FALSE);
+        if (prop->chr != NULL && prop->chr->prop != prop) {
+          // Only this PropRecord is stale. The ChrRecord and model belong to a
+          // different slot which may also be present in the save, so tearing
+          // them down here would destroy that legitimate character.
+          clear_plain_prop(prop, FALSE);
+        } else {
+          destroy_chr_prop(prop, FALSE);
+        }
       } else if (!clear_prop_for_replacement(prop)) {
         practiceLogWarn(
             "Cannot retain prop slot %d while replacing type %d with CHR",
@@ -2331,13 +2375,8 @@ bool load_props_state(StateStream *stream) {
 
     case PROP_TYPE_OBJ:
     case PROP_TYPE_WEAPON:
-      // PROP_TYPE_WEAPON props and the pickup/hat object subtypes are the only
-      // objects gameplay fully removes from their slot. Every other object is
-      // static level geometry whose slot is never freed and is restored in
-      // place below.
-      if ((savedPropType == PROP_TYPE_WEAPON ||
-           is_removable_object_subtype(savedObjAllocation.objtype)) &&
-          !slot_matches_object(prop, savedPropType, &savedObjAllocation)) {
+      if (!slot_matches_object(prop, savedPropType, &savedObjAllocation) &&
+          can_recreate_object(&savedObjAllocation)) {
         if (!clear_prop_for_replacement(prop)) {
           practiceLogWarn(
               "Cannot retain prop slot %d while replacing type %d with object",
@@ -2356,10 +2395,9 @@ bool load_props_state(StateStream *stream) {
         createdObjProp = TRUE;
       } else if (!slot_matches_object(prop, savedPropType,
                                       &savedObjAllocation)) {
-        // A static (never-removed) object that the current world does not have
-        // at this slot. There is nothing to restore into, so skip the payload
-        // rather than activating a prop with no backing object.
-        practiceLogWarn("No object at prop slot %d to restore (type %d)",
+        // Runtime object subtypes without a setup origin or creation path
+        // cannot be restored safely into an unbound slot.
+        practiceLogWarn("Cannot recreate object at prop slot %d (type %d)",
                         savedPropIndex, savedObjAllocation.objtype);
         skip_prop_data(stream, savedPropType);
         continue;
@@ -2406,8 +2444,12 @@ bool load_props_state(StateStream *stream) {
       break;
     }
 
-    if (savedPropType == PROP_TYPE_VIEWER) {
+    if (savedPropType == PROP_TYPE_VIEWER ||
+        ((savedPropType == PROP_TYPE_OBJ || savedPropType == PROP_TYPE_WEAPON) &&
+         prop->parent == NULL && prop_is_active_list_member(prop))) {
       chrpropDeregisterRooms(prop);
+      shouldRebuildObjectRooms = savedPropType != PROP_TYPE_VIEWER &&
+                                 (s16)savedPropParentIdx < 0;
     }
 
     // Apply the common PropRecord fields. The active-list/attachment-graph
@@ -2537,11 +2579,18 @@ bool load_props_state(StateStream *stream) {
 
       load_object_subtype(stream, obj);
 
-      // A freshly recreated object is not yet registered in its rooms. The
-      // saved room list was installed with the common fields above; register
-      // it now so the object renders and collides.
-      if (createdObjProp) {
-        chrpropRegisterRooms(prop);
+      // Rebuild root object room membership and dynamic collision geometry from
+      // the restored transform. Movable objects such as Train crates can move
+      // after saving; simply restoring prop/runtime positions leaves their
+      // allocated collision block and room lists at the pre-load location.
+      if ((createdObjProp || shouldRebuildObjectRooms) &&
+          (s16)savedPropParentIdx < 0) {
+        setupUpdateObjectRoomPosition(obj);
+        if (obj->ptr_allocated_collisiondata_block != NULL) {
+          chrobjCollisionRelated(obj);
+        }
+      } else if (obj->ptr_allocated_collisiondata_block != NULL) {
+        chrobjCollisionRelated(obj);
       }
       break;
     }
@@ -2610,6 +2659,7 @@ bool load_props_state(StateStream *stream) {
     PropRecord *chr_prop =
         get_prop_by_index(pendingChrAttachments[i].prop_index);
     if (chr_prop != NULL && chr_prop->type == PROP_TYPE_CHR) {
+      cleanup_live_chr_children(chr_prop, savedLinks, recordCount);
       restore_chr_attachments(chr_prop, &pendingChrAttachments[i].attachments);
     }
   }

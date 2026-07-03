@@ -32,6 +32,8 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining State to Restore
 
+- The level Train has a timer that appears on screen and starts counting down at the end when reaching Natalya and the train blows up after it reaches 0, if this timer is started before loading state, it stays on screen and keeps counting
+- After finishing the level (specifically Caverns) and loading during the ending cutscene most of the enemies are despawned after load
 - Audio
   - Prop sound effects and currently playing audio cues
   - Not sure how realistic or necessary this is?
@@ -144,10 +146,23 @@ Add any general advice helpful for future agents working on this feature here. B
 - **Resolve Projectile Prop Indices After Loading All Props**: Do not temporarily store saved prop indices in `Projectile::ownerprop` or `Projectile::obj`. If a referenced prop was collected or otherwise removed after the save, its record is skipped and the integer remains disguised as a pointer; a later tick or second save will dereference it and crash. Keep indices in separate arrays, resolve them after all prop records are processed, and free projectiles whose object prop no longer exists.
 - **Adding/Removing Props on Load**: The loader rebuilds the prop array to match the save exactly. Props are processed in ascending slot order; before each saved record, every enabled prop in the skipped slots is removed (`removePropAtIndex`), and after the last record all trailing enabled slots are removed. Each saved prop is restored into its _exact_ original slot so all index-based references (parent/child/prev/next, `weapons_held`, projectile `obj`) stay valid. When the current world has no compatible prop in a slot, it is recreated there:
     - CHR: torn down and rebuilt via `create_chr_prop` (body/head allocation metadata).
-    - Object/weapon pickups (`PROP_TYPE_WEAPON`, and OBJ subtypes KEY/MAGAZINE/COLLECTABLE/HAT/AMMO/ARMOUR): rebuilt via `create_object_prop`. Level-defined objects reuse their persistent setup `ObjectRecord` (found through a serialized setup-command index from `setupGetCommandIndexByProp`); dynamically dropped/thrown collectables take a fresh record from the weapon pool (`weaponCreate`). The common fields then install the authoritative object data and rooms are registered.
+    - Setup-backed objects and weapon props are rebuilt via `create_object_prop`. Level-defined objects reuse their persistent setup `ObjectRecord` (found through a serialized setup-command index from `setupGetCommandIndexByProp`); dynamically dropped/thrown collectables take a fresh record from the weapon pool (`weaponCreate`). The common fields then install the authoritative object data and rooms are registered.
     - Explosions/smoke: rebuilt via `create_explosion_prop`/`create_smoke_prop` using a free `g_ExplosionBuffer`/`g_SmokeBuffer` entry.
-    - Static level geometry (doors, glass, autoguns, monitors, CCTV, vehicles, aircraft, tanks, etc.) is never freed by gameplay, so its slot is assumed to persist; a missing one is skipped safely rather than recreated.
+    - Do not assume setup geometry persists. Destroyable setup objects can be freed completely; Train's 20 cuttable floor strips are ordinary `PROPDEF_PROP` records whose slots can then be reused. Recreate any missing setup-backed object from its saved command index. Doors still rely on their persistent live prop.
       Each object/door/weapon record carries an `ObjAllocationState` (model id, subtype, setup-command index) ahead of its payload so the destination prop can be built before the payload is consumed, mirroring `ChrAllocationState` for CHRs. The active-list links (`first`/`current`) and the per-prop `prev/next` are rebuilt from the restored indices; the attachment graph (`parent`/`child`) is owned by `restore_chr_attachments`. Disabled mid-regeneration props remain on the active list and are serialized; disabled attached equipment is restored through its owning CHR. **This is new, hard-to-test code** — the dominant test is save → play (collect items, kill guards, throw grenades, open doors) → load and confirm the saved world is faithfully restored without crashes.
+- **Discard Post-Save CHR Equipment**: A guard can acquire a different weapon
+  or hat after saving. When loading, an old attachment not named by the save
+  must be freed, not detached and activated as a dropped item. Activating it
+  preserves state that did not exist at save time and can splice its overloaded
+  child-sibling `prev`/`next` links into the active prop list.
+- **Validate CHR Ownership Before Reuse**: Matching body/head IDs do not prove
+  that a prop still owns its `ChrRecord`. A reused prop slot can retain a stale
+  pointer to a same-model character owned by another slot. Require
+  `chr->prop == prop` and `model->chr == chr`; otherwise clear only the stale
+  prop alias and recreate its saved CHR. Destroying the shared `ChrRecord`
+  would also destroy the legitimate owner. Reusing it separates collision
+  (`prop->pos`) from rendering (`model` root position), creating an invisible
+  blocking guard.
 - **Never Restore the Prop Free List From Saved Indices — Rebuild It**: Free-list entries have no saved record, so their `prev` links — which chain the free list together — are never written. Restoring `ptr_obj_pos_list_final_entry` from the saved head index therefore points the free list into stale pre-load links. `chrpropAllocate` can then hand out slots that are actually in use, corrupting the prop graph and eventually crashing. Rebuild the free list after props and attachments are restored, but do not equate disabled with free: respawning pickups are disabled while remaining on the active list, and inactive setup objects can remain bound through `obj->prop`. Serialize every active-list prop regardless of `PROPFLAG_ENABLED`; a slot is free only when it was not saved active, has no parent, and has no live CHR/object/explosion/smoke owner. The `prev`-chain integer round-trip through `get_prop_index`/`get_prop_by_index` cannot preserve a misaligned pointer, so any misalignment seen in memory is live corruption rather than saved data.
 - **Active Records Must Clear Live Parents**: Every serialized prop is reached
   through the active list and therefore had `parent == NULL` at save time. If

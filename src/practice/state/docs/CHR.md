@@ -261,6 +261,12 @@ they form a diamond centered on `prop->pos` with points at plus/minus
 `chrwidth` on each axis. Saving the live values also preserves any
 action-specific bound update until the engine calculates them again.
 
+Before reusing a live CHR destination during load, validate the complete
+ownership chain: `prop->chr->prop == prop` and `prop->chr->model->chr ==
+prop->chr`. Body/head equality alone can accept a stale prop alias to a
+same-model guard in another slot, leaving collision at the restored prop
+position while the shared model remains at its real owner's position.
+
 The eighth CHR serialization slice restores equipment and its attachment
 ownership:
 

@@ -5,6 +5,7 @@
 #include "chrobjhandler.h"
 #include "emu_log.h"
 #include "joy.h"
+#include "objecthandler.h"
 #include "player.h"
 #include "practice_timescale.h"
 #include "state/practice_states.h"
@@ -27,6 +28,7 @@ extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
 #define FIRE_SLOWMO 5
 #define RNG_LOAD 6
 #define STATE_ARCHIVES_KEY 7
+#define STATE_TRAIN_HATCH 8
 // --- end test cases ---
 
 static s32 g_save_test_timer = -1;
@@ -52,6 +54,8 @@ s32 practice_tests_boot_level(s32 test_case) {
     return LEVELID_DAM;
   case STATE_ARCHIVES_KEY:
     return LEVELID_ARCHIVES;
+  case STATE_TRAIN_HATCH:
+    return LEVELID_TRAIN;
   default:
     return LEVELID_NONE;
   }
@@ -285,6 +289,132 @@ void practice_tests_tick() {
         emu_log("KEY_NOT_RESTORED");
         emu_log("TEST_FAILED");
       }
+    }
+  } break;
+
+  case STATE_TRAIN_HATCH: {
+    static s32 saved_hatch_part_count;
+    static ChrRecord *test_chr;
+    static WeaponObjRecord *post_save_weapon;
+    static PropRecord *alias_chr_prop;
+    static PropRecord *owner_chr_prop;
+    s32 hatch_part_count = 0;
+    s32 i;
+
+    for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+      PropRecord *prop = &pos_data_entry[i];
+
+      if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON) &&
+          prop->obj != NULL && prop->obj->prop == prop &&
+          prop->obj->type == PROPDEF_PROP &&
+          prop->obj->obj == PROP_HATCHBOLT) {
+        hatch_part_count++;
+      }
+    }
+
+    if (after_frames(30)) {
+      PropRecord *prop;
+
+      test_chr = NULL;
+      post_save_weapon = NULL;
+      alias_chr_prop = NULL;
+      owner_chr_prop = NULL;
+      for (prop = ptr_obj_pos_list_first_entry; prop != NULL;
+           prop = prop->next) {
+        if (prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
+            prop->chr->weapons_held[GUNLEFT] == NULL) {
+          test_chr = prop->chr;
+          break;
+        }
+      }
+
+      for (prop = ptr_obj_pos_list_first_entry;
+           prop != NULL && alias_chr_prop == NULL; prop = prop->next) {
+        PropRecord *other;
+
+        if (prop->type != PROP_TYPE_CHR || prop->chr == NULL ||
+            prop->chr == test_chr || prop->chr->prop != prop) {
+          continue;
+        }
+        for (other = prop->next; other != NULL; other = other->next) {
+          if (other->type == PROP_TYPE_CHR && other->chr != NULL &&
+              other->chr != test_chr && other->chr->prop == other &&
+              other->chr->bodynum == prop->chr->bodynum &&
+              other->chr->headnum == prop->chr->headnum) {
+            if (prop < other) {
+              alias_chr_prop = prop;
+              owner_chr_prop = other;
+            } else {
+              alias_chr_prop = other;
+              owner_chr_prop = prop;
+            }
+            break;
+          }
+        }
+      }
+
+      saved_hatch_part_count = hatch_part_count;
+      emu_log("HATCH_PARTS_BEFORE=%d", saved_hatch_part_count);
+      if (saved_hatch_part_count == 0 || test_chr == NULL ||
+          alias_chr_prop == NULL) {
+        emu_log("TEST_FAILED");
+      } else {
+        emu_log("TRIGGER_SAVE");
+        save_game_state();
+        emu_log("SAVE_DONE");
+      }
+    } else if (after_frames(2)) {
+      PropRecord *post_save_prop =
+          chrGiveWeapon(test_chr, PROP_CHRKALASH, ITEM_AK47,
+                        PROPFLAG_WEAPON_LEFTHANDED);
+
+      if (post_save_prop == NULL) {
+        emu_log("POST_SAVE_WEAPON_NOT_CREATED");
+        emu_log("TEST_FAILED");
+      } else {
+        post_save_weapon = post_save_prop->weapon;
+      }
+
+      // Simulate a freed prop slot retaining a stale pointer to a same-model
+      // character that is actually owned by a later slot.
+      alias_chr_prop->chr = owner_chr_prop->chr;
+
+      for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+        PropRecord *prop = &pos_data_entry[i];
+
+        if ((prop->type == PROP_TYPE_OBJ ||
+             prop->type == PROP_TYPE_WEAPON) &&
+            prop->obj != NULL && prop->obj->prop == prop &&
+            prop->obj->type == PROPDEF_PROP &&
+            prop->obj->obj == PROP_HATCHBOLT) {
+          objFreePermanently(prop->obj, TRUE);
+        }
+      }
+      emu_log("HATCH_PARTS_DESTROYED");
+    } else if (after_frames(2)) {
+      emu_log("TRIGGER_LOAD");
+      load_game_state();
+      emu_log("LOAD_DONE");
+    } else if (after_frames(2)) {
+      emu_log("HATCH_PARTS_AFTER=%d", hatch_part_count);
+      if (hatch_part_count != saved_hatch_part_count) {
+        emu_log("TEST_FAILED");
+      }
+      if (test_chr->weapons_held[GUNLEFT] != NULL ||
+          post_save_weapon == NULL || post_save_weapon->prop != NULL) {
+        emu_log("POST_SAVE_WEAPON_NOT_REMOVED");
+        emu_log("TEST_FAILED");
+      }
+      if (alias_chr_prop->chr == NULL ||
+          alias_chr_prop->chr->prop != alias_chr_prop ||
+          owner_chr_prop->chr == NULL ||
+          owner_chr_prop->chr->prop != owner_chr_prop ||
+          alias_chr_prop->chr == owner_chr_prop->chr) {
+        emu_log("CROSS_LINKED_CHR_NOT_REPAIRED");
+        emu_log("TEST_FAILED");
+      }
+    } else if (after_frames(30)) {
+      emu_log("TEST_COMPLETE");
     }
   } break;
 

@@ -594,6 +594,8 @@ The serializer restores `duration`, `smoke_type`, and all ten `SmokePart` values
     - Active sound state nodes (`ALSoundState *`) are dynamically allocated. On reload, these pointer members must be set to `NULL` to prevent crashes when the sound engine tries to modify a dead address.
 3. **List Integrity**:
     - Care must be taken not to alter list linkage (`prev`/`next`) directly unless allocating/deallocating a prop, as list order and pointers are crucial to the engine’s update loop.
+    - Equipment acquired by a CHR after the save must be freed during load, not detached and activated as a new dropped prop.
+    - Missing setup-backed objects must be recreated from their saved setup-command index. Destroyable geometry such as Train's cuttable floor strips is fully freed during gameplay and its prop slots may be reused.
 4. **Projectile/Embedment Union Integrity**:
     - `ObjectRecord::projectile` and `ObjectRecord::embedment` share one union slot. Restore only `projectile` for `RUNTIMEBITFLAG_DEPOSIT`, only `embedment` for `RUNTIMEBITFLAG_EMBEDDED`, or clear the slot and both flags when the saved index is invalid.
 5. **Deferred Projectile Reference Resolution**:
