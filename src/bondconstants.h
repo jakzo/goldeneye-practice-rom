@@ -682,7 +682,13 @@ BITFLAG(WEAPONSTATBITFLAG,
 #define SP_BOOT_SZ 0x10
 #define SP_RMON_SZ 0x300
 #define SP_IDLE_SZ 0x40
+#ifdef PRACTICE_ROM
+// TODO: Figure out exactly why 0x200 is exceeded sometimes during state load
+// in the practice ROM
+#define SP_SHED_SZ 0x400
+#else
 #define SP_SHED_SZ 0x200
+#endif
 #define SP_MAIN_SZ 0x8000
 #define SP_AUDI_SZ 0x1000
 #define SP_DEBUG_SZ 0x6B0
