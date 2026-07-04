@@ -409,7 +409,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
     s32 p_x = MARGIN_RIGHT;
     s32 p_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
 #if DEV
-    u32 p_color = 0xCC3300FF;
+    u32 p_color = 0xCC9900FF;
 #else
     u32 p_color = 0x00CC00FF;
 #endif

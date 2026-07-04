@@ -2132,18 +2132,19 @@ Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
                 gSPMatrix(gdl++, osVirtualToPhysical((void*)currentPlayerGetProjectionMatrix()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
                 gdl = fogRenderClearFogMode(gdl);
 
-                /* Note: Omit the transparency/alpha pass (chrpropsRenderPass with pass = 1)
-                 * for characters and props during PIP rendering. The main player's Pass 1
-                 * has already freed the character skeletal joint/bone matrices (field_20)
-                 * for the frame, so trying to re-render transparent parts here will
-                 * read invalid/stale memory and crash the N64 CPU. */
-                // if (get_debug_do_draw_obj())
-                // {
-                //     if (sub_GAME_7F0BD8F0())
-                //     {
-                //         gdl = chrpropsRenderPass(gdl, dword_CODE_bss_8007FFA0[j].roomid, 1);
-                //     }
-                // }
+                /*
+                 * The grenade-cam prop preparation pass rebuilds character
+                 * joints and model matrices for this view. Render the alpha
+                 * pass both for transparent props/effects and to release the
+                 * rebuilt character joint lists at the normal lifecycle point.
+                 */
+                if (get_debug_do_draw_obj())
+                {
+                    if (sub_GAME_7F0BD8F0())
+                    {
+                        gdl = chrpropsRenderPass(gdl, dword_CODE_bss_8007FFA0[j].roomid, 1);
+                    }
+                }
             }
         }
     }

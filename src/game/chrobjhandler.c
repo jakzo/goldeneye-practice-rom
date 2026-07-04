@@ -40769,4 +40769,3 @@ void drop_inventory(void)
         }
     }
 }
-

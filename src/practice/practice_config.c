@@ -21,7 +21,7 @@ struct PracticeConfig practice = {
     5.0f,          // log_message_duration
     TRUE,          // show_hundredths_on_timer
     TRUE,          // show_mission_timer
-    FALSE,         // grenade_cam
+    TRUE,          // grenade_cam
     TRUE,          // splits_enabled
     TRUE,          // gate_guard_status
     FALSE,         // dam_gate_intro_enabled

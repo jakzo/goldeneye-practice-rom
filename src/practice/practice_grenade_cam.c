@@ -24,11 +24,13 @@
 #define PIP_SIZE 75
 #define PIP_SPACING 4
 #define FREEZE_DURATION_SEC 5.0f
-#define MAX_CAMERA_DIST 80.0f
+#define CAMERA_HEIGHT 600.0f
+#define MIN_CAMERA_HEIGHT 500.0f
+#define MAX_CAMERA_HEIGHT 800.0f
+#define MAX_CAMERA_DIST 1600.0f
 #define MAX_CAMERA_DIST_SQR (MAX_CAMERA_DIST * MAX_CAMERA_DIST)
 
 struct pip_slot {
-  struct Projectile *grenade;
   struct ObjectRecord *grenade_obj;
   coord3d grenade_last_pos;
   struct StandTile *grenade_last_stan;
@@ -38,6 +40,7 @@ struct pip_slot {
 };
 
 static struct pip_slot g_PipSlots[MAX_PIP_SLOTS];
+static bool g_IsRenderingGrenadeCam;
 
 extern s32 z_buffer;
 extern s32 z_buffer_width;
@@ -65,6 +68,33 @@ extern coord3d flt_CODE_bss_80079970;
 extern f32 flt_CODE_bss_8007997C;
 extern f32 flt_CODE_bss_80079980;
 
+s32 practice_grenade_cam_is_rendering(void) {
+  return g_IsRenderingGrenadeCam;
+}
+
+static void prepare_pip_props(void) {
+  s32 saved_clock_timer = g_ClockTimer;
+  struct player *saved_player_two = g_playerPointers[PLAYER_2];
+
+  // The normal prop dispatcher also prepares each view's visibility, depth and
+  // model matrices. Treat this as a zero-time second multiplayer view so its
+  // retick/relist bookkeeping still runs without advancing simulation.
+  //
+  // Some dispatcher side paths iterate every reported player (for example,
+  // prop sound attenuation). Give the synthetic view a valid player pointer
+  // while it is reported, otherwise those paths dereference the empty P2 slot.
+  g_playerPointers[PLAYER_2] = g_CurrentPlayer;
+  g_IsRenderingGrenadeCam = TRUE;
+  g_ClockTimer = 0;
+
+  determing_type_of_object_and_detection();
+  chraiUpdateOnscreenPropCount();
+
+  g_ClockTimer = saved_clock_timer;
+  g_IsRenderingGrenadeCam = FALSE;
+  g_playerPointers[PLAYER_2] = saved_player_two;
+}
+
 void practice_grenade_cam_tick(void) {
   s32 i, s;
   struct PropRecord *player_prop = get_curplayer_positiondata();
@@ -72,10 +102,18 @@ void practice_grenade_cam_tick(void) {
   struct pip_slot *slot;
   bool still_active, is_player_grenade;
   coord3d g_pos;
-  f32 dx, dz, dist_sqr, dist, min_y, max_y;
+  f32 dx, dz, dist_sqr, dist, speed;
 
-  if (!practice.grenade_cam || g_CurrentPlayer == NULL || player_prop == NULL)
+  if (g_CurrentPlayer == NULL || player_prop == NULL)
     return;
+
+  if (!practice.grenade_cam) {
+    for (s = 0; s < MAX_PIP_SLOTS; s++) {
+      g_PipSlots[s].active = FALSE;
+      g_PipSlots[s].grenade_obj = NULL;
+    }
+    return;
+  }
 
   // 1. Tick existing slots
   for (s = 0; s < MAX_PIP_SLOTS; s++) {
@@ -88,20 +126,23 @@ void practice_grenade_cam_tick(void) {
       slot->freeze_ticks -= g_ClockTimer;
       if (slot->freeze_ticks <= 0) {
         slot->active = FALSE;
-        slot->grenade = NULL;
         slot->grenade_obj = NULL;
       }
     } else {
       // Tracking phase
-      p = slot->grenade;
-      still_active = p != NULL && !(p->flags & PROJECTILEFLAG_FREE) &&
-                     p->obj == slot->grenade_obj && p->obj->prop != NULL;
+      // A grenade's Projectile is freed when it finishes bouncing, while its
+      // object remains alive until the fuse expires. Track the object so the
+      // camera and grenade do not disappear at that normal transition.
+      still_active =
+          slot->grenade_obj != NULL && slot->grenade_obj->prop != NULL &&
+          slot->grenade_obj->obj == PROP_CHRGRENADE &&
+          !(slot->grenade_obj->runtime_bitflags & RUNTIMEBITFLAG_REMOVE);
 
       if (still_active) {
-        g_pos = p->obj->prop->pos;
+        g_pos = slot->grenade_obj->prop->pos;
         slot->grenade_last_pos = g_pos;
-        if (p->obj->prop->stan != NULL) {
-          slot->grenade_last_stan = p->obj->prop->stan;
+        if (slot->grenade_obj->prop->stan != NULL) {
+          slot->grenade_last_stan = slot->grenade_obj->prop->stan;
         }
 
         // Camera follow logic
@@ -114,12 +155,10 @@ void practice_grenade_cam_tick(void) {
           slot->camera_pos.z = g_pos.z + (dz / dist) * MAX_CAMERA_DIST;
         }
 
-        max_y = g_pos.y + 50.0f;
-        min_y = g_pos.y + 30.0f;
-        if (slot->camera_pos.y < min_y) {
-          slot->camera_pos.y = min_y;
-        } else if (slot->camera_pos.y > max_y) {
-          slot->camera_pos.y = max_y;
+        if (slot->camera_pos.y < g_pos.y + MIN_CAMERA_HEIGHT) {
+          slot->camera_pos.y = g_pos.y + MIN_CAMERA_HEIGHT;
+        } else if (slot->camera_pos.y > g_pos.y + MAX_CAMERA_HEIGHT) {
+          slot->camera_pos.y = g_pos.y + MAX_CAMERA_HEIGHT;
         }
       } else {
         // Start freeze phase
@@ -151,15 +190,24 @@ void practice_grenade_cam_tick(void) {
         continue;
 
       slot->active = TRUE;
-      slot->grenade = p;
       slot->grenade_obj = p->obj;
       slot->grenade_last_pos = p->obj->prop->pos;
       slot->grenade_last_stan = p->obj->prop->stan;
       slot->freeze_ticks = 0;
 
-      slot->camera_pos.x = p->obj->prop->pos.x;
-      slot->camera_pos.z = p->obj->prop->pos.z;
-      slot->camera_pos.y = p->obj->prop->pos.y + 30.0f;
+      // Start behind the direction of travel. Starting directly above the
+      // grenade put the model close to the near plane and produced an almost
+      // vertical, poorly defined camera orientation.
+      speed = sqrtf(p->speed.x * p->speed.x + p->speed.z * p->speed.z);
+      if (speed > 0.001f) {
+        slot->camera_pos.x =
+            p->obj->prop->pos.x - p->speed.x / speed * MAX_CAMERA_DIST;
+        slot->camera_pos.z =
+            p->obj->prop->pos.z - p->speed.z / speed * MAX_CAMERA_DIST;
+      } else {
+        slot->camera_pos = *bondviewGetCurrentPlayersPosition();
+      }
+      slot->camera_pos.y = p->obj->prop->pos.y + CAMERA_HEIGHT;
       break;
     }
   next_grenade:;
@@ -207,6 +255,8 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
   coord3d saved_pos3;
   struct collision434 saved_field_488;
   StandTile *saved_room_pointer;
+  coord3d saved_player_prop_pos;
+  StandTile *saved_player_prop_stan;
 
   coord3d saved_current_model_pos;
   coord3d saved_previous_model_pos;
@@ -282,6 +332,8 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
   saved_pos3 = g_CurrentPlayer->pos3;
   saved_field_488 = g_CurrentPlayer->field_488;
   saved_room_pointer = g_CurrentPlayer->room_pointer;
+  saved_player_prop_pos = g_CurrentPlayer->prop->pos;
+  saved_player_prop_stan = g_CurrentPlayer->prop->stan;
 
   saved_current_model_pos = g_CurrentPlayer->current_model_pos;
   saved_previous_model_pos = g_CurrentPlayer->previous_model_pos;
@@ -412,11 +464,18 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
     g_CurrentPlayer->field_488.pos = cam_pos;
     g_CurrentPlayer->field_488.pos3 = cam_pos;
 
+    // A few prop render paths read the player prop directly instead of using
+    // bondviewGetCurrentPlayersPosition. Make those paths observe this PIP's
+    // camera, then restore the real player prop after all PIPs are rendered.
+    g_CurrentPlayer->prop->pos = cam_pos;
+    g_CurrentPlayer->prop->stan = stan;
+
     sub_GAME_7F0876C4(&cam_pos, &cam_look, &cam_up);
 
     // 4. Render visual scene
     gdl = skyRender(gdl);
     bgRoomVisibilityRelated();
+    prepare_pip_props();
     gdl = bgLevelRender_practice(gdl);
     gdl = sub_GAME_7F049B58(gdl);
 #if defined(VERSION_EU)
@@ -473,6 +532,8 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
   g_CurrentPlayer->pos3 = saved_pos3;
   g_CurrentPlayer->field_488 = saved_field_488;
   g_CurrentPlayer->room_pointer = saved_room_pointer;
+  g_CurrentPlayer->prop->pos = saved_player_prop_pos;
+  g_CurrentPlayer->prop->stan = saved_player_prop_stan;
 
   g_CurrentPlayer->current_model_pos = saved_current_model_pos;
   g_CurrentPlayer->previous_model_pos = saved_previous_model_pos;

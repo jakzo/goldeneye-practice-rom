@@ -33,9 +33,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining State to Restore
 
-- Audio
-  - Prop sound effects and currently playing audio cues
-  - Not sure how realistic or necessary this is?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
 ## Key Learnings

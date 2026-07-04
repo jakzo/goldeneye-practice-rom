@@ -7,6 +7,7 @@
 #include "bondview.h"
 #include "lvl.h"
 #include "player_2.h"
+#include "practice/practice_grenade_cam.h"
 
 /* Define default values that are different between EU and the rest for initBONDdataforPlayer */
 #ifdef VERSION_EU
@@ -91,6 +92,12 @@ s32 getPlayerCount(void)
 {
     s32 count = 0;
     s32 i;
+#ifdef PRACTICE_ROM
+    if (practice_grenade_cam_is_rendering())
+    {
+        return 2;
+    }
+#endif
     for (i = 0; i < 4; i++) {
         if (g_playerPointers[i] != NULL) {
             count++;
@@ -628,6 +635,12 @@ void shuffle_player_ids(void) {
 s32 sub_GAME_7F09B4D8(s32 current_player_num) {
     s32 i;
     s32 position = 0;
+#ifdef PRACTICE_ROM
+    if (practice_grenade_cam_is_rendering())
+    {
+        return 1;
+    }
+#endif
 
     for (i = 0; i < 4; i++) {
         if (current_player_num != array_PLAYER_IDs[i])

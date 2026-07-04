@@ -75,6 +75,8 @@ When tasked with modification or analysis of gameplay, look here first:
 
 All new logic for the practice ROM is stored in the files under `src/practice`. If logic needs to be added to existing files, it should be added within an `#ifdef PRACTICE_ROM` block. If any lines are modified, the modified lines should exist in the `#ifdef` block with the original still existing, unmodified in the `#else` block. This is so that changes to the original code are easy to find and compare to original. `#include` directives do not need to be in `#ifdef` blocks.
 
+Do NOT put practice code inside `#ifdef NONMATCHING` blocks as this code will not be built (the assembly is used instead).
+
 Also make sure to not add large global variables, since they consume BSS size which takes the scarce memory away from the game and causes crashes.
 
 ---
