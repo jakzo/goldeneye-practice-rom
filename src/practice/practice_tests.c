@@ -32,6 +32,7 @@ extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 #define STATE_ARCHIVES_KEY 7
 #define STATE_TRAIN_HATCH 8
 #define STATE_CAVERNS_ATTACHMENTS 9
+#define STATE_CORRUPT_FREELIST 10
 // --- end test cases ---
 
 static s32 g_save_test_timer = -1;
@@ -50,6 +51,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_GRENADE:
   case FIRE_SLOWMO:
   case RNG_LOAD:
+  case STATE_CORRUPT_FREELIST:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
     return LEVELID_BUNKER1;
@@ -265,6 +267,24 @@ void practice_tests_tick() {
       save_game_state();
       emu_log("SAVE_DONE");
     } else if (after_frames(30)) {
+      emu_log("TRIGGER_LOAD");
+      load_game_state();
+      emu_log("LOAD_DONE");
+    } else if (after_frames(2)) {
+      emu_log("TEST_COMPLETE");
+    }
+    break;
+
+  case STATE_CORRUPT_FREELIST:
+    if (after_frames(30)) {
+      emu_log("TRIGGER_SAVE");
+      save_game_state();
+      emu_log("SAVE_DONE");
+    } else if (after_frames(2)) {
+      if (ptr_obj_pos_list_final_entry != NULL) {
+        ptr_obj_pos_list_final_entry->prev = (PropRecord *)0x801e1830;
+      }
+      emu_log("CORRUPT_FREELIST");
       emu_log("TRIGGER_LOAD");
       load_game_state();
       emu_log("LOAD_DONE");

@@ -121,8 +121,15 @@ typedef union {
 static void retain_prop_from_free_list(PropRecord *prop) {
   PropRecord *current = ptr_obj_pos_list_final_entry;
   PropRecord *previous = NULL;
+  s32 guard = 0;
 
-  while (current != NULL) {
+  while (current != NULL && guard++ < POS_DATA_ENTRY_LEN) {
+    if (current < pos_data_entry ||
+        current >= &pos_data_entry[POS_DATA_ENTRY_LEN]) {
+      ptr_obj_pos_list_final_entry = NULL;
+      return;
+    }
+
     if (current == prop) {
       if (previous == NULL) {
         ptr_obj_pos_list_final_entry = current->prev;
@@ -134,6 +141,10 @@ static void retain_prop_from_free_list(PropRecord *prop) {
     }
     previous = current;
     current = current->prev;
+  }
+
+  if (guard >= POS_DATA_ENTRY_LEN) {
+    ptr_obj_pos_list_final_entry = NULL;
   }
 }
 
