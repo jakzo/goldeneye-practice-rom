@@ -11,7 +11,7 @@ extern s32 g_CurrentStageToLoad;
 extern void store_osgetcount(void);
 
 /* Small header cache so we can validate without re-reading SRAM. */
-static SaveStateHeader g_SavedHeader;
+static SaveStateHeader g_SavedHeader __attribute__((aligned(16)));
 bool g_HasSavedState = FALSE;
 
 void init_save_state_system(void) {
@@ -36,6 +36,7 @@ void save_game_state(void) {
     header.version = SAVE_STATE_VERSION;
     header.level_id = g_CurrentStageToLoad;
     header.size = 0; /* patched below */
+    header.unused = 0;
     write_bytes(&stream.base, &header, sizeof(header));
   }
 

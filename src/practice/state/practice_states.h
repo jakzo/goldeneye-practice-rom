@@ -27,6 +27,7 @@ typedef struct {
   u16 version;
   u16 size;
   s32 level_id;
+  u32 unused;
 } SaveStateHeader;
 
 void save_global_state(StateStream *stream);
