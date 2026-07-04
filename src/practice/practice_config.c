@@ -654,7 +654,7 @@ static Gfx *render_setting(Gfx *gdl, const struct PracticeSetting *setting,
   return gdl;
 }
 
-static Gfx *render_settings(Gfx *gdl, const char *heading, u32 heading_color,
+static Gfx *render_settings(Gfx *gdl, char *heading, u32 heading_color,
                             const struct PracticeSetting *settings,
                             s32 setting_count, s32 stage_id, s32 *visible_index,
                             s32 *y) {

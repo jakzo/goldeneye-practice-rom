@@ -1,9 +1,8 @@
 #include "practice_states.h"
 #include "../practice_sram.h"
+#include "../practice_sfx.h"
 #include "player.h"
 #include "practice_ui.h"
-#include <bondconstants.h>
-#include <music.h>
 #include <snd.h>
 #include <ultra64.h>
 
@@ -62,7 +61,7 @@ void save_game_state(void) {
 
   g_HasSavedState = TRUE;
 
-  sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, 0);
+  practice_sfx_play_save_state_sound();
   practiceLogInfo("State saved (%dKB)", (g_SavedHeader.size + 1023) / 1024);
 }
 
@@ -122,6 +121,6 @@ void load_game_state(void) {
   // Re-baseline frame timer so time isn't dumped into the next deltaFrames
   store_osgetcount();
 
-  sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, CAMERA_BEEP1_SFX, 0);
+  practice_sfx_play_save_state_sound();
   practiceLogInfo("State loaded");
 }
