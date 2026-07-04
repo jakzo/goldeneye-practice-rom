@@ -2547,6 +2547,9 @@ s32 interface_menu05_fileselect(void)
     if (g_MenuTimer >= 1801) // NTSC (60fps): 30 seconds + 1 frame
 #endif
     {
+#ifdef PRACTICE_ROM
+        if (!practice.skip_logos_on_startup)
+#endif
         frontChangeMenu(MENU_LEGAL_SCREEN, TRUE);
     }
 }

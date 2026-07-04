@@ -1,6 +1,9 @@
 - Finish state loading
 - Lag monitor
+    - Global setting
+- Deterministic replay system
 - TLB improvements
 - Add more splits
 - Finish grenade cam
+    - Bug: explosion and smoke textures get messed up
 - Figure out frame delta determinism after load

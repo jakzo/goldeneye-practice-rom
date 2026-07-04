@@ -36,6 +36,11 @@ typedef struct {
 } SplitList;
 
 /**
+ * Return whether the level has splits for the currently selected difficulty.
+ */
+s32 has_splits(s32 level_id);
+
+/**
  * Initialize the splits system. Call once at startup.
  */
 void splits_init(void);

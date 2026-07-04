@@ -10,29 +10,26 @@ Above all, make sure you investigate thoroughly to fully understand where pieces
 
 ## Current Goal
 
-Props are fully implemented for save and restore, including adding props that
-the save contains but the current world does not, and removing props that exist
-but are absent from the save. The next goal is global state.
-
-### Next Goals
-
-- [done] Bond
-- [done] Props (PropRecord type-by-type, including add/remove on load)
-- [done] NPCs (position, animation, AI, etc.)
-- [current] Global state (mission timer, objectives, etc.)
+Everything should now be implemented. Right now bugs and missing bits are being found through manual testing and then added to the list below for fixing.
 
 ## Prompt
 
-Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and implement support for saving/loading state of the first item in "Remaining State to Restore". Make sure to:
+Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and fix save/load state support for the first item in "Remaining". Make sure to:
 
 - See `practice_states_*.c` files for the current state of the code
-- Remove the item from the "Remaining State to Restore" section once implemented
+- Remove the item from the "Remaining" section once fixed
 - No need to update the changelog or SAVE_STATE_VERSION
-- If you notice some other global state that is not supported yet, implement it immediately if simple, otherwise add it to the list of remaining state to restore to do it later
+- If you notice some other state that is not supported yet and should be, implement it immediately if simple, otherwise add it to the Remaining list to do it later
 - If there is a case that might need to be considered but you are not sure (for example, if a field is normally null or a pointer but theoretically the object pointed to could have been freed, though there is no evidence of this) then add an invariant assertion and emit an error log if it fails, no need to handle the case gracefully
+- Where practical, add a regression test or modify an existing one
+- After fixing the bug, ask the user to manually test to ensure the bug is fixed
+- If you notice any documentation (either in the `docs` files or in comments) is incorrect, tell the user about it and after they have confirmed that the fix worked, update the docs
 
-## Remaining State to Restore
+## Remaining
 
+- Exploded props become charred and deformed, but when saving these exploded props they are not restored on state load (neither the original nor exploded prop)
+- Some tinted glass in Control disappears from certain angles after loading it seems?
+- Crashes when loading state sometimes?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
 ## Key Learnings

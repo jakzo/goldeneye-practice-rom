@@ -1,6 +1,7 @@
 #include "practice/practice_config.h"
 #include "emu_log.h"
 #include "front.h"
+#include "practice_splits.h"
 #include "practice_sram.h"
 #include "practice_tests.h"
 #include <bondconstants.h>
@@ -36,7 +37,7 @@ struct PracticeConfig practice = {
 #define SETTINGS_LINE_HEIGHT 15
 #define SETTINGS_VIEW_TOP 135
 #define SETTINGS_BOTTOM_MARGIN 20
-#define SETTINGS_FOCUS_MARGIN SETTINGS_LINE_HEIGHT
+#define SETTINGS_FOCUS_MARGIN (SETTINGS_LINE_HEIGHT * 2)
 #define SETTINGS_HEADING_GAP 10
 #define SETTINGS_SCROLLBAR_X 45
 #define SETTINGS_SCROLLBAR_WIDTH 4
@@ -54,6 +55,10 @@ struct PracticeConfig practice = {
 #define TEXT_DISABLED_COLOR 0x000000cc
 #define TEXT_SELECTED_GLOW 0x999999FF
 #define FOCUSED_OPTION_BOX_COLOR 0xddbb33aa
+#define HEADING_BADGE_GAP 8
+#define HEADING_BADGE_PAD_X 2
+#define HEADING_BADGE_PAD_Y 0
+#define HEADING_BADGE_TEXT_MAX 32
 
 struct StoredPracticeConfig {
   u32 magic;
@@ -131,8 +136,6 @@ static const struct PracticeOption s_enabled_disabled[] = {
     {"Disabled", FALSE},
 };
 
-static s32 splits_apply(s32 stage_id) { return stage_id == LEVELID_RUNWAY; }
-
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
 
 static const char *level_name(s32 stage_id) {
@@ -175,20 +178,23 @@ static const struct PracticeSetting s_level_settings[] = {
     OPTIONS_SETTING("Gate intro cutscene", dam_gate_intro_enabled,
                     s_disabled_enabled, dam_apply),
     DYNAMIC_OPTIONS_SETTING("Boot into level", boot_level, boot_level_options),
-    OPTIONS_SETTING("Splits", splits_enabled, s_enabled_disabled, splits_apply),
-    OPTIONS_SETTING("Log on split", log_splits, s_disabled_enabled,
-                    splits_apply),
+    OPTIONS_SETTING("Splits", splits_enabled, s_enabled_disabled, has_splits),
 };
 
 static const struct PracticeSetting s_global_settings[] = {
+    OPTIONS_SETTING("Grenade cam", grenade_cam, s_disabled_enabled, NULL),
+    OPTIONS_SETTING("Log on split", log_splits, s_disabled_enabled, NULL),
     SLIDER_SETTING("Log message duration", log_message_duration, 0.1f, 20.0f,
                    0.1f),
     OPTIONS_SETTING("Skip intro cutscenes", disable_intro_cutscenes,
                     s_disabled_enabled, NULL),
+    OPTIONS_SETTING("On-screen timer", show_mission_timer, s_enabled_disabled,
+                    NULL),
+    OPTIONS_SETTING("Timer hundredths", show_hundredths_on_timer,
+                    s_enabled_disabled, NULL),
     OPTIONS_SETTING("Skip logos on startup", skip_logos_on_startup,
                     s_enabled_disabled, NULL),
     OPTIONS_SETTING("Hotkey trigger", left_trigger_hotkeys, s_left_right, NULL),
-    OPTIONS_SETTING("Grenade cam", grenade_cam, s_disabled_enabled, NULL),
 };
 
 #undef OPTIONS_SETTING
@@ -654,20 +660,71 @@ static Gfx *render_setting(Gfx *gdl, const struct PracticeSetting *setting,
   return gdl;
 }
 
+static Gfx *render_heading_badge(Gfx *gdl, s32 x, s32 y, const char *text,
+                                 u32 color) {
+  char text_with_newline[HEADING_BADGE_TEXT_MAX];
+  s32 text_length;
+  s32 text_width;
+  s32 text_height;
+  s32 text_x;
+  s32 text_y;
+  s32 box_left;
+  s32 box_top;
+  s32 box_right;
+  s32 box_bottom;
+
+  for (text_length = 0;
+       text_length < HEADING_BADGE_TEXT_MAX - 2 && text[text_length] != '\0';
+       text_length++) {
+    text_with_newline[text_length] = text[text_length];
+  }
+  text_with_newline[text_length] = '\n';
+  text_with_newline[text_length + 1] = '\0';
+
+  textMeasure(&text_height, &text_width, text_with_newline,
+              (struct fontchar *)ptrFontBankGothicChars,
+              (struct font *)ptrFontBankGothic, 0);
+
+  box_left = x + HEADING_BADGE_GAP;
+  box_top =
+      y + (SETTINGS_LINE_HEIGHT - text_height - HEADING_BADGE_PAD_Y * 2) / 2;
+  box_right = box_left + text_width + HEADING_BADGE_PAD_X * 2;
+  box_bottom = box_top + text_height + HEADING_BADGE_PAD_Y * 2 - 1;
+
+  gdl = microcode_constructor_related_to_menus(gdl, box_left, box_top,
+                                               box_right, box_top + 1, color);
+  gdl = microcode_constructor_related_to_menus(gdl, box_left, box_bottom - 1,
+                                               box_right, box_bottom, color);
+  gdl = microcode_constructor_related_to_menus(gdl, box_left, box_top,
+                                               box_left + 1, box_bottom, color);
+  gdl = microcode_constructor_related_to_menus(gdl, box_right - 1, box_top,
+                                               box_right, box_bottom, color);
+
+  text_x = box_left + HEADING_BADGE_PAD_X;
+  text_y = box_top + HEADING_BADGE_PAD_Y;
+  return textRender(gdl, &text_x, &text_y, (s8 *)text_with_newline,
+                    ptrFontBankGothicChars, ptrFontBankGothic, color, viGetX(),
+                    viGetY(), 0, 0);
+}
+
 static Gfx *render_settings(Gfx *gdl, char *heading, u32 heading_color,
                             const struct PracticeSetting *settings,
                             s32 setting_count, s32 stage_id, s32 *visible_index,
-                            s32 *y) {
+                            s32 *y, s32 show_splits_badge) {
   s32 i;
   u32 x = SETTINGS_X;
 
   if (line_is_below_view(*y)) {
     return gdl;
   }
-  // gdl = print_text(gdl, SETTINGS_X, *y, heading, heading_color);
-  gdl = textRenderGlow(gdl, &x, y, heading, ptrFontZurichBoldChars,
-                       ptrFontZurichBold, heading_color, 0xffffffff, viGetX(),
-                       viGetY(), 0, 0);
+  if (*y >= SETTINGS_VIEW_TOP) {
+    gdl = textRenderGlow(gdl, &x, y, heading, ptrFontZurichBoldChars,
+                         ptrFontZurichBold, heading_color, 0xffffffff, viGetX(),
+                         viGetY(), 0, 0);
+    if (show_splits_badge) {
+      gdl = render_heading_badge(gdl, x, *y, "has splits", 0xff0000cc);
+    }
+  }
   *y += SETTINGS_LINE_HEIGHT;
 
   for (i = 0; i < setting_count; i++) {
@@ -751,11 +808,11 @@ Gfx *practice_config_menu_render(Gfx *gdl, s32 stage_id) {
   if (level_count > 0) {
     gdl = render_settings(gdl, "LEVEL SETTINGS:", 0x003300FF, s_level_settings,
                           ARRAY_COUNT(s_level_settings), stage_id,
-                          &visible_index, &y);
+                          &visible_index, &y, has_splits(stage_id));
     y += SETTINGS_HEADING_GAP;
   }
 
   return render_settings(gdl, "GLOBAL SETTINGS:", 0x330033FF, s_global_settings,
                          ARRAY_COUNT(s_global_settings), stage_id,
-                         &visible_index, &y);
+                         &visible_index, &y, FALSE);
 }

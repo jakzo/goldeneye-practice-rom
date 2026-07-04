@@ -123,6 +123,18 @@ static const SplitList g_SplitLists[] = {
     {-1, -1, NULL}, // sentinel
 };
 
+s32 has_splits(s32 level_id) {
+  s32 i;
+
+  for (i = 0; g_SplitLists[i].splits != NULL; i++) {
+    if (g_SplitLists[i].level_id == level_id &&
+        g_SplitLists[i].difficulty == selected_difficulty) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -288,7 +300,7 @@ void trigger_split() {
     s_SplitCumulativeTimes[s_CurrentSplitIndex] = mission_timer;
   }
 
-  if (practice.log_splits) {
+  {
     char time_buf[16];
     char delta_buf[16];
     s32 delta = mission_timer - last_split_time;
@@ -296,8 +308,15 @@ void trigger_split() {
 
     format_time(mission_timer, time_buf, TRUE);
     format_time(delta, delta_buf, FALSE);
-    practiceLogInfo("SPLIT %d/%d: %s - %s (delta: %s)", s_CurrentSplitIndex + 1,
-                    s_TotalSplits, split->name, time_buf, delta_buf);
+    if (practice.log_splits) {
+      practiceLogInfo("SPLIT %d/%d: %s - %s (delta: %s)",
+                      s_CurrentSplitIndex + 1, s_TotalSplits, split->name,
+                      time_buf, delta_buf);
+    } else {
+      practiceLogDebug("SPLIT %d/%d: %s - %s (delta: %s)",
+                       s_CurrentSplitIndex + 1, s_TotalSplits, split->name,
+                       time_buf, delta_buf);
+    }
   }
 
   s_CurrentSplitIndex++;
