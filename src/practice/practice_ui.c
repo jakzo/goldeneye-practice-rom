@@ -3,6 +3,7 @@
 #include "emu_log.h"
 #include "game/bg.h"
 #include "game/bondview.h"
+#include "game/lvl.h"
 #include "game/textrelated.h"
 #include "player.h"
 #include "practice_config.h"
@@ -10,6 +11,7 @@
 #include <bondconstants.h>
 #include <bondtypes.h>
 #include <fr.h>
+#include <math.h>
 #include <stdarg.h>
 #include <ultra64.h>
 
@@ -107,6 +109,8 @@ extern void *memcpy(void *dst, const void *src, size_t count);
 #define MARGIN_BOTTOM 9
 #define MARGIN_RIGHT 5
 #define LINE_SPACING 0
+#define GAME_UNITS_PER_METER 100.0f
+#define GAME_TICKS_PER_SECOND 60.0f
 
 typedef enum {
   LOG_LEVEL_DEBUG,
@@ -387,6 +391,25 @@ static Gfx *render_gate_guard_pill(Gfx *gdl) {
   }
 }
 
+static f32 player_speed_metres_per_second(void) {
+  f32 delta_x;
+  f32 delta_z;
+  f32 distance;
+
+  if (g_CurrentPlayer == NULL || g_GlobalTimerDelta <= 0.0f) {
+    return 0.0f;
+  }
+
+  delta_x = g_CurrentPlayer->field_488.collision_position.x -
+            g_CurrentPlayer->bondprevpos.x;
+  delta_z = g_CurrentPlayer->field_488.collision_position.z -
+            g_CurrentPlayer->bondprevpos.z;
+  distance = sqrtf(delta_x * delta_x + delta_z * delta_z);
+
+  return distance * GAME_TICKS_PER_SECOND /
+         (g_GlobalTimerDelta * GAME_UNITS_PER_METER);
+}
+
 Gfx *practice_ui_render(Gfx *gdl) {
   s32 i;
   s32 current_y;
@@ -406,22 +429,21 @@ Gfx *practice_ui_render(Gfx *gdl) {
     struct fontchar *fontCharsZurich =
         (struct fontchar *)ptrFontZurichBoldChars;
     struct fontchar *charP = &fontCharsZurich['P'];
-    s32 p_x = MARGIN_RIGHT;
-    s32 p_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
+    s32 hud_x = MARGIN_RIGHT;
+    s32 hud_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
 #if DEV
     u32 p_color = 0xCC9900FF;
 #else
     u32 p_color = 0x00CC00FF;
 #endif
-    gdl = renderText(gdl, &p_x, &p_y, "P", (s32)fontCharsZurich,
+    gdl = renderText(gdl, &hud_x, &hud_y, "P", (s32)fontCharsZurich,
                      ptrFontZurichBold, p_color, viGetX(), viGetY());
+    hud_x += 8;
 
     // Render mission timer next to the "P" indicator
     if (practice.show_mission_timer) {
       char timer_buf[16];
-      // Position timer to the right of the "P" with a small gap
-      s32 timer_x = p_x + 8;
-      s32 timer_y = p_y;
+      s32 timer_x = hud_x;
       s32 missionTime = getMissiontimer();
       s32 minutes = missionTime / 60 / 60;
       s32 seconds = missionTime / 60 % 60;
@@ -429,9 +451,21 @@ Gfx *practice_ui_render(Gfx *gdl) {
       s32 color = is_timer_active ? 0xFFFFFFFF : 0xA0A0A0FF;
 
       sprintf(timer_buf, "%d:%02d.%02d", minutes, seconds, hundredths);
-      gdl =
-          renderText(gdl, &timer_x, &timer_y, timer_buf, ptrFontBankGothicChars,
-                     ptrFontBankGothic, color, viGetX(), viGetY());
+      gdl = renderText(gdl, &timer_x, &hud_y, timer_buf, ptrFontBankGothicChars,
+                       ptrFontBankGothic, color, viGetX(), viGetY());
+
+      hud_x += 58;
+    }
+
+    if (practice.speedometer_enabled) {
+      char speed_buf[16];
+      s32 speedometer_x = hud_x;
+
+      sprintf(speed_buf, "%.2fm/s", player_speed_metres_per_second());
+      gdl = renderText(gdl, &speedometer_x, &hud_y, speed_buf,
+                       ptrFontBankGothicChars, ptrFontBankGothic, 0xFFFFFFFF,
+                       viGetX(), viGetY());
+      hud_x += 32;
     }
   }
 

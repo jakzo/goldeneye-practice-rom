@@ -27,6 +27,7 @@ struct PracticeConfig practice = {
     TRUE,          // gate_guard_status
     FALSE,         // dam_gate_intro_enabled
     FALSE,         // log_splits
+    FALSE,         // speedometer_enabled
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -192,6 +193,8 @@ static const struct PracticeSetting s_global_settings[] = {
                     NULL),
     OPTIONS_SETTING("Timer hundredths", show_hundredths_on_timer,
                     s_enabled_disabled, NULL),
+    OPTIONS_SETTING("Speedometer", speedometer_enabled, s_disabled_enabled,
+                    NULL),
     OPTIONS_SETTING("Skip logos on startup", skip_logos_on_startup,
                     s_enabled_disabled, NULL),
     OPTIONS_SETTING("Hotkey trigger", left_trigger_hotkeys, s_left_right, NULL),
