@@ -61,9 +61,9 @@ void updateFrameCounters(s32 deltaFrames)
     // the frame delta captured when the pause began instead of the wall-clock
     // delta (which would otherwise dump all the paused time into one large
     // catch-up frame)
-    if (!g_IsTimePaused && g_PrePauseDeltaFrames >= 0 && deltaFrames > 0) {
-        deltaFrames = g_PrePauseDeltaFrames;
-        g_PrePauseDeltaFrames = -1;
+    if (!g_IsTimePaused && g_ForcedDeltaFrames >= 0 && deltaFrames > 0) {
+        deltaFrames = g_ForcedDeltaFrames;
+        g_ForcedDeltaFrames = -1;
     }
     g_TimeScaleDeltaFrames = deltaFrames;
     restore_rng_if_frame_dropped();

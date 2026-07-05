@@ -391,7 +391,7 @@ void save_global_state(StateStream *stream) {
 #endif
   write_bytes(stream, &g_randomSeed, sizeof(g_randomSeed));
   write_bytes(stream, &g_chrObjRandomSeed, sizeof(g_chrObjRandomSeed));
-  write_u32(stream, g_PrePauseDeltaFrames);
+  write_u32(stream, g_ForcedDeltaFrames);
   write_u32(stream, get_cur_playernum());
 
   // Alarm
@@ -485,7 +485,7 @@ void load_global_state_pre_props(StateStream *stream) {
   read_bytes(stream, &saved_random_seed, sizeof(saved_random_seed));
   read_bytes(stream, &saved_chr_obj_random_seed,
              sizeof(saved_chr_obj_random_seed));
-  g_PrePauseDeltaFrames = read_u32(stream);
+  g_ForcedDeltaFrames = read_u32(stream);
   saved_current_player_index = read_u32(stream);
 
   // Alarm

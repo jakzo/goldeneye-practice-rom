@@ -16,7 +16,7 @@ s32 g_IsTimePaused = FALSE;
 s32 g_TimeScaleDeltaFrames = 1;
 u64 g_FrozenFrameRngSeed = 0;
 s32 g_PrevFrameTimeScaleDropped = FALSE;
-s32 g_PrePauseDeltaFrames = -1;
+s32 g_ForcedDeltaFrames = -1;
 
 void set_final_time_scale(f32 scale) {
   g_TimeScaleFinal = scale;
@@ -33,7 +33,7 @@ void set_time_scale(f32 scale) {
 
 void pause() {
   if (!g_IsTimePaused) {
-    g_PrePauseDeltaFrames = speedgraphframes;
+    g_ForcedDeltaFrames = speedgraphframes;
     practice_sfx_pause();
   }
   g_IsTimePaused = TRUE;
