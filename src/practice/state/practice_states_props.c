@@ -989,14 +989,14 @@ static bool find_model_node_index(ModelNode *node, ModelNode *target,
 static s16 get_model_node_index(ModelFileHeader *header, ModelNode *target) {
   s16 result = -1;
   s32 nextIndex = 0;
-  s32 limit;
 
   if (header == NULL || header->RootNode == NULL || target == NULL) {
     return -1;
   }
 
-  limit = header->numRecords > 0 ? header->numRecords : 0x7fff;
-  find_model_node_index(header->RootNode, target, &nextIndex, limit, &result);
+  // numRecords counts runtime-data records, not every structural ModelNode, so
+  // it cannot bound this traversal. Use the s16 index range as a cycle guard.
+  find_model_node_index(header->RootNode, target, &nextIndex, 0x7fff, &result);
   return result;
 }
 
@@ -1023,15 +1023,13 @@ static ModelNode *find_model_node_by_index(ModelNode *node, s16 targetIndex,
 static ModelNode *get_model_node_by_index(ModelFileHeader *header,
                                           s16 targetIndex) {
   s32 nextIndex = 0;
-  s32 limit;
 
   if (header == NULL || header->RootNode == NULL || targetIndex < 0) {
     return NULL;
   }
 
-  limit = header->numRecords > 0 ? header->numRecords : 0x7fff;
   return find_model_node_by_index(header->RootNode, targetIndex, &nextIndex,
-                                  limit);
+                                  0x7fff);
 }
 
 static void save_projectile(StateStream *stream, Projectile *proj) {
