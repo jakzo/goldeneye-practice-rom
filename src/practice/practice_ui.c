@@ -5,6 +5,7 @@
 #include "game/bondview.h"
 #include "game/lvl.h"
 #include "game/textrelated.h"
+#include "game/unk_0C0A70.h"
 #include "player.h"
 #include "practice_config.h"
 #include <PR/os.h>
@@ -410,6 +411,28 @@ static f32 player_speed_metres_per_second(void) {
          (g_GlobalTimerDelta * GAME_UNITS_PER_METER);
 }
 
+static f32 strafe_100m_lag_time_added(s32 dropped_frames) {
+  f32 d;
+  f32 added_seconds;
+
+  if (dropped_frames <= 0) {
+    return 0.0f;
+  }
+
+  d = (f32)dropped_frames;
+
+  /*
+   * Fourth-order least-squares fit of the TEST_MOVE_SPEED strafe medians in
+   * docs/test_strafe_speed_results.html, expressed as added 100m time vs
+   * dropped frames and forced through 0.
+   */
+  added_seconds =
+      d * (0.247800872f +
+           d * (0.017377249f + d * (-0.001018621f + d * 0.000013940f)));
+
+  return added_seconds < 0.0f ? 0.0f : added_seconds;
+}
+
 Gfx *practice_ui_render(Gfx *gdl) {
   s32 i;
   s32 current_y;
@@ -465,7 +488,23 @@ Gfx *practice_ui_render(Gfx *gdl) {
       gdl = renderText(gdl, &speedometer_x, &hud_y, speed_buf,
                        ptrFontBankGothicChars, ptrFontBankGothic, 0xFFFFFFFF,
                        viGetX(), viGetY());
-      hud_x += 32;
+      hud_x += 60;
+    }
+
+    if (practice.lag_estimate_enabled) {
+      char lag_buf[16];
+      s32 lag_x = hud_x;
+      s32 dropped_frames = speedgraphframes - 1;
+
+      if (dropped_frames < 0) {
+        dropped_frames = 0;
+      }
+
+      sprintf(lag_buf, "+%.1f (%d)", strafe_100m_lag_time_added(dropped_frames),
+              dropped_frames);
+      gdl = renderText(gdl, &lag_x, &hud_y, lag_buf, ptrFontBankGothicChars,
+                       ptrFontBankGothic, 0xFFFFFFFF, viGetX(), viGetY());
+      hud_x += 54;
     }
   }
 

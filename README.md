@@ -24,6 +24,11 @@ This ROM provides tools for practicing speedruns of Goldeneye 007 on the Nintend
     - During gameplay press `L + D-Right` to increase game speed by 10%
 - **Speedometer**
     - Displays Bond's current horizontal movement speed (moving up and down does not affect the displayed speed)
+- **Lag estimate**
+    - Displays the amount of lag and estimated effect
+    - The format looks like `+0.6 (2)` where:
+        - `(2)` means there were 2 dropped frames before the current one was rendered
+        - `+0.6` means that if you were strafe-running at max speed for 100 meters (slightly less than the length of the start of the runway to the plane in Runway) you would have taken 0.6 seconds longer than if there were 0 dropped frames
 - **Skip level intro cutscenes**
     - Starting a level goes straight into it, rather than playing the intro cutscene
 - **Skips legal and logo screens on game startup**

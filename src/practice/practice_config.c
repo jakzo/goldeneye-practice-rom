@@ -28,6 +28,7 @@ struct PracticeConfig practice = {
     FALSE,         // dam_gate_intro_enabled
     FALSE,         // log_splits
     FALSE,         // speedometer_enabled
+    TRUE,          // lag_estimate_enabled
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -193,6 +194,8 @@ static const struct PracticeSetting s_global_settings[] = {
                     NULL),
     OPTIONS_SETTING("Timer hundredths", show_hundredths_on_timer,
                     s_enabled_disabled, NULL),
+    OPTIONS_SETTING("Lag estimate", lag_estimate_enabled, s_enabled_disabled,
+                    NULL),
     OPTIONS_SETTING("Speedometer", speedometer_enabled, s_disabled_enabled,
                     NULL),
     OPTIONS_SETTING("Skip logos on startup", skip_logos_on_startup,

@@ -41,6 +41,7 @@ struct PracticeConfig {
   s32 dam_gate_intro_enabled;
   s32 log_splits;
   s32 speedometer_enabled;
+  s32 lag_estimate_enabled;
 };
 
 extern struct PracticeConfig practice;

@@ -3,6 +3,7 @@
 #include <PR/ultratypes.h>
 
 extern void *memcpy(void *, const void *, size_t);
+extern int memcmp(const void *, const void *, size_t);
 #ifdef __GNUC__
 extern char *strchr(const char *, int);
 extern size_t strlen(const char *);

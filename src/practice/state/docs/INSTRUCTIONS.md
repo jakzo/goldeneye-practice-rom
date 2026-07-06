@@ -29,6 +29,7 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and fix 
 
 ## Remaining
 
+- After dying the game shows a replay of your death and turns the sfx volume down, but when loading state back to alive the volume stays lowered
 - Lights in the roof of the Bunker control room can be shot out, but they do not turn back on after restoring state
   - The glass shards that come out after shooting are not affected by save state either
 - Saving object deformation vertices can cost 20kb+, can we save the seeds used to deform them instead?

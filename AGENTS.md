@@ -81,6 +81,12 @@ Also make sure to not add large global variables, since they consume BSS size wh
 
 ---
 
+## Building Features
+
+In general all features should have a corresponding setting, or multiple if the feature has parameters that can be tweaked. Add the option to `practice_config.c` and to the menu in `practice_ui.c`. Features should also be briefly documented in the `README.md`. Do not add to the `CHANGELOG.md` unless explicitly asked (this will happen right before release of the next version).
+
+---
+
 ## Assembly & C Integration (GLOBAL_ASM)
 
 The codebase heavily utilizes standard decompilation patterns to bridge C with yet-unmatched assembly code.
