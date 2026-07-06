@@ -58,5 +58,6 @@ BG_SEG_FILES = \
 	$(BUILD_DIR)/$(OBSEG_DIR)/bg/bg_ear_all_p.seg \
 	$(BUILD_DIR)/$(OBSEG_DIR)/bg/bg_len_all_p.seg \
 	$(BUILD_DIR)/$(OBSEG_DIR)/bg/bg_pam_all_p.seg \
-	$(BUILD_DIR)/$(OBSEG_DIR)/bg/bg_wax_all_p.seg 
+	$(BUILD_DIR)/$(OBSEG_DIR)/bg/bg_wax_all_p.seg \
+	$(BUILD_DIR)/$(OBSEG_DIR)/bg/bg_test_all_p.seg
 	

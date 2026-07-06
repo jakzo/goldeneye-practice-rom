@@ -109,6 +109,9 @@ struct memallocstring memallocstringtable[] = {
 { LEVELID_EGYPT,        "-ml0 -me0 -mgfx100 -mvtx50 -mt600 -ma250"},
 { LEVELID_CITADEL,      "-ml0 -me0 -mgfx100 -mvtx50 -mt650 -ma150"},
 { LEVELID_CUBA,         "-ml0 -me0 -mgfx100 -mvtx50 -mt300 -ma300"},
+#ifdef PRACTICE_ROM
+{ LEVELID_TEST,         "-ml0 -me0 -mgfx20  -mvtx10 -mt100 -ma100"},
+#endif
 { LEVELID_TITLE,        "-ml0 -me0 -mgfx80 -mvtx20 -mt646 -ma001"},
 { 0x5B,                 "-ml0 -me0 -mgfx60 -mvtx20 -mt500 -ma001"},
 { 0x63,                 "-ml0 -me0 -mgfx60 -mvtx20 -mt500 -ma001"},

@@ -1,0 +1,2308 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GoldenEye TEST_MOVE_SPEED results</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #111722;
+      color: #e8eef7;
+    }
+
+    body {
+      margin: 0;
+      padding: 32px;
+    }
+
+    main {
+      width: min(1200px, 100%);
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.5rem, 3vw, 2.25rem);
+    }
+
+    .subtitle {
+      margin: 8px 0 24px;
+      color: #9facc0;
+    }
+
+    .chart-wrapper {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #344055;
+      border-radius: 12px;
+      background: #192231;
+      box-shadow: 0 16px 48px rgb(0 0 0 / 25%);
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+      touch-action: none;
+    }
+
+    .grid {
+      stroke: #344055;
+      stroke-width: 1;
+    }
+
+    .axis {
+      stroke: #9facc0;
+      stroke-width: 1.5;
+    }
+
+    .tick-label,
+    .axis-label {
+      fill: #bdc8d8;
+      font-size: 14px;
+    }
+
+    .axis-label {
+      font-size: 17px;
+      font-weight: 600;
+    }
+
+    .result-line {
+      fill: none;
+      stroke: #61b7ff;
+      stroke-width: 3;
+      stroke-linejoin: round;
+      stroke-linecap: round;
+    }
+
+    .point {
+      fill: #61b7ff;
+      stroke: #eef7ff;
+      stroke-width: 1.5;
+      cursor: crosshair;
+      transition: r 120ms ease, fill 120ms ease;
+    }
+
+    .point:hover,
+    .point:focus {
+      r: 8px;
+      fill: #ffcb6b;
+      outline: none;
+    }
+
+    .point.outlier {
+      fill: #ff7272;
+    }
+
+    .tooltip {
+      position: absolute;
+      z-index: 2;
+      min-width: 270px;
+      max-width: min(390px, calc(100% - 32px));
+      padding: 12px 14px;
+      border: 1px solid #576984;
+      border-radius: 8px;
+      background: rgb(12 18 28 / 96%);
+      box-shadow: 0 8px 30px rgb(0 0 0 / 45%);
+      pointer-events: none;
+      opacity: 0;
+      transform: translate(12px, 12px);
+      transition: opacity 100ms ease;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .tooltip.visible {
+      opacity: 1;
+    }
+
+    .tooltip strong {
+      display: block;
+      margin-bottom: 4px;
+      color: #fff;
+      font-size: 15px;
+    }
+
+    .tooltip .mix {
+      margin-bottom: 6px;
+      color: #ffcb6b;
+    }
+
+    .tooltip .summary {
+      margin-bottom: 8px;
+      color: #ffcb6b;
+    }
+
+    .tooltip .sample {
+      padding-top: 8px;
+      border-top: 1px solid #344055;
+    }
+
+    .tooltip .sample + .sample {
+      margin-top: 8px;
+    }
+
+    .tooltip .sample strong {
+      font-size: 14px;
+    }
+
+    .tooltip dl {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 2px 12px;
+      margin: 0;
+    }
+
+    .tooltip dt {
+      color: #9facc0;
+    }
+
+    .tooltip dd {
+      margin: 0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .legend {
+      margin: 14px 4px 0;
+      color: #9facc0;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>GoldenEye TEST_MOVE_SPEED results</h1>
+    <p class="subtitle">Completion time by effective delta frames — dots are individual samples and the line follows their median.</p>
+
+    <div class="chart-wrapper" id="chart-wrapper">
+      <svg id="chart" viewBox="0 0 1200 720" role="img"
+           aria-label="Line graph of completion time in seconds against effective delta frames">
+      </svg>
+      <div class="tooltip" id="tooltip" role="status" aria-live="polite"></div>
+    </div>
+  </main>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+    const results = Array.from(
+      document.getElementById("stdout")
+        .textContent
+        .matchAll(/TEST_MOVE_SPEED_CASE (\d+) \(deltaFrames = ([\d.]+)% @ (\d+) or ([\d.]+)% @ (\d+)\)\n(?:.|\n)+?DISTANCE_REACHED x=([\d.-]+) z=([\d.-]+) in ([\d.]+)s \((\d+) ticks \+ ([\d.]+) extra distance\)/g)
+        .map(match => ({
+          case: +(match[1]),
+          deltaFrames: (+(match[3]) * +(match[2]) + +(match[5]) * +(match[4])) / 100,
+          mix: `${match[2]}% @ ${match[3]} or ${match[4]}% @ ${match[5]}`,
+          x: +(match[6]),
+          z: +(match[7]),
+          seconds: +(match[8]),
+          ticks: +(match[9]),
+          extra: +(match[10])
+        }))
+    );
+
+    const groupsByDeltaFrames = new Map();
+    for (const result of results) {
+      // Use a stable decimal key so harmless floating-point noise does not
+      // split samples that have the same effective delta-frame value.
+      const key = result.deltaFrames.toFixed(6);
+      if (!groupsByDeltaFrames.has(key)) {
+        groupsByDeltaFrames.set(key, {
+          deltaFrames: result.deltaFrames,
+          samples: []
+        });
+      }
+      groupsByDeltaFrames.get(key).samples.push(result);
+    }
+
+    const median = values => {
+      const sorted = [...values].sort((a, b) => a - b);
+      const middle = Math.floor(sorted.length / 2);
+      return sorted.length % 2
+        ? sorted[middle]
+        : (sorted[middle - 1] + sorted[middle]) / 2;
+    };
+
+    const groups = Array.from(groupsByDeltaFrames.values())
+      .sort((a, b) => a.deltaFrames - b.deltaFrames)
+      .map(group => ({
+        ...group,
+        medianSeconds: median(group.samples.map(sample => sample.seconds))
+      }));
+
+    const svg = document.querySelector("#chart");
+    const wrapper = document.querySelector("#chart-wrapper");
+    const tooltip = document.querySelector("#tooltip");
+    const ns = "http://www.w3.org/2000/svg";
+    const bounds = {left: 92, right: 35, top: 35, bottom: 82};
+    const width = 1200;
+    const height = 720;
+    const plotWidth = width - bounds.left - bounds.right;
+    const plotHeight = height - bounds.top - bounds.bottom;
+    const xMin = 1;
+    const xMax = 30.5;
+    const yMin = 0;
+    const yMax = 70.5;
+
+    const sx = value => bounds.left + (value - xMin) / (xMax - xMin) * plotWidth;
+    const sy = value => bounds.top + (yMax - value) / (yMax - yMin) * plotHeight;
+
+    function add(tag, attributes = {}, text = "") {
+      const node = document.createElementNS(ns, tag);
+      for (const [name, value] of Object.entries(attributes)) {
+        node.setAttribute(name, value);
+      }
+      if (text) node.textContent = text;
+      svg.append(node);
+      return node;
+    }
+
+    for (let value = 0; value <= 70; value += 2) {
+      const y = sy(value);
+      add("line", {x1: bounds.left, y1: y, x2: width - bounds.right, y2: y, class: "grid"});
+      add("text", {x: bounds.left - 14, y: y + 5, "text-anchor": "end", class: "tick-label"},
+          value.toFixed(1));
+    }
+
+    for (let value = 1; value <= 30; value++) {
+      const x = sx(value);
+      add("line", {x1: x, y1: bounds.top, x2: x, y2: height - bounds.bottom, class: "grid"});
+      add("text", {x, y: height - bounds.bottom + 27, "text-anchor": "middle", class: "tick-label"}, value);
+    }
+
+    add("line", {
+      x1: bounds.left, y1: height - bounds.bottom,
+      x2: width - bounds.right, y2: height - bounds.bottom, class: "axis"
+    });
+    add("line", {
+      x1: bounds.left, y1: bounds.top,
+      x2: bounds.left, y2: height - bounds.bottom, class: "axis"
+    });
+    add("text", {
+      x: bounds.left + plotWidth / 2, y: height - 22,
+      "text-anchor": "middle", class: "axis-label"
+    }, "Effective delta frames");
+    add("text", {
+      x: 24, y: bounds.top + plotHeight / 2,
+      "text-anchor": "middle", class: "axis-label",
+      transform: `rotate(-90 24 ${bounds.top + plotHeight / 2})`
+    }, "Time (seconds)");
+
+    add("polyline", {
+      points: groups
+        .map(group => `${sx(group.deltaFrames)},${sy(group.medianSeconds)}`)
+        .join(" "),
+      class: "result-line"
+    });
+
+    function sampleHtml(result) {
+      return `
+        <div class="sample">
+        <strong>TEST_MOVE_SPEED_CASE ${result.case}</strong>
+        <div class="mix">deltaFrames = ${result.mix}</div>
+        <dl>
+          <dt>Time</dt><dd>${result.seconds.toFixed(2)} s</dd>
+          <dt>Ticks</dt><dd>${result.ticks}</dd>
+          <dt>Position</dt><dd>x=${result.x.toFixed(1)}, z=${result.z.toFixed(1)}</dd>
+          <dt>Extra distance</dt><dd>${result.extra.toFixed(1)}</dd>
+        </dl>
+        </div>`;
+    }
+
+    function tooltipHtml(group) {
+      const sampleLabel = group.samples.length === 1 ? "sample" : "samples";
+      return `
+        <strong>Effective delta frames: ${group.deltaFrames.toFixed(2)}</strong>
+        <div class="summary">
+          ${group.samples.length} ${sampleLabel} · median ${group.medianSeconds.toFixed(2)} s
+        </div>
+        ${group.samples.map(sampleHtml).join("")}`;
+    }
+
+    function showTooltip(event, group) {
+      tooltip.innerHTML = tooltipHtml(group);
+      tooltip.classList.add("visible");
+
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const sourceRect = event.currentTarget.getBoundingClientRect();
+      const pointX = sourceRect.left + sourceRect.width / 2 - wrapperRect.left;
+      const pointY = sourceRect.top + sourceRect.height / 2 - wrapperRect.top;
+      const tooltipWidth = tooltip.offsetWidth;
+      const tooltipHeight = tooltip.offsetHeight;
+      const left = Math.min(pointX + 12, wrapperRect.width - tooltipWidth - 12);
+      const top = Math.min(pointY + 12, wrapperRect.height - tooltipHeight - 12);
+
+      tooltip.style.left = `${Math.max(8, left)}px`;
+      tooltip.style.top = `${Math.max(8, top)}px`;
+    }
+
+    function hideTooltip() {
+      tooltip.classList.remove("visible");
+    }
+
+    for (const group of groups) {
+      for (const result of group.samples) {
+        const point = add("circle", {
+          cx: sx(result.deltaFrames),
+          cy: sy(result.seconds),
+          r: 5.5,
+          class: "point",
+          tabindex: 0,
+          role: "button",
+          "aria-label": `${group.samples.length} samples at ${result.deltaFrames.toFixed(2)} effective delta frames; median ${group.medianSeconds.toFixed(2)} seconds`
+        });
+        point.addEventListener("pointerenter", event => showTooltip(event, group));
+        point.addEventListener("pointermove", event => showTooltip(event, group));
+        point.addEventListener("pointerleave", hideTooltip);
+        point.addEventListener("focus", event => showTooltip(event, group));
+        point.addEventListener("blur", hideTooltip);
+      }
+    }
+  });
+  </script>
+  <div id="stdout" style="display: none;">
+=== building test ROM ===
+
+=== TEST_MOVE_SPEED: patching ===
+Runtime config patched: test_case=11, boot_level=-1
+=== TEST_MOVE_SPEED: running ===
+OpenGL Version: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2, GLSL: 4.50
+OpenGL: Failed to load librashader: shaders will be disabled
+Loaded ge007.u
+OpenGL Version: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2, GLSL: 4.50
+OpenGL: Failed to load librashader: shaders will be disabled
+Vulkan Enabled: using paraLLEl-RDP
+TEST_STARTED
+[WARN]: Stalled compile (compute, d4db6236f1bec5e8): thread 0 - 121376.083 us (mode: sync, success: yes).
+[WARN]: Stalled compile (compute, 235e4c3510098f6d): thread 0 - 7967.000 us (mode: sync, success: yes).
+[WARN]: Stalled compile (compute, 5e969bd158b09fb3): thread 0 - 15055.916 us (mode: sync, success: yes).
+[WARN]: Stalled compile (compute, 471d277cbebc0024): thread 0 - 7699.667 us (mode: sync, success: yes).
+State saved (8KB)
+TEST_MOVE_SPEED_CASE 0 (deltaFrames = 100% @ 18 or 0% @ 19)
+State loaded
+DISTANCE_REACHED x=-1.9 z=-10062.2 in 37.82s (2269 ticks + 62.2 extra distance)
+TEST_MOVE_SPEED_CASE 1 (deltaFrames = 40% @ 20 or 60% @ 21)
+State loaded
+DISTANCE_REACHED x=12.4 z=-10097.5 in 42.62s (2557 ticks + 97.5 extra distance)
+TEST_MOVE_SPEED_CASE 2 (deltaFrames = 90% @ 23 or 10% @ 24)
+State loaded
+DISTANCE_REACHED x=5.5 z=-10001.2 in 47.37s (2842 ticks + 1.2 extra distance)
+TEST_MOVE_SPEED_CASE 3 (deltaFrames = 30% @ 25 or 70% @ 26)
+State loaded
+DISTANCE_REACHED x=13.6 z=-10056.9 in 55.27s (3316 ticks + 56.9 extra distance)
+TEST_MOVE_SPEED_CASE 4 (deltaFrames = 80% @ 28 or 20% @ 29)
+State loaded
+DISTANCE_REACHED x=47.7 z=-10021.8 in 55.47s (3328 ticks + 21.9 extra distance)
+TEST_MOVE_SPEED_CASE 5 (deltaFrames = 30% @ 30 or 70% @ 31)
+State loaded
+DISTANCE_REACHED x=5.7 z=-10079.8 in 65.52s (3931 ticks + 79.8 extra distance)
+TEST_MOVE_SPEED_CASE 6 (deltaFrames = 70% @ 3 or 30% @ 4)
+State loaded
+DISTANCE_REACHED x=-2.0 z=-10025.7 in 17.13s (1028 ticks + 25.7 extra distance)
+TEST_MOVE_SPEED_CASE 7 (deltaFrames = 20% @ 5 or 80% @ 6)
+State loaded
+DISTANCE_REACHED x=4.1 z=-10036.0 in 18.88s (1133 ticks + 36.0 extra distance)
+TEST_MOVE_SPEED_CASE 8 (deltaFrames = 60% @ 8 or 40% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.1 z=-10000.4 in 20.87s (1252 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 9 (deltaFrames = 10% @ 10 or 90% @ 11)
+State loaded
+DISTANCE_REACHED x=0.8 z=-10009.8 in 24.73s (1484 ticks + 9.8 extra distance)
+TEST_MOVE_SPEED_CASE 10 (deltaFrames = 60% @ 13 or 40% @ 14)
+State loaded
+DISTANCE_REACHED x=6.3 z=-10023.1 in 27.05s (1623 ticks + 23.1 extra distance)
+TEST_MOVE_SPEED_CASE 11 (deltaFrames = 100% @ 16 or 0% @ 17)
+State loaded
+DISTANCE_REACHED x=3.8 z=-10023.4 in 33.62s (2017 ticks + 23.4 extra distance)
+TEST_MOVE_SPEED_CASE 12 (deltaFrames = 50% @ 18 or 50% @ 19)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10098.7 in 39.78s (2387 ticks + 98.7 extra distance)
+TEST_MOVE_SPEED_CASE 13 (deltaFrames = 90% @ 21 or 10% @ 22)
+State loaded
+DISTANCE_REACHED x=-5.3 z=-10033.0 in 46.08s (2765 ticks + 33.0 extra distance)
+TEST_MOVE_SPEED_CASE 14 (deltaFrames = 40% @ 23 or 60% @ 24)
+State loaded
+DISTANCE_REACHED x=-8.9 z=-10035.1 in 48.42s (2905 ticks + 35.1 extra distance)
+TEST_MOVE_SPEED_CASE 15 (deltaFrames = 90% @ 26 or 10% @ 27)
+State loaded
+DISTANCE_REACHED x=9.6 z=-10088.2 in 55.68s (3341 ticks + 88.2 extra distance)
+TEST_MOVE_SPEED_CASE 16 (deltaFrames = 30% @ 28 or 70% @ 29)
+State loaded
+=== building test ROM ===
+
+=== TEST_MOVE_SPEED: patching ===
+Runtime config patched: test_case=11, boot_level=-1
+=== TEST_MOVE_SPEED: running ===
+OpenGL Version: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2, GLSL: 4.50
+OpenGL: Failed to load librashader: shaders will be disabled
+Loaded ge007.u
+OpenGL Version: 4.5 (Core Profile) Mesa 25.2.8-0ubuntu0.24.04.2, GLSL: 4.50
+OpenGL: Failed to load librashader: shaders will be disabled
+Vulkan Enabled: using paraLLEl-RDP
+TEST_STARTED
+[WARN]: Stalled compile (compute, ff6863004fc9ee60): thread 0 - 6872.750 us (mode: sync, success: yes).
+[WARN]: Stalled compile (compute, d4db6236f1bec5e8): thread 0 - 122538.792 us (mode: sync, success: yes).
+[WARN]: Stalled compile (compute, 235e4c3510098f6d): thread 0 - 9429.958 us (mode: sync, success: yes).
+[WARN]: Stalled compile (compute, 5e969bd158b09fb3): thread 0 - 15396.792 us (mode: sync, success: yes).
+[WARN]: Stalled compile (compute, 471d277cbebc0024): thread 0 - 8109.334 us (mode: sync, success: yes).
+State saved (8KB)
+TEST_MOVE_SPEED_CASE 0 (deltaFrames = 100% @ 18 or 0% @ 19)
+State loaded
+DISTANCE_REACHED x=-1.9 z=-10062.2 in 37.82s (2269 ticks + 62.2 extra distance)
+TEST_MOVE_SPEED_CASE 1 (deltaFrames = 40% @ 20 or 60% @ 21)
+State loaded
+DISTANCE_REACHED x=12.4 z=-10097.5 in 42.62s (2557 ticks + 97.5 extra distance)
+TEST_MOVE_SPEED_CASE 2 (deltaFrames = 90% @ 23 or 10% @ 24)
+State loaded
+DISTANCE_REACHED x=5.5 z=-10001.2 in 47.37s (2842 ticks + 1.2 extra distance)
+TEST_MOVE_SPEED_CASE 3 (deltaFrames = 30% @ 25 or 70% @ 26)
+State loaded
+DISTANCE_REACHED x=13.6 z=-10056.9 in 55.27s (3316 ticks + 56.9 extra distance)
+TEST_MOVE_SPEED_CASE 4 (deltaFrames = 80% @ 28 or 20% @ 29)
+State loaded
+DISTANCE_REACHED x=47.7 z=-10021.8 in 55.47s (3328 ticks + 21.9 extra distance)
+TEST_MOVE_SPEED_CASE 5 (deltaFrames = 30% @ 30 or 70% @ 31)
+State loaded
+DISTANCE_REACHED x=5.7 z=-10079.8 in 65.52s (3931 ticks + 79.8 extra distance)
+TEST_MOVE_SPEED_CASE 6 (deltaFrames = 70% @ 3 or 30% @ 4)
+State loaded
+DISTANCE_REACHED x=-2.0 z=-10025.7 in 17.13s (1028 ticks + 25.7 extra distance)
+TEST_MOVE_SPEED_CASE 7 (deltaFrames = 20% @ 5 or 80% @ 6)
+State loaded
+DISTANCE_REACHED x=4.1 z=-10036.0 in 18.88s (1133 ticks + 36.0 extra distance)
+TEST_MOVE_SPEED_CASE 8 (deltaFrames = 60% @ 8 or 40% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.1 z=-10000.4 in 20.87s (1252 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 9 (deltaFrames = 10% @ 10 or 90% @ 11)
+State loaded
+DISTANCE_REACHED x=0.8 z=-10009.8 in 24.73s (1484 ticks + 9.8 extra distance)
+TEST_MOVE_SPEED_CASE 10 (deltaFrames = 60% @ 13 or 40% @ 14)
+State loaded
+DISTANCE_REACHED x=6.3 z=-10023.1 in 27.05s (1623 ticks + 23.1 extra distance)
+TEST_MOVE_SPEED_CASE 11 (deltaFrames = 100% @ 16 or 0% @ 17)
+State loaded
+DISTANCE_REACHED x=3.8 z=-10023.4 in 33.62s (2017 ticks + 23.4 extra distance)
+TEST_MOVE_SPEED_CASE 12 (deltaFrames = 50% @ 18 or 50% @ 19)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10098.7 in 39.78s (2387 ticks + 98.7 extra distance)
+TEST_MOVE_SPEED_CASE 13 (deltaFrames = 90% @ 21 or 10% @ 22)
+State loaded
+DISTANCE_REACHED x=-5.3 z=-10033.0 in 46.08s (2765 ticks + 33.0 extra distance)
+TEST_MOVE_SPEED_CASE 14 (deltaFrames = 40% @ 23 or 60% @ 24)
+State loaded
+DISTANCE_REACHED x=-8.9 z=-10035.1 in 48.42s (2905 ticks + 35.1 extra distance)
+TEST_MOVE_SPEED_CASE 15 (deltaFrames = 90% @ 26 or 10% @ 27)
+State loaded
+DISTANCE_REACHED x=9.6 z=-10088.2 in 55.68s (3341 ticks + 88.2 extra distance)
+TEST_MOVE_SPEED_CASE 16 (deltaFrames = 30% @ 28 or 70% @ 29)
+State loaded
+DISTANCE_REACHED x=4.8 z=-10036.0 in 62.20s (3732 ticks + 36.0 extra distance)
+TEST_MOVE_SPEED_CASE 17 (deltaFrames = 80% @ 1 or 20% @ 2)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10006.0 in 15.93s (956 ticks + 6.0 extra distance)
+TEST_MOVE_SPEED_CASE 18 (deltaFrames = 20% @ 3 or 80% @ 4)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10029.2 in 17.58s (1055 ticks + 29.2 extra distance)
+TEST_MOVE_SPEED_CASE 19 (deltaFrames = 70% @ 6 or 30% @ 7)
+State loaded
+DISTANCE_REACHED x=7.2 z=-10013.7 in 19.25s (1155 ticks + 13.7 extra distance)
+TEST_MOVE_SPEED_CASE 20 (deltaFrames = 20% @ 8 or 80% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.1 z=-10070.1 in 21.87s (1312 ticks + 70.1 extra distance)
+TEST_MOVE_SPEED_CASE 21 (deltaFrames = 60% @ 11 or 40% @ 12)
+State loaded
+DISTANCE_REACHED x=-3.4 z=-10024.1 in 25.50s (1530 ticks + 24.1 extra distance)
+TEST_MOVE_SPEED_CASE 22 (deltaFrames = 10% @ 13 or 90% @ 14)
+State loaded
+DISTANCE_REACHED x=-3.3 z=-10058.2 in 30.60s (1836 ticks + 58.2 extra distance)
+TEST_MOVE_SPEED_CASE 23 (deltaFrames = 50% @ 16 or 50% @ 17)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10037.2 in 34.95s (2097 ticks + 37.2 extra distance)
+TEST_MOVE_SPEED_CASE 24 (deltaFrames = 100% @ 19 or 0% @ 20)
+State loaded
+DISTANCE_REACHED x=-0.7 z=-10022.2 in 40.87s (2452 ticks + 22.2 extra distance)
+TEST_MOVE_SPEED_CASE 25 (deltaFrames = 50% @ 21 or 50% @ 22)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10042.0 in 44.83s (2690 ticks + 42.0 extra distance)
+TEST_MOVE_SPEED_CASE 26 (deltaFrames = 90% @ 24 or 10% @ 25)
+State loaded
+DISTANCE_REACHED x=-0.8 z=-10101.2 in 49.82s (2989 ticks + 101.2 extra distance)
+TEST_MOVE_SPEED_CASE 27 (deltaFrames = 40% @ 26 or 60% @ 27)
+State loaded
+DISTANCE_REACHED x=-5.5 z=-10035.4 in 55.47s (3328 ticks + 35.4 extra distance)
+TEST_MOVE_SPEED_CASE 28 (deltaFrames = 80% @ 29 or 20% @ 30)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10114.4 in 60.85s (3651 ticks + 114.4 extra distance)
+TEST_MOVE_SPEED_CASE 29 (deltaFrames = 30% @ 1 or 70% @ 2)
+State loaded
+DISTANCE_REACHED x=2.2 z=-10000.9 in 16.20s (972 ticks + 0.9 extra distance)
+TEST_MOVE_SPEED_CASE 30 (deltaFrames = 80% @ 4 or 20% @ 5)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10007.2 in 17.43s (1046 ticks + 7.2 extra distance)
+TEST_MOVE_SPEED_CASE 31 (deltaFrames = 20% @ 6 or 80% @ 7)
+State loaded
+DISTANCE_REACHED x=0.6 z=-10013.2 in 18.85s (1131 ticks + 13.2 extra distance)
+TEST_MOVE_SPEED_CASE 32 (deltaFrames = 70% @ 9 or 30% @ 10)
+State loaded
+DISTANCE_REACHED x=-10.9 z=-10014.2 in 21.72s (1303 ticks + 14.2 extra distance)
+TEST_MOVE_SPEED_CASE 33 (deltaFrames = 10% @ 11 or 90% @ 12)
+State loaded
+DISTANCE_REACHED x=-1.9 z=-10039.9 in 25.80s (1548 ticks + 39.9 extra distance)
+TEST_MOVE_SPEED_CASE 34 (deltaFrames = 60% @ 14 or 40% @ 15)
+State loaded
+DISTANCE_REACHED x=0.3 z=-10042.2 in 30.03s (1802 ticks + 42.2 extra distance)
+TEST_MOVE_SPEED_CASE 35 (deltaFrames = 10% @ 16 or 90% @ 17)
+State loaded
+DISTANCE_REACHED x=5.7 z=-10030.1 in 36.35s (2181 ticks + 30.1 extra distance)
+TEST_MOVE_SPEED_CASE 36 (deltaFrames = 50% @ 19 or 50% @ 20)
+State loaded
+DISTANCE_REACHED x=7.1 z=-10051.8 in 40.67s (2440 ticks + 51.8 extra distance)
+TEST_MOVE_SPEED_CASE 37 (deltaFrames = 100% @ 22 or 0% @ 23)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10069.5 in 46.95s (2817 ticks + 69.5 extra distance)
+TEST_MOVE_SPEED_CASE 38 (deltaFrames = 40% @ 24 or 60% @ 25)
+State loaded
+DISTANCE_REACHED x=-3.3 z=-10077.3 in 52.10s (3126 ticks + 77.3 extra distance)
+TEST_MOVE_SPEED_CASE 39 (deltaFrames = 90% @ 27 or 10% @ 28)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10057.1 in 58.73s (3524 ticks + 57.1 extra distance)
+TEST_MOVE_SPEED_CASE 40 (deltaFrames = 40% @ 29 or 60% @ 30)
+State loaded
+DISTANCE_REACHED x=3.4 z=-10109.4 in 63.65s (3819 ticks + 109.4 extra distance)
+TEST_MOVE_SPEED_CASE 41 (deltaFrames = 80% @ 2 or 20% @ 3)
+State loaded
+DISTANCE_REACHED x=-0.4 z=-10020.4 in 16.57s (994 ticks + 20.4 extra distance)
+TEST_MOVE_SPEED_CASE 42 (deltaFrames = 30% @ 4 or 70% @ 5)
+State loaded
+DISTANCE_REACHED x=-1.6 z=-10004.9 in 17.42s (1045 ticks + 4.9 extra distance)
+TEST_MOVE_SPEED_CASE 43 (deltaFrames = 70% @ 7 or 30% @ 8)
+State loaded
+DISTANCE_REACHED x=2.1 z=-10017.7 in 20.70s (1242 ticks + 17.7 extra distance)
+TEST_MOVE_SPEED_CASE 44 (deltaFrames = 20% @ 9 or 80% @ 10)
+State loaded
+DISTANCE_REACHED x=-1.4 z=-10058.1 in 22.72s (1363 ticks + 58.1 extra distance)
+TEST_MOVE_SPEED_CASE 45 (deltaFrames = 70% @ 12 or 30% @ 13)
+State loaded
+DISTANCE_REACHED x=-6.6 z=-10071.5 in 26.88s (1613 ticks + 71.5 extra distance)
+TEST_MOVE_SPEED_CASE 46 (deltaFrames = 10% @ 14 or 90% @ 15)
+State loaded
+DISTANCE_REACHED x=5.1 z=-10111.6 in 31.32s (1879 ticks + 111.6 extra distance)
+TEST_MOVE_SPEED_CASE 47 (deltaFrames = 60% @ 17 or 40% @ 18)
+State loaded
+DISTANCE_REACHED x=9.3 z=-10024.1 in 36.57s (2194 ticks + 24.1 extra distance)
+TEST_MOVE_SPEED_CASE 48 (deltaFrames = 100% @ 20 or 0% @ 21)
+State loaded
+DISTANCE_REACHED x=8.5 z=-10042.6 in 44.02s (2641 ticks + 42.6 extra distance)
+TEST_MOVE_SPEED_CASE 49 (deltaFrames = 50% @ 22 or 50% @ 23)
+State loaded
+DISTANCE_REACHED x=20.6 z=-10014.7 in 48.77s (2926 ticks + 14.8 extra distance)
+TEST_MOVE_SPEED_CASE 50 (deltaFrames = 100% @ 25 or 0% @ 26)
+State loaded
+DISTANCE_REACHED x=7.8 z=-10071.6 in 52.93s (3176 ticks + 71.6 extra distance)
+TEST_MOVE_SPEED_CASE 51 (deltaFrames = 40% @ 27 or 60% @ 28)
+State loaded
+DISTANCE_REACHED x=25.8 z=-10032.2 in 57.08s (3425 ticks + 32.2 extra distance)
+TEST_MOVE_SPEED_CASE 52 (deltaFrames = 90% @ 30 or 10% @ 31)
+State loaded
+DISTANCE_REACHED x=8.9 z=-10143.1 in 63.72s (3823 ticks + 143.1 extra distance)
+TEST_MOVE_SPEED_CASE 53 (deltaFrames = 30% @ 2 or 70% @ 3)
+State loaded
+DISTANCE_REACHED x=-0.6 z=-10004.5 in 16.73s (1004 ticks + 4.5 extra distance)
+TEST_MOVE_SPEED_CASE 54 (deltaFrames = 80% @ 5 or 20% @ 6)
+State loaded
+DISTANCE_REACHED x=-0.0 z=-10019.3 in 18.32s (1099 ticks + 19.3 extra distance)
+TEST_MOVE_SPEED_CASE 55 (deltaFrames = 30% @ 7 or 70% @ 8)
+State loaded
+DISTANCE_REACHED x=3.4 z=-10053.3 in 20.55s (1233 ticks + 53.3 extra distance)
+TEST_MOVE_SPEED_CASE 56 (deltaFrames = 70% @ 10 or 30% @ 11)
+State loaded
+DISTANCE_REACHED x=1.9 z=-10070.4 in 23.53s (1412 ticks + 70.4 extra distance)
+TEST_MOVE_SPEED_CASE 57 (deltaFrames = 20% @ 12 or 80% @ 13)
+State loaded
+DISTANCE_REACHED x=-14.0 z=-10007.7 in 27.33s (1640 ticks + 7.7 extra distance)
+TEST_MOVE_SPEED_CASE 58 (deltaFrames = 60% @ 15 or 40% @ 16)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10098.2 in 31.35s (1881 ticks + 98.2 extra distance)
+TEST_MOVE_SPEED_CASE 59 (deltaFrames = 10% @ 17 or 90% @ 18)
+State loaded
+DISTANCE_REACHED x=7.5 z=-10026.3 in 36.42s (2185 ticks + 26.3 extra distance)
+TEST_MOVE_SPEED_CASE 60 (deltaFrames = 60% @ 20 or 40% @ 21)
+State loaded
+DISTANCE_REACHED x=6.6 z=-10071.2 in 42.53s (2552 ticks + 71.2 extra distance)
+TEST_MOVE_SPEED_CASE 61 (deltaFrames = 100% @ 23 or 0% @ 24)
+State loaded
+DISTANCE_REACHED x=7.9 z=-10069.8 in 48.70s (2922 ticks + 69.8 extra distance)
+TEST_MOVE_SPEED_CASE 62 (deltaFrames = 50% @ 25 or 50% @ 26)
+State loaded
+DISTANCE_REACHED x=3.2 z=-10010.3 in 54.42s (3265 ticks + 10.3 extra distance)
+TEST_MOVE_SPEED_CASE 63 (deltaFrames = 90% @ 28 or 10% @ 29)
+State loaded
+DISTANCE_REACHED x=84.8 z=-10125.1 in 66.52s (3991 ticks + 125.5 extra distance)
+TEST_MOVE_SPEED_CASE 64 (deltaFrames = 40% @ 30 or 60% @ 31)
+State loaded
+DISTANCE_REACHED x=0.8 z=-10082.4 in 64.80s (3888 ticks + 82.4 extra distance)
+TEST_MOVE_SPEED_CASE 65 (deltaFrames = 90% @ 3 or 10% @ 4)
+State loaded
+DISTANCE_REACHED x=-4.2 z=-10022.0 in 16.70s (1002 ticks + 22.0 extra distance)
+TEST_MOVE_SPEED_CASE 66 (deltaFrames = 30% @ 5 or 70% @ 6)
+State loaded
+DISTANCE_REACHED x=-1.5 z=-10015.0 in 18.83s (1130 ticks + 15.0 extra distance)
+TEST_MOVE_SPEED_CASE 67 (deltaFrames = 80% @ 8 or 20% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10023.2 in 20.93s (1256 ticks + 23.2 extra distance)
+TEST_MOVE_SPEED_CASE 68 (deltaFrames = 20% @ 10 or 80% @ 11)
+State loaded
+DISTANCE_REACHED x=0.0 z=-10073.4 in 23.97s (1438 ticks + 73.4 extra distance)
+TEST_MOVE_SPEED_CASE 69 (deltaFrames = 70% @ 13 or 30% @ 14)
+State loaded
+DISTANCE_REACHED x=-9.6 z=-10002.2 in 28.17s (1690 ticks + 2.2 extra distance)
+TEST_MOVE_SPEED_CASE 70 (deltaFrames = 20% @ 15 or 80% @ 16)
+State loaded
+DISTANCE_REACHED x=2.0 z=-10015.8 in 32.15s (1929 ticks + 15.8 extra distance)
+TEST_MOVE_SPEED_CASE 71 (deltaFrames = 60% @ 18 or 40% @ 19)
+State loaded
+DISTANCE_REACHED x=6.5 z=-10033.5 in 38.37s (2302 ticks + 33.5 extra distance)
+TEST_MOVE_SPEED_CASE 72 (deltaFrames = 10% @ 20 or 90% @ 21)
+State loaded
+DISTANCE_REACHED x=-4.9 z=-10104.0 in 44.27s (2656 ticks + 104.0 extra distance)
+TEST_MOVE_SPEED_CASE 73 (deltaFrames = 50% @ 23 or 50% @ 24)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10017.1 in 49.38s (2963 ticks + 17.1 extra distance)
+TEST_MOVE_SPEED_CASE 74 (deltaFrames = 100% @ 26 or 0% @ 27)
+State loaded
+DISTANCE_REACHED x=-8.0 z=-10116.0 in 55.48s (3329 ticks + 116.0 extra distance)
+TEST_MOVE_SPEED_CASE 75 (deltaFrames = 50% @ 28 or 50% @ 29)
+State loaded
+DISTANCE_REACHED x=-2.2 z=-10083.4 in 62.73s (3764 ticks + 83.4 extra distance)
+TEST_MOVE_SPEED_CASE 76 (deltaFrames = 90% @ 1 or 10% @ 2)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10004.5 in 15.88s (953 ticks + 4.5 extra distance)
+TEST_MOVE_SPEED_CASE 77 (deltaFrames = 40% @ 3 or 60% @ 4)
+State loaded
+DISTANCE_REACHED x=2.6 z=-10023.6 in 17.42s (1045 ticks + 23.6 extra distance)
+TEST_MOVE_SPEED_CASE 78 (deltaFrames = 80% @ 6 or 20% @ 7)
+State loaded
+DISTANCE_REACHED x=15.3 z=-10046.8 in 19.13s (1148 ticks + 46.8 extra distance)
+TEST_MOVE_SPEED_CASE 79 (deltaFrames = 30% @ 8 or 70% @ 9)
+State loaded
+DISTANCE_REACHED x=0.6 z=-10006.3 in 21.07s (1264 ticks + 6.3 extra distance)
+TEST_MOVE_SPEED_CASE 80 (deltaFrames = 80% @ 11 or 20% @ 12)
+State loaded
+DISTANCE_REACHED x=10.7 z=-10044.7 in 24.28s (1457 ticks + 44.7 extra distance)
+TEST_MOVE_SPEED_CASE 81 (deltaFrames = 20% @ 13 or 80% @ 14)
+State loaded
+DISTANCE_REACHED x=-7.3 z=-10044.6 in 31.08s (1865 ticks + 44.6 extra distance)
+TEST_MOVE_SPEED_CASE 82 (deltaFrames = 70% @ 16 or 30% @ 17)
+State loaded
+DISTANCE_REACHED x=-4.0 z=-10017.5 in 33.98s (2039 ticks + 17.5 extra distance)
+TEST_MOVE_SPEED_CASE 83 (deltaFrames = 10% @ 18 or 90% @ 19)
+State loaded
+DISTANCE_REACHED x=4.0 z=-10016.6 in 40.35s (2421 ticks + 16.6 extra distance)
+TEST_MOVE_SPEED_CASE 84 (deltaFrames = 60% @ 21 or 40% @ 22)
+State loaded
+DISTANCE_REACHED x=3.6 z=-10006.5 in 46.02s (2761 ticks + 6.5 extra distance)
+TEST_MOVE_SPEED_CASE 85 (deltaFrames = 10% @ 23 or 90% @ 24)
+State loaded
+DISTANCE_REACHED x=9.7 z=-10015.7 in 48.62s (2917 ticks + 15.7 extra distance)
+TEST_MOVE_SPEED_CASE 86 (deltaFrames = 50% @ 26 or 50% @ 27)
+State loaded
+DISTANCE_REACHED x=11.9 z=-10083.5 in 55.68s (3341 ticks + 83.5 extra distance)
+TEST_MOVE_SPEED_CASE 87 (deltaFrames = 100% @ 29 or 0% @ 30)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10095.7 in 60.43s (3626 ticks + 95.7 extra distance)
+TEST_MOVE_SPEED_CASE 88 (deltaFrames = 40% @ 1 or 60% @ 2)
+State loaded
+DISTANCE_REACHED x=-2.0 z=-10013.6 in 16.15s (969 ticks + 13.6 extra distance)
+TEST_MOVE_SPEED_CASE 89 (deltaFrames = 90% @ 4 or 10% @ 5)
+State loaded
+DISTANCE_REACHED x=-2.2 z=-10036.6 in 17.63s (1058 ticks + 36.6 extra distance)
+TEST_MOVE_SPEED_CASE 90 (deltaFrames = 40% @ 6 or 60% @ 7)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10013.4 in 19.60s (1176 ticks + 13.4 extra distance)
+TEST_MOVE_SPEED_CASE 91 (deltaFrames = 80% @ 9 or 20% @ 10)
+State loaded
+DISTANCE_REACHED x=0.7 z=-10029.1 in 21.95s (1317 ticks + 29.1 extra distance)
+TEST_MOVE_SPEED_CASE 92 (deltaFrames = 30% @ 11 or 70% @ 12)
+State loaded
+DISTANCE_REACHED x=-12.3 z=-10073.9 in 25.97s (1558 ticks + 73.9 extra distance)
+TEST_MOVE_SPEED_CASE 93 (deltaFrames = 70% @ 14 or 30% @ 15)
+State loaded
+DISTANCE_REACHED x=-2.7 z=-10014.3 in 26.97s (1618 ticks + 14.3 extra distance)
+TEST_MOVE_SPEED_CASE 94 (deltaFrames = 20% @ 16 or 80% @ 17)
+State loaded
+DISTANCE_REACHED x=-1.8 z=-10058.1 in 34.47s (2068 ticks + 58.1 extra distance)
+TEST_MOVE_SPEED_CASE 95 (deltaFrames = 70% @ 19 or 30% @ 20)
+State loaded
+DISTANCE_REACHED x=-7.4 z=-10016.8 in 41.83s (2510 ticks + 16.8 extra distance)
+TEST_MOVE_SPEED_CASE 96 (deltaFrames = 10% @ 21 or 90% @ 22)
+State loaded
+DISTANCE_REACHED x=-2.1 z=-10022.5 in 47.83s (2870 ticks + 22.5 extra distance)
+TEST_MOVE_SPEED_CASE 97 (deltaFrames = 60% @ 24 or 40% @ 25)
+State loaded
+DISTANCE_REACHED x=11.4 z=-10014.3 in 49.65s (2979 ticks + 14.3 extra distance)
+TEST_MOVE_SPEED_CASE 98 (deltaFrames = 100% @ 27 or 0% @ 28)
+State loaded
+DISTANCE_REACHED x=18.1 z=-10042.3 in 58.07s (3484 ticks + 42.3 extra distance)
+TEST_MOVE_SPEED_CASE 99 (deltaFrames = 50% @ 29 or 50% @ 30)
+State loaded
+DISTANCE_REACHED x=9.9 z=-10024.7 in 59.02s (3541 ticks + 24.7 extra distance)
+TEST_MOVE_SPEED_CASE 100 (deltaFrames = 100% @ 2 or 0% @ 3)
+State loaded
+DISTANCE_REACHED x=2.7 z=-10016.1 in 16.38s (983 ticks + 16.1 extra distance)
+TEST_MOVE_SPEED_CASE 101 (deltaFrames = 40% @ 4 or 60% @ 5)
+State loaded
+DISTANCE_REACHED x=-12.7 z=-10017.1 in 18.07s (1084 ticks + 17.1 extra distance)
+TEST_MOVE_SPEED_CASE 102 (deltaFrames = 90% @ 7 or 10% @ 8)
+State loaded
+DISTANCE_REACHED x=-2.4 z=-10035.3 in 20.00s (1200 ticks + 35.3 extra distance)
+TEST_MOVE_SPEED_CASE 103 (deltaFrames = 30% @ 9 or 70% @ 10)
+State loaded
+DISTANCE_REACHED x=6.6 z=-10051.0 in 22.33s (1340 ticks + 51.0 extra distance)
+TEST_MOVE_SPEED_CASE 104 (deltaFrames = 80% @ 12 or 20% @ 13)
+State loaded
+DISTANCE_REACHED x=-3.3 z=-10002.1 in 26.23s (1574 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 105 (deltaFrames = 30% @ 14 or 70% @ 15)
+State loaded
+DISTANCE_REACHED x=-8.3 z=-10078.9 in 30.17s (1810 ticks + 78.9 extra distance)
+TEST_MOVE_SPEED_CASE 106 (deltaFrames = 70% @ 17 or 30% @ 18)
+State loaded
+DISTANCE_REACHED x=-6.3 z=-10048.3 in 35.78s (2147 ticks + 48.3 extra distance)
+TEST_MOVE_SPEED_CASE 107 (deltaFrames = 20% @ 19 or 80% @ 20)
+State loaded
+DISTANCE_REACHED x=0.1 z=-10040.5 in 42.27s (2536 ticks + 40.5 extra distance)
+TEST_MOVE_SPEED_CASE 108 (deltaFrames = 60% @ 22 or 40% @ 23)
+State loaded
+DISTANCE_REACHED x=-10.6 z=-10065.5 in 47.07s (2824 ticks + 65.5 extra distance)
+TEST_MOVE_SPEED_CASE 109 (deltaFrames = 10% @ 24 or 90% @ 25)
+State loaded
+DISTANCE_REACHED x=6.7 z=-10068.9 in 51.90s (3114 ticks + 68.9 extra distance)
+TEST_MOVE_SPEED_CASE 110 (deltaFrames = 60% @ 27 or 40% @ 28)
+State loaded
+DISTANCE_REACHED x=10.4 z=-10008.9 in 58.47s (3508 ticks + 9.0 extra distance)
+TEST_MOVE_SPEED_CASE 111 (deltaFrames = 100% @ 30 or 0% @ 31)
+State loaded
+DISTANCE_REACHED x=-7.7 z=-10002.9 in 63.02s (3781 ticks + 2.9 extra distance)
+TEST_MOVE_SPEED_CASE 112 (deltaFrames = 50% @ 2 or 50% @ 3)
+State loaded
+DISTANCE_REACHED x=20.1 z=-10017.8 in 16.57s (994 ticks + 17.8 extra distance)
+TEST_MOVE_SPEED_CASE 113 (deltaFrames = 100% @ 5 or 0% @ 6)
+State loaded
+DISTANCE_REACHED x=0.9 z=-10042.8 in 18.35s (1101 ticks + 42.8 extra distance)
+TEST_MOVE_SPEED_CASE 114 (deltaFrames = 40% @ 7 or 60% @ 8)
+State loaded
+DISTANCE_REACHED x=8.0 z=-10039.9 in 20.55s (1233 ticks + 39.9 extra distance)
+TEST_MOVE_SPEED_CASE 115 (deltaFrames = 90% @ 10 or 10% @ 11)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10034.6 in 23.23s (1394 ticks + 34.6 extra distance)
+TEST_MOVE_SPEED_CASE 116 (deltaFrames = 30% @ 12 or 70% @ 13)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10069.1 in 30.30s (1818 ticks + 69.1 extra distance)
+TEST_MOVE_SPEED_CASE 117 (deltaFrames = 80% @ 15 or 20% @ 16)
+State loaded
+DISTANCE_REACHED x=-3.6 z=-10128.0 in 30.42s (1825 ticks + 128.0 extra distance)
+TEST_MOVE_SPEED_CASE 118 (deltaFrames = 30% @ 17 or 70% @ 18)
+State loaded
+DISTANCE_REACHED x=-2.5 z=-10053.1 in 36.62s (2197 ticks + 53.1 extra distance)
+TEST_MOVE_SPEED_CASE 119 (deltaFrames = 70% @ 20 or 30% @ 21)
+State loaded
+DISTANCE_REACHED x=-3.5 z=-10044.2 in 43.65s (2619 ticks + 44.2 extra distance)
+TEST_MOVE_SPEED_CASE 120 (deltaFrames = 20% @ 22 or 80% @ 23)
+State loaded
+DISTANCE_REACHED x=-3.9 z=-10043.2 in 45.62s (2737 ticks + 43.2 extra distance)
+TEST_MOVE_SPEED_CASE 121 (deltaFrames = 60% @ 25 or 40% @ 26)
+State loaded
+DISTANCE_REACHED x=3.3 z=-10064.7 in 55.92s (3355 ticks + 64.7 extra distance)
+TEST_MOVE_SPEED_CASE 122 (deltaFrames = 10% @ 27 or 90% @ 28)
+State loaded
+DISTANCE_REACHED x=14.5 z=-10007.2 in 61.87s (3712 ticks + 7.3 extra distance)
+TEST_MOVE_SPEED_CASE 123 (deltaFrames = 60% @ 30 or 40% @ 31)
+State loaded
+DISTANCE_REACHED x=-3.9 z=-10011.9 in 60.82s (3649 ticks + 11.9 extra distance)
+TEST_MOVE_SPEED_CASE 124 (deltaFrames = 100% @ 3 or 0% @ 4)
+State loaded
+DISTANCE_REACHED x=1.1 z=-10012.0 in 16.87s (1012 ticks + 12.0 extra distance)
+TEST_MOVE_SPEED_CASE 125 (deltaFrames = 50% @ 5 or 50% @ 6)
+State loaded
+DISTANCE_REACHED x=-2.2 z=-10027.6 in 18.55s (1113 ticks + 27.6 extra distance)
+TEST_MOVE_SPEED_CASE 126 (deltaFrames = 90% @ 8 or 10% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.6 z=-10042.0 in 21.07s (1264 ticks + 42.0 extra distance)
+TEST_MOVE_SPEED_CASE 127 (deltaFrames = 40% @ 10 or 60% @ 11)
+State loaded
+DISTANCE_REACHED x=0.5 z=-10079.0 in 24.07s (1444 ticks + 79.0 extra distance)
+TEST_MOVE_SPEED_CASE 128 (deltaFrames = 90% @ 13 or 10% @ 14)
+State loaded
+DISTANCE_REACHED x=6.3 z=-10085.1 in 29.48s (1769 ticks + 85.1 extra distance)
+TEST_MOVE_SPEED_CASE 129 (deltaFrames = 30% @ 15 or 70% @ 16)
+State loaded
+DISTANCE_REACHED x=-12.9 z=-10038.8 in 33.02s (1981 ticks + 38.8 extra distance)
+TEST_MOVE_SPEED_CASE 130 (deltaFrames = 80% @ 18 or 20% @ 19)
+State loaded
+DISTANCE_REACHED x=0.3 z=-10044.9 in 38.23s (2294 ticks + 44.9 extra distance)
+TEST_MOVE_SPEED_CASE 131 (deltaFrames = 20% @ 20 or 80% @ 21)
+State loaded
+DISTANCE_REACHED x=-7.3 z=-10000.4 in 44.73s (2684 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 132 (deltaFrames = 70% @ 23 or 30% @ 24)
+State loaded
+DISTANCE_REACHED x=-3.5 z=-10109.7 in 48.95s (2937 ticks + 109.7 extra distance)
+TEST_MOVE_SPEED_CASE 133 (deltaFrames = 20% @ 25 or 80% @ 26)
+State loaded
+DISTANCE_REACHED x=-7.3 z=-10095.3 in 55.48s (3329 ticks + 95.4 extra distance)
+TEST_MOVE_SPEED_CASE 134 (deltaFrames = 60% @ 28 or 40% @ 29)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10025.7 in 60.13s (3608 ticks + 25.7 extra distance)
+TEST_MOVE_SPEED_CASE 135 (deltaFrames = 10% @ 30 or 90% @ 31)
+State loaded
+DISTANCE_REACHED x=-7.4 z=-10091.2 in 64.92s (3895 ticks + 91.2 extra distance)
+TEST_MOVE_SPEED_CASE 136 (deltaFrames = 50% @ 3 or 50% @ 4)
+State loaded
+DISTANCE_REACHED x=3.6 z=-10030.4 in 17.20s (1032 ticks + 30.4 extra distance)
+TEST_MOVE_SPEED_CASE 137 (deltaFrames = 100% @ 6 or 0% @ 7)
+State loaded
+DISTANCE_REACHED x=-7.4 z=-10037.8 in 19.02s (1141 ticks + 37.8 extra distance)
+TEST_MOVE_SPEED_CASE 138 (deltaFrames = 50% @ 8 or 50% @ 9)
+State loaded
+DISTANCE_REACHED x=10.9 z=-10012.9 in 21.12s (1267 ticks + 12.9 extra distance)
+TEST_MOVE_SPEED_CASE 139 (deltaFrames = 90% @ 11 or 10% @ 12)
+State loaded
+DISTANCE_REACHED x=-5.9 z=-10000.1 in 24.07s (1444 ticks + 0.1 extra distance)
+TEST_MOVE_SPEED_CASE 140 (deltaFrames = 40% @ 13 or 60% @ 14)
+State loaded
+DISTANCE_REACHED x=-3.4 z=-10092.1 in 32.92s (1975 ticks + 92.1 extra distance)
+TEST_MOVE_SPEED_CASE 141 (deltaFrames = 80% @ 16 or 20% @ 17)
+State loaded
+DISTANCE_REACHED x=2.1 z=-10040.2 in 34.03s (2042 ticks + 40.2 extra distance)
+TEST_MOVE_SPEED_CASE 142 (deltaFrames = 30% @ 18 or 70% @ 19)
+State loaded
+DISTANCE_REACHED x=-7.0 z=-10045.7 in 39.92s (2395 ticks + 45.7 extra distance)
+TEST_MOVE_SPEED_CASE 143 (deltaFrames = 80% @ 21 or 20% @ 22)
+State loaded
+DISTANCE_REACHED x=-3.6 z=-10008.7 in 43.83s (2630 ticks + 8.7 extra distance)
+TEST_MOVE_SPEED_CASE 144 (deltaFrames = 20% @ 23 or 80% @ 24)
+State loaded
+DISTANCE_REACHED x=5.9 z=-10026.7 in 48.82s (2929 ticks + 26.7 extra distance)
+TEST_MOVE_SPEED_CASE 145 (deltaFrames = 70% @ 26 or 30% @ 27)
+State loaded
+DISTANCE_REACHED x=11.2 z=-10018.4 in 55.25s (3315 ticks + 18.4 extra distance)
+TEST_MOVE_SPEED_CASE 146 (deltaFrames = 10% @ 28 or 90% @ 29)
+State loaded
+DISTANCE_REACHED x=-8.7 z=-10083.5 in 59.75s (3585 ticks + 83.5 extra distance)
+TEST_MOVE_SPEED_CASE 147 (deltaFrames = 60% @ 1 or 40% @ 2)
+State loaded
+DISTANCE_REACHED x=2.2 z=-10001.8 in 15.85s (951 ticks + 1.8 extra distance)
+TEST_MOVE_SPEED_CASE 148 (deltaFrames = 10% @ 3 or 90% @ 4)
+State loaded
+DISTANCE_REACHED x=-2.4 z=-10025.7 in 17.45s (1047 ticks + 25.7 extra distance)
+TEST_MOVE_SPEED_CASE 149 (deltaFrames = 50% @ 6 or 50% @ 7)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10008.9 in 19.20s (1152 ticks + 8.9 extra distance)
+TEST_MOVE_SPEED_CASE 150 (deltaFrames = 100% @ 9 or 0% @ 10)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10003.9 in 21.77s (1306 ticks + 3.9 extra distance)
+TEST_MOVE_SPEED_CASE 151 (deltaFrames = 40% @ 11 or 60% @ 12)
+State loaded
+DISTANCE_REACHED x=0.9 z=-10032.3 in 24.77s (1486 ticks + 32.3 extra distance)
+TEST_MOVE_SPEED_CASE 152 (deltaFrames = 90% @ 14 or 10% @ 15)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10020.6 in 34.78s (2087 ticks + 20.6 extra distance)
+TEST_MOVE_SPEED_CASE 153 (deltaFrames = 40% @ 16 or 60% @ 17)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10000.9 in 32.95s (1977 ticks + 0.9 extra distance)
+TEST_MOVE_SPEED_CASE 154 (deltaFrames = 80% @ 19 or 20% @ 20)
+State loaded
+DISTANCE_REACHED x=2.0 z=-10047.6 in 40.65s (2439 ticks + 47.6 extra distance)
+TEST_MOVE_SPEED_CASE 155 (deltaFrames = 30% @ 21 or 70% @ 22)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10053.2 in 45.97s (2758 ticks + 53.2 extra distance)
+TEST_MOVE_SPEED_CASE 156 (deltaFrames = 70% @ 24 or 30% @ 25)
+State loaded
+DISTANCE_REACHED x=-4.8 z=-10093.3 in 49.85s (2991 ticks + 93.3 extra distance)
+TEST_MOVE_SPEED_CASE 157 (deltaFrames = 20% @ 26 or 80% @ 27)
+State loaded
+DISTANCE_REACHED x=11.1 z=-10050.7 in 59.43s (3566 ticks + 50.7 extra distance)
+TEST_MOVE_SPEED_CASE 158 (deltaFrames = 70% @ 29 or 30% @ 30)
+State loaded
+DISTANCE_REACHED x=0.0 z=-10037.3 in 60.58s (3635 ticks + 37.3 extra distance)
+TEST_MOVE_SPEED_CASE 159 (deltaFrames = 10% @ 1 or 90% @ 2)
+State loaded
+DISTANCE_REACHED x=0.6 z=-10007.2 in 16.27s (976 ticks + 7.2 extra distance)
+TEST_MOVE_SPEED_CASE 160 (deltaFrames = 60% @ 4 or 40% @ 5)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10027.7 in 18.00s (1080 ticks + 27.7 extra distance)
+TEST_MOVE_SPEED_CASE 161 (deltaFrames = 100% @ 7 or 0% @ 8)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10057.0 in 20.08s (1205 ticks + 57.0 extra distance)
+TEST_MOVE_SPEED_CASE 162 (deltaFrames = 50% @ 9 or 50% @ 10)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10067.0 in 22.35s (1341 ticks + 67.0 extra distance)
+TEST_MOVE_SPEED_CASE 163 (deltaFrames = 100% @ 12 or 0% @ 13)
+State loaded
+DISTANCE_REACHED x=1.0 z=-10022.5 in 26.22s (1573 ticks + 22.5 extra distance)
+TEST_MOVE_SPEED_CASE 164 (deltaFrames = 40% @ 14 or 60% @ 15)
+State loaded
+DISTANCE_REACHED x=-2.7 z=-10023.9 in 31.65s (1899 ticks + 23.9 extra distance)
+TEST_MOVE_SPEED_CASE 165 (deltaFrames = 90% @ 17 or 10% @ 18)
+State loaded
+DISTANCE_REACHED x=-8.0 z=-10047.7 in 36.20s (2172 ticks + 47.7 extra distance)
+TEST_MOVE_SPEED_CASE 166 (deltaFrames = 30% @ 19 or 70% @ 20)
+State loaded
+DISTANCE_REACHED x=1.6 z=-10132.2 in 37.47s (2248 ticks + 132.2 extra distance)
+TEST_MOVE_SPEED_CASE 167 (deltaFrames = 80% @ 22 or 20% @ 23)
+State loaded
+DISTANCE_REACHED x=-9.3 z=-10026.0 in 47.37s (2842 ticks + 26.0 extra distance)
+TEST_MOVE_SPEED_CASE 168 (deltaFrames = 30% @ 24 or 70% @ 25)
+State loaded
+DISTANCE_REACHED x=-6.8 z=-10066.3 in 51.92s (3115 ticks + 66.3 extra distance)
+TEST_MOVE_SPEED_CASE 169 (deltaFrames = 70% @ 27 or 30% @ 28)
+State loaded
+DISTANCE_REACHED x=-1.3 z=-10094.3 in 58.70s (3522 ticks + 94.3 extra distance)
+TEST_MOVE_SPEED_CASE 170 (deltaFrames = 20% @ 29 or 80% @ 30)
+State loaded
+DISTANCE_REACHED x=-8.3 z=-10023.0 in 61.62s (3697 ticks + 23.0 extra distance)
+TEST_MOVE_SPEED_CASE 171 (deltaFrames = 60% @ 2 or 40% @ 3)
+State loaded
+DISTANCE_REACHED x=0.5 z=-10002.1 in 16.57s (994 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 172 (deltaFrames = 10% @ 4 or 90% @ 5)
+State loaded
+DISTANCE_REACHED x=-4.3 z=-10051.4 in 18.15s (1089 ticks + 51.4 extra distance)
+TEST_MOVE_SPEED_CASE 173 (deltaFrames = 60% @ 7 or 40% @ 8)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10044.0 in 20.02s (1201 ticks + 44.0 extra distance)
+TEST_MOVE_SPEED_CASE 174 (deltaFrames = 100% @ 10 or 0% @ 11)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10058.4 in 22.85s (1371 ticks + 58.4 extra distance)
+TEST_MOVE_SPEED_CASE 175 (deltaFrames = 50% @ 12 or 50% @ 13)
+State loaded
+DISTANCE_REACHED x=1.8 z=-10012.9 in 26.28s (1577 ticks + 12.9 extra distance)
+TEST_MOVE_SPEED_CASE 176 (deltaFrames = 90% @ 15 or 10% @ 16)
+State loaded
+DISTANCE_REACHED x=-3.5 z=-10047.5 in 31.97s (1918 ticks + 47.5 extra distance)
+TEST_MOVE_SPEED_CASE 177 (deltaFrames = 40% @ 17 or 60% @ 18)
+State loaded
+DISTANCE_REACHED x=-4.4 z=-10131.3 in 35.82s (2149 ticks + 131.3 extra distance)
+TEST_MOVE_SPEED_CASE 178 (deltaFrames = 90% @ 20 or 10% @ 21)
+State loaded
+DISTANCE_REACHED x=-13.4 z=-10012.0 in 43.90s (2634 ticks + 12.0 extra distance)
+TEST_MOVE_SPEED_CASE 179 (deltaFrames = 30% @ 22 or 70% @ 23)
+State loaded
+DISTANCE_REACHED x=-5.8 z=-10093.4 in 48.45s (2907 ticks + 93.4 extra distance)
+TEST_MOVE_SPEED_CASE 180 (deltaFrames = 80% @ 25 or 20% @ 26)
+State loaded
+DISTANCE_REACHED x=9.2 z=-10088.6 in 52.93s (3176 ticks + 88.6 extra distance)
+TEST_MOVE_SPEED_CASE 181 (deltaFrames = 20% @ 27 or 80% @ 28)
+State loaded
+DISTANCE_REACHED x=-10.4 z=-10110.4 in 67.22s (4033 ticks + 110.4 extra distance)
+TEST_MOVE_SPEED_CASE 182 (deltaFrames = 70% @ 30 or 30% @ 31)
+State loaded
+DISTANCE_REACHED x=10.0 z=-10136.0 in 64.65s (3879 ticks + 136.0 extra distance)
+TEST_MOVE_SPEED_CASE 183 (deltaFrames = 20% @ 2 or 80% @ 3)
+State loaded
+DISTANCE_REACHED x=13.4 z=-10027.5 in 16.73s (1004 ticks + 27.5 extra distance)
+TEST_MOVE_SPEED_CASE 184 (deltaFrames = 60% @ 5 or 40% @ 6)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10013.9 in 18.65s (1119 ticks + 13.9 extra distance)
+TEST_MOVE_SPEED_CASE 185 (deltaFrames = 10% @ 7 or 90% @ 8)
+State loaded
+DISTANCE_REACHED x=3.1 z=-10005.4 in 20.57s (1234 ticks + 5.4 extra distance)
+TEST_MOVE_SPEED_CASE 186 (deltaFrames = 50% @ 10 or 50% @ 11)
+State loaded
+DISTANCE_REACHED x=-5.4 z=-10013.2 in 23.67s (1420 ticks + 13.2 extra distance)
+TEST_MOVE_SPEED_CASE 187 (deltaFrames = 100% @ 13 or 0% @ 14)
+State loaded
+DISTANCE_REACHED x=-8.2 z=-10081.3 in 27.75s (1665 ticks + 81.3 extra distance)
+TEST_MOVE_SPEED_CASE 188 (deltaFrames = 50% @ 15 or 50% @ 16)
+State loaded
+DISTANCE_REACHED x=-1.5 z=-10023.2 in 37.75s (2265 ticks + 23.2 extra distance)
+TEST_MOVE_SPEED_CASE 189 (deltaFrames = 90% @ 18 or 10% @ 19)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10093.4 in 38.62s (2317 ticks + 93.4 extra distance)
+TEST_MOVE_SPEED_CASE 190 (deltaFrames = 40% @ 20 or 60% @ 21)
+State loaded
+DISTANCE_REACHED x=12.4 z=-10097.5 in 42.62s (2557 ticks + 97.5 extra distance)
+TEST_MOVE_SPEED_CASE 191 (deltaFrames = 80% @ 23 or 20% @ 24)
+State loaded
+DISTANCE_REACHED x=5.9 z=-10002.1 in 47.20s (2832 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 192 (deltaFrames = 30% @ 25 or 70% @ 26)
+State loaded
+DISTANCE_REACHED x=13.6 z=-10056.9 in 55.27s (3316 ticks + 56.9 extra distance)
+TEST_MOVE_SPEED_CASE 193 (deltaFrames = 80% @ 28 or 20% @ 29)
+State loaded
+DISTANCE_REACHED x=47.7 z=-10021.8 in 55.47s (3328 ticks + 21.9 extra distance)
+TEST_MOVE_SPEED_CASE 194 (deltaFrames = 20% @ 30 or 80% @ 31)
+State loaded
+DISTANCE_REACHED x=2.9 z=-10049.5 in 65.23s (3914 ticks + 49.5 extra distance)
+TEST_MOVE_SPEED_CASE 195 (deltaFrames = 70% @ 3 or 30% @ 4)
+State loaded
+DISTANCE_REACHED x=1.9 z=-10028.5 in 17.13s (1028 ticks + 28.5 extra distance)
+TEST_MOVE_SPEED_CASE 196 (deltaFrames = 10% @ 5 or 90% @ 6)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10033.2 in 18.80s (1128 ticks + 33.2 extra distance)
+TEST_MOVE_SPEED_CASE 197 (deltaFrames = 60% @ 8 or 40% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.1 z=-10000.4 in 20.87s (1252 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 198 (deltaFrames = 10% @ 10 or 90% @ 11)
+State loaded
+DISTANCE_REACHED x=0.8 z=-10009.8 in 24.73s (1484 ticks + 9.8 extra distance)
+TEST_MOVE_SPEED_CASE 199 (deltaFrames = 50% @ 13 or 50% @ 14)
+State loaded
+DISTANCE_REACHED x=-10.9 z=-10086.4 in 30.20s (1812 ticks + 86.5 extra distance)
+TEST_MOVE_SPEED_CASE 200 (deltaFrames = 100% @ 16 or 0% @ 17)
+State loaded
+DISTANCE_REACHED x=3.8 z=-10023.4 in 33.62s (2017 ticks + 23.4 extra distance)
+TEST_MOVE_SPEED_CASE 201 (deltaFrames = 40% @ 18 or 60% @ 19)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10009.6 in 38.80s (2328 ticks + 9.6 extra distance)
+TEST_MOVE_SPEED_CASE 202 (deltaFrames = 90% @ 21 or 10% @ 22)
+State loaded
+DISTANCE_REACHED x=6.3 z=-10038.8 in 39.75s (2385 ticks + 38.8 extra distance)
+TEST_MOVE_SPEED_CASE 203 (deltaFrames = 40% @ 23 or 60% @ 24)
+State loaded
+DISTANCE_REACHED x=-8.9 z=-10035.1 in 48.42s (2905 ticks + 35.1 extra distance)
+TEST_MOVE_SPEED_CASE 204 (deltaFrames = 80% @ 26 or 20% @ 27)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10052.1 in 58.97s (3538 ticks + 52.1 extra distance)
+TEST_MOVE_SPEED_CASE 205 (deltaFrames = 30% @ 28 or 70% @ 29)
+State loaded
+DISTANCE_REACHED x=4.8 z=-10036.0 in 62.20s (3732 ticks + 36.0 extra distance)
+TEST_MOVE_SPEED_CASE 206 (deltaFrames = 70% @ 1 or 30% @ 2)
+State loaded
+DISTANCE_REACHED x=6.9 z=-10008.1 in 16.00s (960 ticks + 8.1 extra distance)
+TEST_MOVE_SPEED_CASE 207 (deltaFrames = 20% @ 3 or 80% @ 4)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10029.2 in 17.58s (1055 ticks + 29.2 extra distance)
+TEST_MOVE_SPEED_CASE 208 (deltaFrames = 70% @ 6 or 30% @ 7)
+State loaded
+DISTANCE_REACHED x=7.2 z=-10013.7 in 19.25s (1155 ticks + 13.7 extra distance)
+TEST_MOVE_SPEED_CASE 209 (deltaFrames = 10% @ 8 or 90% @ 9)
+State loaded
+DISTANCE_REACHED x=-4.8 z=-10065.8 in 22.12s (1327 ticks + 65.8 extra distance)
+TEST_MOVE_SPEED_CASE 210 (deltaFrames = 60% @ 11 or 40% @ 12)
+State loaded
+DISTANCE_REACHED x=-3.4 z=-10024.1 in 25.50s (1530 ticks + 24.1 extra distance)
+TEST_MOVE_SPEED_CASE 211 (deltaFrames = 100% @ 14 or 0% @ 15)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10069.5 in 29.42s (1765 ticks + 69.5 extra distance)
+TEST_MOVE_SPEED_CASE 212 (deltaFrames = 50% @ 16 or 50% @ 17)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10037.2 in 34.95s (2097 ticks + 37.2 extra distance)
+TEST_MOVE_SPEED_CASE 213 (deltaFrames = 100% @ 19 or 0% @ 20)
+State loaded
+DISTANCE_REACHED x=-0.7 z=-10022.2 in 40.87s (2452 ticks + 22.2 extra distance)
+TEST_MOVE_SPEED_CASE 214 (deltaFrames = 40% @ 21 or 60% @ 22)
+State loaded
+DISTANCE_REACHED x=-1.3 z=-10032.0 in 46.45s (2787 ticks + 32.0 extra distance)
+TEST_MOVE_SPEED_CASE 215 (deltaFrames = 90% @ 24 or 10% @ 25)
+State loaded
+DISTANCE_REACHED x=-0.8 z=-10101.2 in 49.82s (2989 ticks + 101.2 extra distance)
+TEST_MOVE_SPEED_CASE 216 (deltaFrames = 30% @ 26 or 70% @ 27)
+State loaded
+DISTANCE_REACHED x=13.9 z=-10020.9 in 53.42s (3205 ticks + 21.0 extra distance)
+TEST_MOVE_SPEED_CASE 217 (deltaFrames = 80% @ 29 or 20% @ 30)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10114.4 in 60.85s (3651 ticks + 114.4 extra distance)
+TEST_MOVE_SPEED_CASE 218 (deltaFrames = 30% @ 1 or 70% @ 2)
+State loaded
+DISTANCE_REACHED x=2.2 z=-10000.9 in 16.20s (972 ticks + 0.9 extra distance)
+TEST_MOVE_SPEED_CASE 219 (deltaFrames = 70% @ 4 or 30% @ 5)
+State loaded
+DISTANCE_REACHED x=-4.7 z=-10039.5 in 17.93s (1076 ticks + 39.5 extra distance)
+TEST_MOVE_SPEED_CASE 220 (deltaFrames = 20% @ 6 or 80% @ 7)
+State loaded
+DISTANCE_REACHED x=-5.3 z=-10064.8 in 20.77s (1246 ticks + 64.8 extra distance)
+TEST_MOVE_SPEED_CASE 221 (deltaFrames = 60% @ 9 or 40% @ 10)
+State loaded
+DISTANCE_REACHED x=45.8 z=-10049.2 in 22.12s (1327 ticks + 49.3 extra distance)
+TEST_MOVE_SPEED_CASE 222 (deltaFrames = 10% @ 11 or 90% @ 12)
+State loaded
+DISTANCE_REACHED x=-1.9 z=-10039.9 in 25.80s (1548 ticks + 39.9 extra distance)
+TEST_MOVE_SPEED_CASE 223 (deltaFrames = 60% @ 14 or 40% @ 15)
+State loaded
+DISTANCE_REACHED x=0.3 z=-10042.2 in 30.03s (1802 ticks + 42.2 extra distance)
+TEST_MOVE_SPEED_CASE 224 (deltaFrames = 100% @ 17 or 0% @ 18)
+State loaded
+DISTANCE_REACHED x=3.6 z=-10063.1 in 36.00s (2160 ticks + 63.1 extra distance)
+TEST_MOVE_SPEED_CASE 225 (deltaFrames = 50% @ 19 or 50% @ 20)
+State loaded
+DISTANCE_REACHED x=-4.3 z=-10004.6 in 42.27s (2536 ticks + 4.6 extra distance)
+TEST_MOVE_SPEED_CASE 226 (deltaFrames = 90% @ 22 or 10% @ 23)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10027.8 in 46.42s (2785 ticks + 27.8 extra distance)
+TEST_MOVE_SPEED_CASE 227 (deltaFrames = 40% @ 24 or 60% @ 25)
+State loaded
+DISTANCE_REACHED x=-3.3 z=-10077.3 in 52.10s (3126 ticks + 77.3 extra distance)
+TEST_MOVE_SPEED_CASE 228 (deltaFrames = 90% @ 27 or 10% @ 28)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10057.1 in 58.73s (3524 ticks + 57.1 extra distance)
+TEST_MOVE_SPEED_CASE 229 (deltaFrames = 30% @ 29 or 70% @ 30)
+State loaded
+DISTANCE_REACHED x=-3.0 z=-10007.1 in 63.38s (3803 ticks + 7.1 extra distance)
+TEST_MOVE_SPEED_CASE 230 (deltaFrames = 80% @ 2 or 20% @ 3)
+State loaded
+DISTANCE_REACHED x=-0.4 z=-10020.4 in 16.57s (994 ticks + 20.4 extra distance)
+TEST_MOVE_SPEED_CASE 231 (deltaFrames = 20% @ 4 or 80% @ 5)
+State loaded
+DISTANCE_REACHED x=-17.9 z=-10019.7 in 18.03s (1082 ticks + 19.8 extra distance)
+TEST_MOVE_SPEED_CASE 232 (deltaFrames = 70% @ 7 or 30% @ 8)
+State loaded
+DISTANCE_REACHED x=2.1 z=-10017.7 in 20.70s (1242 ticks + 17.7 extra distance)
+TEST_MOVE_SPEED_CASE 233 (deltaFrames = 20% @ 9 or 80% @ 10)
+State loaded
+DISTANCE_REACHED x=-1.4 z=-10058.1 in 22.72s (1363 ticks + 58.1 extra distance)
+TEST_MOVE_SPEED_CASE 234 (deltaFrames = 60% @ 12 or 40% @ 13)
+State loaded
+DISTANCE_REACHED x=1.4 z=-10007.0 in 26.27s (1576 ticks + 7.0 extra distance)
+TEST_MOVE_SPEED_CASE 235 (deltaFrames = 10% @ 14 or 90% @ 15)
+State loaded
+DISTANCE_REACHED x=1.5 z=-10010.0 in 31.07s (1864 ticks + 10.0 extra distance)
+TEST_MOVE_SPEED_CASE 236 (deltaFrames = 50% @ 17 or 50% @ 18)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10032.6 in 37.35s (2241 ticks + 32.6 extra distance)
+TEST_MOVE_SPEED_CASE 237 (deltaFrames = 100% @ 20 or 0% @ 21)
+State loaded
+DISTANCE_REACHED x=8.5 z=-10042.6 in 44.02s (2641 ticks + 42.6 extra distance)
+TEST_MOVE_SPEED_CASE 238 (deltaFrames = 50% @ 22 or 50% @ 23)
+State loaded
+DISTANCE_REACHED x=20.6 z=-10014.7 in 48.77s (2926 ticks + 14.8 extra distance)
+TEST_MOVE_SPEED_CASE 239 (deltaFrames = 90% @ 25 or 10% @ 26)
+State loaded
+DISTANCE_REACHED x=-5.2 z=-10049.9 in 53.13s (3188 ticks + 49.9 extra distance)
+TEST_MOVE_SPEED_CASE 240 (deltaFrames = 40% @ 27 or 60% @ 28)
+State loaded
+DISTANCE_REACHED x=25.8 z=-10032.2 in 57.08s (3425 ticks + 32.2 extra distance)
+TEST_MOVE_SPEED_CASE 241 (deltaFrames = 80% @ 30 or 20% @ 31)
+State loaded
+DISTANCE_REACHED x=-0.4 z=-10039.3 in 62.93s (3776 ticks + 39.3 extra distance)
+TEST_MOVE_SPEED_CASE 242 (deltaFrames = 30% @ 2 or 70% @ 3)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10008.2 in 16.77s (1006 ticks + 8.2 extra distance)
+TEST_MOVE_SPEED_CASE 243 (deltaFrames = 80% @ 5 or 20% @ 6)
+State loaded
+DISTANCE_REACHED x=-0.0 z=-10019.3 in 18.32s (1099 ticks + 19.3 extra distance)
+TEST_MOVE_SPEED_CASE 244 (deltaFrames = 20% @ 7 or 80% @ 8)
+State loaded
+DISTANCE_REACHED x=-2.4 z=-10010.2 in 20.45s (1227 ticks + 10.2 extra distance)
+TEST_MOVE_SPEED_CASE 245 (deltaFrames = 70% @ 10 or 30% @ 11)
+State loaded
+DISTANCE_REACHED x=1.9 z=-10070.4 in 23.53s (1412 ticks + 70.4 extra distance)
+TEST_MOVE_SPEED_CASE 246 (deltaFrames = 10% @ 12 or 90% @ 13)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10097.1 in 27.55s (1653 ticks + 97.1 extra distance)
+TEST_MOVE_SPEED_CASE 247 (deltaFrames = 60% @ 15 or 40% @ 16)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10094.7 in 30.82s (1849 ticks + 94.7 extra distance)
+TEST_MOVE_SPEED_CASE 248 (deltaFrames = 10% @ 17 or 90% @ 18)
+State loaded
+DISTANCE_REACHED x=7.5 z=-10026.3 in 36.42s (2185 ticks + 26.3 extra distance)
+TEST_MOVE_SPEED_CASE 249 (deltaFrames = 50% @ 20 or 50% @ 21)
+State loaded
+DISTANCE_REACHED x=-2.4 z=-10052.5 in 44.08s (2645 ticks + 52.5 extra distance)
+TEST_MOVE_SPEED_CASE 250 (deltaFrames = 100% @ 23 or 0% @ 24)
+State loaded
+DISTANCE_REACHED x=7.9 z=-10069.8 in 48.70s (2922 ticks + 69.8 extra distance)
+TEST_MOVE_SPEED_CASE 251 (deltaFrames = 40% @ 25 or 60% @ 26)
+State loaded
+DISTANCE_REACHED x=9.4 z=-10072.7 in 53.80s (3228 ticks + 72.7 extra distance)
+TEST_MOVE_SPEED_CASE 252 (deltaFrames = 90% @ 28 or 10% @ 29)
+State loaded
+DISTANCE_REACHED x=84.8 z=-10125.1 in 66.52s (3991 ticks + 125.5 extra distance)
+TEST_MOVE_SPEED_CASE 253 (deltaFrames = 40% @ 30 or 60% @ 31)
+State loaded
+DISTANCE_REACHED x=0.8 z=-10082.4 in 64.80s (3888 ticks + 82.4 extra distance)
+TEST_MOVE_SPEED_CASE 254 (deltaFrames = 80% @ 3 or 20% @ 4)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10028.0 in 17.08s (1025 ticks + 28.0 extra distance)
+TEST_MOVE_SPEED_CASE 255 (deltaFrames = 30% @ 5 or 70% @ 6)
+State loaded
+DISTANCE_REACHED x=-2.9 z=-10027.0 in 18.57s (1114 ticks + 27.0 extra distance)
+TEST_MOVE_SPEED_CASE 256 (deltaFrames = 70% @ 8 or 30% @ 9)
+State loaded
+DISTANCE_REACHED x=-2.3 z=-10020.1 in 20.92s (1255 ticks + 20.1 extra distance)
+TEST_MOVE_SPEED_CASE 257 (deltaFrames = 20% @ 10 or 80% @ 11)
+State loaded
+DISTANCE_REACHED x=6.7 z=-10006.3 in 24.33s (1460 ticks + 6.3 extra distance)
+TEST_MOVE_SPEED_CASE 258 (deltaFrames = 70% @ 13 or 30% @ 14)
+State loaded
+DISTANCE_REACHED x=-9.6 z=-10002.2 in 28.17s (1690 ticks + 2.2 extra distance)
+TEST_MOVE_SPEED_CASE 259 (deltaFrames = 10% @ 15 or 90% @ 16)
+State loaded
+DISTANCE_REACHED x=5.1 z=-10018.2 in 33.68s (2021 ticks + 18.2 extra distance)
+TEST_MOVE_SPEED_CASE 260 (deltaFrames = 60% @ 18 or 40% @ 19)
+State loaded
+DISTANCE_REACHED x=6.5 z=-10033.5 in 38.37s (2302 ticks + 33.5 extra distance)
+TEST_MOVE_SPEED_CASE 261 (deltaFrames = 10% @ 20 or 90% @ 21)
+State loaded
+DISTANCE_REACHED x=-4.9 z=-10104.0 in 44.27s (2656 ticks + 104.0 extra distance)
+TEST_MOVE_SPEED_CASE 262 (deltaFrames = 50% @ 23 or 50% @ 24)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10017.1 in 49.38s (2963 ticks + 17.1 extra distance)
+TEST_MOVE_SPEED_CASE 263 (deltaFrames = 100% @ 26 or 0% @ 27)
+State loaded
+DISTANCE_REACHED x=-8.0 z=-10116.0 in 55.48s (3329 ticks + 116.0 extra distance)
+TEST_MOVE_SPEED_CASE 264 (deltaFrames = 40% @ 28 or 60% @ 29)
+State loaded
+DISTANCE_REACHED x=8.7 z=-10042.0 in 53.42s (3205 ticks + 42.0 extra distance)
+TEST_MOVE_SPEED_CASE 265 (deltaFrames = 90% @ 1 or 10% @ 2)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10004.5 in 15.88s (953 ticks + 4.5 extra distance)
+TEST_MOVE_SPEED_CASE 266 (deltaFrames = 40% @ 3 or 60% @ 4)
+State loaded
+DISTANCE_REACHED x=2.6 z=-10023.6 in 17.42s (1045 ticks + 23.6 extra distance)
+TEST_MOVE_SPEED_CASE 267 (deltaFrames = 80% @ 6 or 20% @ 7)
+State loaded
+DISTANCE_REACHED x=15.3 z=-10046.8 in 19.13s (1148 ticks + 46.8 extra distance)
+TEST_MOVE_SPEED_CASE 268 (deltaFrames = 30% @ 8 or 70% @ 9)
+State loaded
+DISTANCE_REACHED x=0.6 z=-10006.3 in 21.07s (1264 ticks + 6.3 extra distance)
+TEST_MOVE_SPEED_CASE 269 (deltaFrames = 70% @ 11 or 30% @ 12)
+State loaded
+DISTANCE_REACHED x=0.0 z=-10078.0 in 26.18s (1571 ticks + 78.0 extra distance)
+TEST_MOVE_SPEED_CASE 270 (deltaFrames = 20% @ 13 or 80% @ 14)
+State loaded
+DISTANCE_REACHED x=5.3 z=-10136.5 in 29.47s (1768 ticks + 136.5 extra distance)
+TEST_MOVE_SPEED_CASE 271 (deltaFrames = 70% @ 16 or 30% @ 17)
+State loaded
+DISTANCE_REACHED x=-8.0 z=-10054.4 in 34.78s (2087 ticks + 54.4 extra distance)
+TEST_MOVE_SPEED_CASE 272 (deltaFrames = 10% @ 18 or 90% @ 19)
+State loaded
+DISTANCE_REACHED x=4.0 z=-10016.6 in 40.35s (2421 ticks + 16.6 extra distance)
+TEST_MOVE_SPEED_CASE 273 (deltaFrames = 60% @ 21 or 40% @ 22)
+State loaded
+DISTANCE_REACHED x=9.8 z=-10000.4 in 44.98s (2699 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 274 (deltaFrames = 100% @ 24 or 0% @ 25)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10025.4 in 50.42s (3025 ticks + 25.4 extra distance)
+TEST_MOVE_SPEED_CASE 275 (deltaFrames = 50% @ 26 or 50% @ 27)
+State loaded
+DISTANCE_REACHED x=11.9 z=-10083.5 in 55.68s (3341 ticks + 83.5 extra distance)
+TEST_MOVE_SPEED_CASE 276 (deltaFrames = 100% @ 29 or 0% @ 30)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10095.7 in 60.43s (3626 ticks + 95.7 extra distance)
+TEST_MOVE_SPEED_CASE 277 (deltaFrames = 40% @ 1 or 60% @ 2)
+State loaded
+DISTANCE_REACHED x=-2.0 z=-10013.6 in 16.15s (969 ticks + 13.6 extra distance)
+TEST_MOVE_SPEED_CASE 278 (deltaFrames = 90% @ 4 or 10% @ 5)
+State loaded
+DISTANCE_REACHED x=-2.2 z=-10036.6 in 17.63s (1058 ticks + 36.6 extra distance)
+TEST_MOVE_SPEED_CASE 279 (deltaFrames = 30% @ 6 or 70% @ 7)
+State loaded
+DISTANCE_REACHED x=-0.6 z=-10039.8 in 19.12s (1147 ticks + 39.8 extra distance)
+TEST_MOVE_SPEED_CASE 280 (deltaFrames = 80% @ 9 or 20% @ 10)
+State loaded
+DISTANCE_REACHED x=-0.0 z=-10033.4 in 21.95s (1317 ticks + 33.4 extra distance)
+TEST_MOVE_SPEED_CASE 281 (deltaFrames = 30% @ 11 or 70% @ 12)
+State loaded
+DISTANCE_REACHED x=-12.3 z=-10073.9 in 25.97s (1558 ticks + 73.9 extra distance)
+TEST_MOVE_SPEED_CASE 282 (deltaFrames = 70% @ 14 or 30% @ 15)
+State loaded
+DISTANCE_REACHED x=-2.7 z=-10014.3 in 26.97s (1618 ticks + 14.3 extra distance)
+TEST_MOVE_SPEED_CASE 283 (deltaFrames = 20% @ 16 or 80% @ 17)
+State loaded
+DISTANCE_REACHED x=2.6 z=-10048.1 in 35.62s (2137 ticks + 48.1 extra distance)
+TEST_MOVE_SPEED_CASE 284 (deltaFrames = 60% @ 19 or 40% @ 20)
+State loaded
+DISTANCE_REACHED x=-10.3 z=-10035.2 in 41.40s (2484 ticks + 35.2 extra distance)
+TEST_MOVE_SPEED_CASE 285 (deltaFrames = 10% @ 21 or 90% @ 22)
+State loaded
+DISTANCE_REACHED x=25.9 z=-10031.5 in 46.38s (2783 ticks + 31.5 extra distance)
+TEST_MOVE_SPEED_CASE 286 (deltaFrames = 60% @ 24 or 40% @ 25)
+State loaded
+DISTANCE_REACHED x=11.4 z=-10014.3 in 49.65s (2979 ticks + 14.3 extra distance)
+TEST_MOVE_SPEED_CASE 287 (deltaFrames = 100% @ 27 or 0% @ 28)
+State loaded
+DISTANCE_REACHED x=18.1 z=-10042.3 in 58.07s (3484 ticks + 42.3 extra distance)
+TEST_MOVE_SPEED_CASE 288 (deltaFrames = 50% @ 29 or 50% @ 30)
+State loaded
+DISTANCE_REACHED x=9.9 z=-10024.7 in 59.02s (3541 ticks + 24.7 extra distance)
+TEST_MOVE_SPEED_CASE 289 (deltaFrames = 90% @ 2 or 10% @ 3)
+State loaded
+DISTANCE_REACHED x=4.4 z=-10008.5 in 16.35s (981 ticks + 8.5 extra distance)
+TEST_MOVE_SPEED_CASE 290 (deltaFrames = 40% @ 4 or 60% @ 5)
+State loaded
+DISTANCE_REACHED x=-12.7 z=-10017.1 in 18.07s (1084 ticks + 17.1 extra distance)
+TEST_MOVE_SPEED_CASE 291 (deltaFrames = 90% @ 7 or 10% @ 8)
+State loaded
+DISTANCE_REACHED x=-2.4 z=-10035.3 in 20.00s (1200 ticks + 35.3 extra distance)
+TEST_MOVE_SPEED_CASE 292 (deltaFrames = 30% @ 9 or 70% @ 10)
+State loaded
+DISTANCE_REACHED x=6.6 z=-10051.0 in 22.33s (1340 ticks + 51.0 extra distance)
+TEST_MOVE_SPEED_CASE 293 (deltaFrames = 80% @ 12 or 20% @ 13)
+State loaded
+DISTANCE_REACHED x=-3.3 z=-10002.1 in 26.23s (1574 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 294 (deltaFrames = 20% @ 14 or 80% @ 15)
+State loaded
+DISTANCE_REACHED x=-0.8 z=-10006.9 in 28.90s (1734 ticks + 6.9 extra distance)
+TEST_MOVE_SPEED_CASE 295 (deltaFrames = 70% @ 17 or 30% @ 18)
+State loaded
+DISTANCE_REACHED x=-6.3 z=-10048.3 in 35.78s (2147 ticks + 48.3 extra distance)
+TEST_MOVE_SPEED_CASE 296 (deltaFrames = 20% @ 19 or 80% @ 20)
+State loaded
+DISTANCE_REACHED x=7.7 z=-10077.0 in 41.63s (2498 ticks + 77.0 extra distance)
+TEST_MOVE_SPEED_CASE 297 (deltaFrames = 60% @ 22 or 40% @ 23)
+State loaded
+DISTANCE_REACHED x=5.9 z=-10035.5 in 45.97s (2758 ticks + 35.5 extra distance)
+TEST_MOVE_SPEED_CASE 298 (deltaFrames = 10% @ 24 or 90% @ 25)
+State loaded
+DISTANCE_REACHED x=-7.5 z=-10105.4 in 53.15s (3189 ticks + 105.4 extra distance)
+TEST_MOVE_SPEED_CASE 299 (deltaFrames = 50% @ 27 or 50% @ 28)
+State loaded
+DISTANCE_REACHED x=-1.6 z=-10010.6 in 57.78s (3467 ticks + 10.6 extra distance)
+TEST_MOVE_SPEED_CASE 300 (deltaFrames = 100% @ 30 or 0% @ 31)
+State loaded
+DISTANCE_REACHED x=-7.7 z=-10002.9 in 63.02s (3781 ticks + 2.9 extra distance)
+TEST_MOVE_SPEED_CASE 301 (deltaFrames = 50% @ 2 or 50% @ 3)
+State loaded
+DISTANCE_REACHED x=20.1 z=-10017.8 in 16.57s (994 ticks + 17.8 extra distance)
+TEST_MOVE_SPEED_CASE 302 (deltaFrames = 90% @ 5 or 10% @ 6)
+State loaded
+DISTANCE_REACHED x=0.6 z=-10012.8 in 18.37s (1102 ticks + 12.8 extra distance)
+TEST_MOVE_SPEED_CASE 303 (deltaFrames = 40% @ 7 or 60% @ 8)
+State loaded
+DISTANCE_REACHED x=8.0 z=-10039.9 in 20.55s (1233 ticks + 39.9 extra distance)
+TEST_MOVE_SPEED_CASE 304 (deltaFrames = 80% @ 10 or 20% @ 11)
+State loaded
+DISTANCE_REACHED x=6.2 z=-10041.2 in 23.82s (1429 ticks + 41.2 extra distance)
+TEST_MOVE_SPEED_CASE 305 (deltaFrames = 30% @ 12 or 70% @ 13)
+State loaded
+DISTANCE_REACHED x=2.7 z=-10070.6 in 30.30s (1818 ticks + 70.6 extra distance)
+TEST_MOVE_SPEED_CASE 306 (deltaFrames = 80% @ 15 or 20% @ 16)
+State loaded
+DISTANCE_REACHED x=-3.6 z=-10128.0 in 30.42s (1825 ticks + 128.0 extra distance)
+TEST_MOVE_SPEED_CASE 307 (deltaFrames = 20% @ 17 or 80% @ 18)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10028.7 in 36.82s (2209 ticks + 28.7 extra distance)
+TEST_MOVE_SPEED_CASE 308 (deltaFrames = 70% @ 20 or 30% @ 21)
+State loaded
+DISTANCE_REACHED x=-3.5 z=-10044.2 in 43.65s (2619 ticks + 44.2 extra distance)
+TEST_MOVE_SPEED_CASE 309 (deltaFrames = 10% @ 22 or 90% @ 23)
+State loaded
+DISTANCE_REACHED x=6.6 z=-10018.1 in 50.02s (3001 ticks + 18.1 extra distance)
+TEST_MOVE_SPEED_CASE 310 (deltaFrames = 60% @ 25 or 40% @ 26)
+State loaded
+DISTANCE_REACHED x=3.3 z=-10064.7 in 55.92s (3355 ticks + 64.7 extra distance)
+TEST_MOVE_SPEED_CASE 311 (deltaFrames = 10% @ 27 or 90% @ 28)
+State loaded
+DISTANCE_REACHED x=14.5 z=-10007.2 in 61.87s (3712 ticks + 7.3 extra distance)
+TEST_MOVE_SPEED_CASE 312 (deltaFrames = 50% @ 30 or 50% @ 31)
+State loaded
+DISTANCE_REACHED x=7.0 z=-10039.7 in 64.58s (3875 ticks + 39.7 extra distance)
+TEST_MOVE_SPEED_CASE 313 (deltaFrames = 100% @ 3 or 0% @ 4)
+State loaded
+DISTANCE_REACHED x=5.1 z=-10008.4 in 16.87s (1012 ticks + 8.4 extra distance)
+TEST_MOVE_SPEED_CASE 314 (deltaFrames = 40% @ 5 or 60% @ 6)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10020.3 in 18.58s (1115 ticks + 20.3 extra distance)
+TEST_MOVE_SPEED_CASE 315 (deltaFrames = 90% @ 8 or 10% @ 9)
+State loaded
+DISTANCE_REACHED x=-6.6 z=-10004.7 in 20.80s (1248 ticks + 4.7 extra distance)
+TEST_MOVE_SPEED_CASE 316 (deltaFrames = 40% @ 10 or 60% @ 11)
+State loaded
+DISTANCE_REACHED x=0.5 z=-10079.0 in 24.07s (1444 ticks + 79.0 extra distance)
+TEST_MOVE_SPEED_CASE 317 (deltaFrames = 80% @ 13 or 20% @ 14)
+State loaded
+DISTANCE_REACHED x=-6.8 z=-10058.2 in 28.17s (1690 ticks + 58.2 extra distance)
+TEST_MOVE_SPEED_CASE 318 (deltaFrames = 30% @ 15 or 70% @ 16)
+State loaded
+DISTANCE_REACHED x=-12.9 z=-10038.8 in 33.02s (1981 ticks + 38.8 extra distance)
+TEST_MOVE_SPEED_CASE 319 (deltaFrames = 70% @ 18 or 30% @ 19)
+State loaded
+DISTANCE_REACHED x=-0.8 z=-10044.4 in 41.50s (2490 ticks + 44.4 extra distance)
+TEST_MOVE_SPEED_CASE 320 (deltaFrames = 20% @ 20 or 80% @ 21)
+State loaded
+DISTANCE_REACHED x=-7.3 z=-10000.4 in 44.73s (2684 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 321 (deltaFrames = 70% @ 23 or 30% @ 24)
+State loaded
+DISTANCE_REACHED x=-3.5 z=-10109.7 in 48.95s (2937 ticks + 109.7 extra distance)
+TEST_MOVE_SPEED_CASE 322 (deltaFrames = 10% @ 25 or 90% @ 26)
+State loaded
+DISTANCE_REACHED x=-5.2 z=-10085.3 in 53.55s (3213 ticks + 85.3 extra distance)
+TEST_MOVE_SPEED_CASE 323 (deltaFrames = 60% @ 28 or 40% @ 29)
+State loaded
+DISTANCE_REACHED x=12.6 z=-10051.3 in 58.27s (3496 ticks + 51.3 extra distance)
+TEST_MOVE_SPEED_CASE 324 (deltaFrames = 100% @ 1 or 0% @ 2)
+State loaded
+DISTANCE_REACHED x=0.4 z=-10006.3 in 15.80s (948 ticks + 6.3 extra distance)
+TEST_MOVE_SPEED_CASE 325 (deltaFrames = 50% @ 3 or 50% @ 4)
+State loaded
+DISTANCE_REACHED x=-1.7 z=-10018.6 in 17.40s (1044 ticks + 18.6 extra distance)
+TEST_MOVE_SPEED_CASE 326 (deltaFrames = 100% @ 6 or 0% @ 7)
+State loaded
+DISTANCE_REACHED x=-2.3 z=-10012.0 in 18.92s (1135 ticks + 12.0 extra distance)
+TEST_MOVE_SPEED_CASE 327 (deltaFrames = 40% @ 8 or 60% @ 9)
+State loaded
+DISTANCE_REACHED x=-4.3 z=-10066.1 in 21.23s (1274 ticks + 66.1 extra distance)
+TEST_MOVE_SPEED_CASE 328 (deltaFrames = 90% @ 11 or 10% @ 12)
+State loaded
+DISTANCE_REACHED x=-5.9 z=-10000.1 in 24.07s (1444 ticks + 0.1 extra distance)
+TEST_MOVE_SPEED_CASE 329 (deltaFrames = 30% @ 13 or 70% @ 14)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10086.1 in 30.40s (1824 ticks + 86.1 extra distance)
+TEST_MOVE_SPEED_CASE 330 (deltaFrames = 80% @ 16 or 20% @ 17)
+State loaded
+DISTANCE_REACHED x=2.1 z=-10040.2 in 34.03s (2042 ticks + 40.2 extra distance)
+TEST_MOVE_SPEED_CASE 331 (deltaFrames = 30% @ 18 or 70% @ 19)
+State loaded
+DISTANCE_REACHED x=-7.0 z=-10045.7 in 39.92s (2395 ticks + 45.7 extra distance)
+TEST_MOVE_SPEED_CASE 332 (deltaFrames = 70% @ 21 or 30% @ 22)
+State loaded
+DISTANCE_REACHED x=-9.8 z=-10025.2 in 43.70s (2622 ticks + 25.2 extra distance)
+TEST_MOVE_SPEED_CASE 333 (deltaFrames = 20% @ 23 or 80% @ 24)
+State loaded
+DISTANCE_REACHED x=5.9 z=-10026.7 in 48.82s (2929 ticks + 26.7 extra distance)
+TEST_MOVE_SPEED_CASE 334 (deltaFrames = 60% @ 26 or 40% @ 27)
+State loaded
+DISTANCE_REACHED x=-7.9 z=-10042.5 in 55.47s (3328 ticks + 42.5 extra distance)
+TEST_MOVE_SPEED_CASE 335 (deltaFrames = 10% @ 28 or 90% @ 29)
+State loaded
+DISTANCE_REACHED x=-8.7 z=-10083.5 in 59.75s (3585 ticks + 83.5 extra distance)
+TEST_MOVE_SPEED_CASE 336 (deltaFrames = 60% @ 1 or 40% @ 2)
+State loaded
+DISTANCE_REACHED x=2.2 z=-10001.8 in 15.85s (951 ticks + 1.8 extra distance)
+TEST_MOVE_SPEED_CASE 337 (deltaFrames = 100% @ 4 or 0% @ 5)
+State loaded
+DISTANCE_REACHED x=3.9 z=-10001.5 in 17.48s (1049 ticks + 1.5 extra distance)
+TEST_MOVE_SPEED_CASE 338 (deltaFrames = 50% @ 6 or 50% @ 7)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10008.9 in 19.20s (1152 ticks + 8.9 extra distance)
+TEST_MOVE_SPEED_CASE 339 (deltaFrames = 90% @ 9 or 10% @ 10)
+State loaded
+DISTANCE_REACHED x=-0.6 z=-10011.8 in 22.00s (1320 ticks + 11.8 extra distance)
+TEST_MOVE_SPEED_CASE 340 (deltaFrames = 40% @ 11 or 60% @ 12)
+State loaded
+DISTANCE_REACHED x=0.9 z=-10032.3 in 24.77s (1486 ticks + 32.3 extra distance)
+TEST_MOVE_SPEED_CASE 341 (deltaFrames = 90% @ 14 or 10% @ 15)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10020.6 in 34.78s (2087 ticks + 20.6 extra distance)
+TEST_MOVE_SPEED_CASE 342 (deltaFrames = 30% @ 16 or 70% @ 17)
+State loaded
+DISTANCE_REACHED x=-1.4 z=-10084.9 in 34.83s (2090 ticks + 84.9 extra distance)
+TEST_MOVE_SPEED_CASE 343 (deltaFrames = 80% @ 19 or 20% @ 20)
+State loaded
+DISTANCE_REACHED x=5.8 z=-10046.3 in 40.65s (2439 ticks + 46.3 extra distance)
+TEST_MOVE_SPEED_CASE 344 (deltaFrames = 20% @ 21 or 80% @ 22)
+State loaded
+DISTANCE_REACHED x=-4.5 z=-10001.1 in 45.08s (2705 ticks + 1.1 extra distance)
+TEST_MOVE_SPEED_CASE 345 (deltaFrames = 70% @ 24 or 30% @ 25)
+State loaded
+DISTANCE_REACHED x=10.2 z=-10021.9 in 51.05s (3063 ticks + 21.9 extra distance)
+TEST_MOVE_SPEED_CASE 346 (deltaFrames = 20% @ 26 or 80% @ 27)
+State loaded
+DISTANCE_REACHED x=11.1 z=-10050.7 in 59.43s (3566 ticks + 50.7 extra distance)
+TEST_MOVE_SPEED_CASE 347 (deltaFrames = 60% @ 29 or 40% @ 30)
+State loaded
+DISTANCE_REACHED x=-2.5 z=-10008.1 in 60.32s (3619 ticks + 8.1 extra distance)
+TEST_MOVE_SPEED_CASE 348 (deltaFrames = 10% @ 1 or 90% @ 2)
+State loaded
+DISTANCE_REACHED x=2.2 z=-10003.9 in 16.30s (978 ticks + 3.9 extra distance)
+TEST_MOVE_SPEED_CASE 349 (deltaFrames = 50% @ 4 or 50% @ 5)
+State loaded
+DISTANCE_REACHED x=3.2 z=-10035.4 in 17.88s (1073 ticks + 35.4 extra distance)
+TEST_MOVE_SPEED_CASE 350 (deltaFrames = 100% @ 7 or 0% @ 8)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10057.0 in 20.08s (1205 ticks + 57.0 extra distance)
+TEST_MOVE_SPEED_CASE 351 (deltaFrames = 50% @ 9 or 50% @ 10)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10067.0 in 22.35s (1341 ticks + 67.0 extra distance)
+TEST_MOVE_SPEED_CASE 352 (deltaFrames = 90% @ 12 or 10% @ 13)
+State loaded
+DISTANCE_REACHED x=-3.3 z=-10032.1 in 26.02s (1561 ticks + 32.1 extra distance)
+TEST_MOVE_SPEED_CASE 353 (deltaFrames = 40% @ 14 or 60% @ 15)
+State loaded
+DISTANCE_REACHED x=-2.7 z=-10023.9 in 31.65s (1899 ticks + 23.9 extra distance)
+TEST_MOVE_SPEED_CASE 354 (deltaFrames = 80% @ 17 or 20% @ 18)
+State loaded
+DISTANCE_REACHED x=3.2 z=-10002.2 in 35.57s (2134 ticks + 2.2 extra distance)
+TEST_MOVE_SPEED_CASE 355 (deltaFrames = 30% @ 19 or 70% @ 20)
+State loaded
+DISTANCE_REACHED x=1.6 z=-10132.2 in 37.47s (2248 ticks + 132.2 extra distance)
+TEST_MOVE_SPEED_CASE 356 (deltaFrames = 80% @ 22 or 20% @ 23)
+State loaded
+DISTANCE_REACHED x=-9.3 z=-10026.0 in 47.37s (2842 ticks + 26.0 extra distance)
+TEST_MOVE_SPEED_CASE 357 (deltaFrames = 20% @ 24 or 80% @ 25)
+State loaded
+DISTANCE_REACHED x=-3.7 z=-10083.3 in 51.70s (3102 ticks + 83.3 extra distance)
+TEST_MOVE_SPEED_CASE 358 (deltaFrames = 70% @ 27 or 30% @ 28)
+State loaded
+DISTANCE_REACHED x=-1.3 z=-10094.3 in 58.70s (3522 ticks + 94.3 extra distance)
+TEST_MOVE_SPEED_CASE 359 (deltaFrames = 10% @ 29 or 90% @ 30)
+State loaded
+DISTANCE_REACHED x=7.4 z=-10027.8 in 61.82s (3709 ticks + 27.8 extra distance)
+TEST_MOVE_SPEED_CASE 360 (deltaFrames = 60% @ 2 or 40% @ 3)
+State loaded
+DISTANCE_REACHED x=0.5 z=-10002.1 in 16.57s (994 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 361 (deltaFrames = 10% @ 4 or 90% @ 5)
+State loaded
+DISTANCE_REACHED x=-4.3 z=-10051.4 in 18.15s (1089 ticks + 51.4 extra distance)
+TEST_MOVE_SPEED_CASE 362 (deltaFrames = 50% @ 7 or 50% @ 8)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10034.1 in 19.65s (1179 ticks + 34.1 extra distance)
+TEST_MOVE_SPEED_CASE 363 (deltaFrames = 100% @ 10 or 0% @ 11)
+State loaded
+DISTANCE_REACHED x=-2.8 z=-10006.4 in 23.02s (1381 ticks + 6.4 extra distance)
+TEST_MOVE_SPEED_CASE 364 (deltaFrames = 40% @ 12 or 60% @ 13)
+State loaded
+DISTANCE_REACHED x=-2.8 z=-10052.5 in 25.22s (1513 ticks + 52.5 extra distance)
+TEST_MOVE_SPEED_CASE 365 (deltaFrames = 90% @ 15 or 10% @ 16)
+State loaded
+DISTANCE_REACHED x=0.5 z=-10046.8 in 31.97s (1918 ticks + 46.8 extra distance)
+TEST_MOVE_SPEED_CASE 366 (deltaFrames = 40% @ 17 or 60% @ 18)
+State loaded
+DISTANCE_REACHED x=-4.4 z=-10131.3 in 35.82s (2149 ticks + 131.3 extra distance)
+TEST_MOVE_SPEED_CASE 367 (deltaFrames = 80% @ 20 or 20% @ 21)
+State loaded
+DISTANCE_REACHED x=0.7 z=-10003.3 in 43.10s (2586 ticks + 3.3 extra distance)
+TEST_MOVE_SPEED_CASE 368 (deltaFrames = 30% @ 22 or 70% @ 23)
+State loaded
+DISTANCE_REACHED x=-5.8 z=-10093.4 in 48.45s (2907 ticks + 93.4 extra distance)
+TEST_MOVE_SPEED_CASE 369 (deltaFrames = 70% @ 25 or 30% @ 26)
+State loaded
+DISTANCE_REACHED x=2.8 z=-10008.4 in 52.73s (3164 ticks + 8.4 extra distance)
+TEST_MOVE_SPEED_CASE 370 (deltaFrames = 20% @ 27 or 80% @ 28)
+State loaded
+DISTANCE_REACHED x=-10.4 z=-10110.4 in 67.22s (4033 ticks + 110.4 extra distance)
+TEST_MOVE_SPEED_CASE 371 (deltaFrames = 70% @ 30 or 30% @ 31)
+State loaded
+DISTANCE_REACHED x=4.5 z=-10048.0 in 63.17s (3790 ticks + 48.0 extra distance)
+TEST_MOVE_SPEED_CASE 372 (deltaFrames = 10% @ 2 or 90% @ 3)
+State loaded
+DISTANCE_REACHED x=1.5 z=-10026.8 in 16.85s (1011 ticks + 26.8 extra distance)
+TEST_MOVE_SPEED_CASE 373 (deltaFrames = 60% @ 5 or 40% @ 6)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10013.1 in 18.40s (1104 ticks + 13.1 extra distance)
+TEST_MOVE_SPEED_CASE 374 (deltaFrames = 100% @ 8 or 0% @ 9)
+State loaded
+DISTANCE_REACHED x=0.8 z=-10012.2 in 20.82s (1249 ticks + 12.2 extra distance)
+TEST_MOVE_SPEED_CASE 375 (deltaFrames = 50% @ 10 or 50% @ 11)
+State loaded
+DISTANCE_REACHED x=-5.4 z=-10013.2 in 23.67s (1420 ticks + 13.2 extra distance)
+TEST_MOVE_SPEED_CASE 376 (deltaFrames = 100% @ 13 or 0% @ 14)
+State loaded
+DISTANCE_REACHED x=-8.2 z=-10081.3 in 27.75s (1665 ticks + 81.3 extra distance)
+TEST_MOVE_SPEED_CASE 377 (deltaFrames = 40% @ 15 or 60% @ 16)
+State loaded
+DISTANCE_REACHED x=3.4 z=-10004.3 in 33.05s (1983 ticks + 4.3 extra distance)
+TEST_MOVE_SPEED_CASE 378 (deltaFrames = 90% @ 18 or 10% @ 19)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10093.4 in 38.62s (2317 ticks + 93.4 extra distance)
+TEST_MOVE_SPEED_CASE 379 (deltaFrames = 30% @ 20 or 70% @ 21)
+State loaded
+DISTANCE_REACHED x=11.3 z=-10073.3 in 43.52s (2611 ticks + 73.3 extra distance)
+TEST_MOVE_SPEED_CASE 380 (deltaFrames = 80% @ 23 or 20% @ 24)
+State loaded
+DISTANCE_REACHED x=5.9 z=-10002.1 in 47.20s (2832 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 381 (deltaFrames = 30% @ 25 or 70% @ 26)
+State loaded
+DISTANCE_REACHED x=13.6 z=-10056.9 in 55.27s (3316 ticks + 56.9 extra distance)
+TEST_MOVE_SPEED_CASE 382 (deltaFrames = 70% @ 28 or 30% @ 29)
+State loaded
+DISTANCE_REACHED x=-14.6 z=-10042.8 in 59.92s (3595 ticks + 42.8 extra distance)
+TEST_MOVE_SPEED_CASE 383 (deltaFrames = 20% @ 30 or 80% @ 31)
+State loaded
+DISTANCE_REACHED x=2.9 z=-10049.5 in 65.23s (3914 ticks + 49.5 extra distance)
+TEST_MOVE_SPEED_CASE 384 (deltaFrames = 60% @ 3 or 40% @ 4)
+State loaded
+DISTANCE_REACHED x=2.3 z=-10033.9 in 17.22s (1033 ticks + 33.9 extra distance)
+TEST_MOVE_SPEED_CASE 385 (deltaFrames = 10% @ 5 or 90% @ 6)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10033.2 in 18.80s (1128 ticks + 33.2 extra distance)
+TEST_MOVE_SPEED_CASE 386 (deltaFrames = 60% @ 8 or 40% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.1 z=-10000.4 in 20.87s (1252 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 387 (deltaFrames = 100% @ 11 or 0% @ 12)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10055.0 in 24.40s (1464 ticks + 55.0 extra distance)
+TEST_MOVE_SPEED_CASE 388 (deltaFrames = 50% @ 13 or 50% @ 14)
+State loaded
+DISTANCE_REACHED x=-10.9 z=-10086.4 in 30.20s (1812 ticks + 86.5 extra distance)
+TEST_MOVE_SPEED_CASE 389 (deltaFrames = 90% @ 16 or 10% @ 17)
+State loaded
+DISTANCE_REACHED x=-5.5 z=-10033.3 in 33.82s (2029 ticks + 33.3 extra distance)
+TEST_MOVE_SPEED_CASE 390 (deltaFrames = 40% @ 18 or 60% @ 19)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10009.6 in 38.80s (2328 ticks + 9.6 extra distance)
+TEST_MOVE_SPEED_CASE 391 (deltaFrames = 90% @ 21 or 10% @ 22)
+State loaded
+DISTANCE_REACHED x=6.3 z=-10038.8 in 39.75s (2385 ticks + 38.8 extra distance)
+TEST_MOVE_SPEED_CASE 392 (deltaFrames = 30% @ 23 or 70% @ 24)
+State loaded
+DISTANCE_REACHED x=13.2 z=-10021.1 in 48.62s (2917 ticks + 21.1 extra distance)
+TEST_MOVE_SPEED_CASE 393 (deltaFrames = 80% @ 26 or 20% @ 27)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10052.1 in 58.97s (3538 ticks + 52.1 extra distance)
+TEST_MOVE_SPEED_CASE 394 (deltaFrames = 20% @ 28 or 80% @ 29)
+State loaded
+DISTANCE_REACHED x=8.1 z=-10049.0 in 58.58s (3515 ticks + 49.0 extra distance)
+TEST_MOVE_SPEED_CASE 395 (deltaFrames = 70% @ 1 or 30% @ 2)
+State loaded
+DISTANCE_REACHED x=6.9 z=-10008.1 in 16.00s (960 ticks + 8.1 extra distance)
+TEST_MOVE_SPEED_CASE 396 (deltaFrames = 20% @ 3 or 80% @ 4)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10029.2 in 17.58s (1055 ticks + 29.2 extra distance)
+TEST_MOVE_SPEED_CASE 397 (deltaFrames = 60% @ 6 or 40% @ 7)
+State loaded
+DISTANCE_REACHED x=-4.4 z=-10049.3 in 19.45s (1167 ticks + 49.3 extra distance)
+TEST_MOVE_SPEED_CASE 398 (deltaFrames = 10% @ 8 or 90% @ 9)
+State loaded
+DISTANCE_REACHED x=-9.9 z=-10056.6 in 21.23s (1274 ticks + 56.6 extra distance)
+TEST_MOVE_SPEED_CASE 399 (deltaFrames = 50% @ 11 or 50% @ 12)
+State loaded
+DISTANCE_REACHED x=-4.4 z=-10068.1 in 25.92s (1555 ticks + 68.1 extra distance)
+TEST_MOVE_SPEED_CASE 400 (deltaFrames = 100% @ 14 or 0% @ 15)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10069.5 in 29.42s (1765 ticks + 69.5 extra distance)
+TEST_MOVE_SPEED_CASE 401 (deltaFrames = 50% @ 16 or 50% @ 17)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10037.2 in 34.95s (2097 ticks + 37.2 extra distance)
+TEST_MOVE_SPEED_CASE 402 (deltaFrames = 90% @ 19 or 10% @ 20)
+State loaded
+DISTANCE_REACHED x=-2.3 z=-10050.8 in 40.43s (2426 ticks + 50.8 extra distance)
+TEST_MOVE_SPEED_CASE 403 (deltaFrames = 40% @ 21 or 60% @ 22)
+State loaded
+DISTANCE_REACHED x=-1.3 z=-10032.0 in 46.45s (2787 ticks + 32.0 extra distance)
+TEST_MOVE_SPEED_CASE 404 (deltaFrames = 90% @ 24 or 10% @ 25)
+State loaded
+DISTANCE_REACHED x=-0.8 z=-10101.2 in 49.82s (2989 ticks + 101.2 extra distance)
+TEST_MOVE_SPEED_CASE 405 (deltaFrames = 30% @ 26 or 70% @ 27)
+State loaded
+DISTANCE_REACHED x=13.9 z=-10020.9 in 53.42s (3205 ticks + 21.0 extra distance)
+TEST_MOVE_SPEED_CASE 406 (deltaFrames = 80% @ 29 or 20% @ 30)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10114.4 in 60.85s (3651 ticks + 114.4 extra distance)
+TEST_MOVE_SPEED_CASE 407 (deltaFrames = 20% @ 1 or 80% @ 2)
+State loaded
+DISTANCE_REACHED x=-1.5 z=-10009.8 in 16.18s (971 ticks + 9.8 extra distance)
+TEST_MOVE_SPEED_CASE 408 (deltaFrames = 70% @ 4 or 30% @ 5)
+State loaded
+DISTANCE_REACHED x=5.3 z=-10017.3 in 17.78s (1067 ticks + 17.3 extra distance)
+TEST_MOVE_SPEED_CASE 409 (deltaFrames = 20% @ 6 or 80% @ 7)
+State loaded
+DISTANCE_REACHED x=0.6 z=-10013.2 in 18.85s (1131 ticks + 13.2 extra distance)
+TEST_MOVE_SPEED_CASE 410 (deltaFrames = 60% @ 9 or 40% @ 10)
+State loaded
+DISTANCE_REACHED x=45.8 z=-10049.2 in 22.12s (1327 ticks + 49.3 extra distance)
+TEST_MOVE_SPEED_CASE 411 (deltaFrames = 10% @ 11 or 90% @ 12)
+State loaded
+DISTANCE_REACHED x=-1.9 z=-10039.9 in 25.80s (1548 ticks + 39.9 extra distance)
+TEST_MOVE_SPEED_CASE 412 (deltaFrames = 50% @ 14 or 50% @ 15)
+State loaded
+DISTANCE_REACHED x=-1.8 z=-10090.2 in 28.77s (1726 ticks + 90.2 extra distance)
+TEST_MOVE_SPEED_CASE 413 (deltaFrames = 100% @ 17 or 0% @ 18)
+State loaded
+DISTANCE_REACHED x=3.6 z=-10063.1 in 36.00s (2160 ticks + 63.1 extra distance)
+TEST_MOVE_SPEED_CASE 414 (deltaFrames = 50% @ 19 or 50% @ 20)
+State loaded
+DISTANCE_REACHED x=-4.3 z=-10004.6 in 42.27s (2536 ticks + 4.6 extra distance)
+TEST_MOVE_SPEED_CASE 415 (deltaFrames = 90% @ 22 or 10% @ 23)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10027.8 in 46.42s (2785 ticks + 27.8 extra distance)
+TEST_MOVE_SPEED_CASE 416 (deltaFrames = 40% @ 24 or 60% @ 25)
+State loaded
+DISTANCE_REACHED x=-3.3 z=-10077.3 in 52.10s (3126 ticks + 77.3 extra distance)
+TEST_MOVE_SPEED_CASE 417 (deltaFrames = 80% @ 27 or 20% @ 28)
+State loaded
+DISTANCE_REACHED x=7.0 z=-10040.4 in 57.58s (3455 ticks + 40.4 extra distance)
+TEST_MOVE_SPEED_CASE 418 (deltaFrames = 30% @ 29 or 70% @ 30)
+State loaded
+DISTANCE_REACHED x=-1.6 z=-10061.2 in 62.90s (3774 ticks + 61.2 extra distance)
+TEST_MOVE_SPEED_CASE 419 (deltaFrames = 80% @ 2 or 20% @ 3)
+State loaded
+DISTANCE_REACHED x=-0.4 z=-10020.4 in 16.57s (994 ticks + 20.4 extra distance)
+TEST_MOVE_SPEED_CASE 420 (deltaFrames = 20% @ 4 or 80% @ 5)
+State loaded
+DISTANCE_REACHED x=-17.9 z=-10019.7 in 18.03s (1082 ticks + 19.8 extra distance)
+TEST_MOVE_SPEED_CASE 421 (deltaFrames = 70% @ 7 or 30% @ 8)
+State loaded
+DISTANCE_REACHED x=2.1 z=-10017.7 in 20.70s (1242 ticks + 17.7 extra distance)
+TEST_MOVE_SPEED_CASE 422 (deltaFrames = 10% @ 9 or 90% @ 10)
+State loaded
+DISTANCE_REACHED x=-2.1 z=-10029.4 in 22.95s (1377 ticks + 29.4 extra distance)
+TEST_MOVE_SPEED_CASE 423 (deltaFrames = 60% @ 12 or 40% @ 13)
+State loaded
+DISTANCE_REACHED x=1.4 z=-10007.0 in 26.27s (1576 ticks + 7.0 extra distance)
+TEST_MOVE_SPEED_CASE 424 (deltaFrames = 10% @ 14 or 90% @ 15)
+State loaded
+DISTANCE_REACHED x=1.5 z=-10010.0 in 31.07s (1864 ticks + 10.0 extra distance)
+TEST_MOVE_SPEED_CASE 425 (deltaFrames = 50% @ 17 or 50% @ 18)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10032.6 in 37.35s (2241 ticks + 32.6 extra distance)
+TEST_MOVE_SPEED_CASE 426 (deltaFrames = 100% @ 20 or 0% @ 21)
+State loaded
+DISTANCE_REACHED x=8.5 z=-10042.6 in 44.02s (2641 ticks + 42.6 extra distance)
+TEST_MOVE_SPEED_CASE 427 (deltaFrames = 40% @ 22 or 60% @ 23)
+State loaded
+DISTANCE_REACHED x=6.0 z=-10002.9 in 46.75s (2805 ticks + 2.9 extra distance)
+TEST_MOVE_SPEED_CASE 428 (deltaFrames = 90% @ 25 or 10% @ 26)
+State loaded
+DISTANCE_REACHED x=-5.2 z=-10049.9 in 53.13s (3188 ticks + 49.9 extra distance)
+TEST_MOVE_SPEED_CASE 429 (deltaFrames = 40% @ 27 or 60% @ 28)
+State loaded
+DISTANCE_REACHED x=25.8 z=-10032.2 in 57.08s (3425 ticks + 32.2 extra distance)
+TEST_MOVE_SPEED_CASE 430 (deltaFrames = 80% @ 30 or 20% @ 31)
+State loaded
+DISTANCE_REACHED x=-0.4 z=-10039.3 in 62.93s (3776 ticks + 39.3 extra distance)
+TEST_MOVE_SPEED_CASE 431 (deltaFrames = 30% @ 2 or 70% @ 3)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10008.2 in 16.77s (1006 ticks + 8.2 extra distance)
+TEST_MOVE_SPEED_CASE 432 (deltaFrames = 70% @ 5 or 30% @ 6)
+State loaded
+DISTANCE_REACHED x=5.3 z=-10030.4 in 18.47s (1108 ticks + 30.4 extra distance)
+TEST_MOVE_SPEED_CASE 433 (deltaFrames = 20% @ 7 or 80% @ 8)
+State loaded
+DISTANCE_REACHED x=-6.4 z=-10069.9 in 20.45s (1227 ticks + 69.9 extra distance)
+TEST_MOVE_SPEED_CASE 434 (deltaFrames = 70% @ 10 or 30% @ 11)
+State loaded
+DISTANCE_REACHED x=1.9 z=-10070.4 in 23.53s (1412 ticks + 70.4 extra distance)
+TEST_MOVE_SPEED_CASE 435 (deltaFrames = 10% @ 12 or 90% @ 13)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10097.1 in 27.55s (1653 ticks + 97.1 extra distance)
+TEST_MOVE_SPEED_CASE 436 (deltaFrames = 60% @ 15 or 40% @ 16)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10094.7 in 30.82s (1849 ticks + 94.7 extra distance)
+TEST_MOVE_SPEED_CASE 437 (deltaFrames = 100% @ 18 or 0% @ 19)
+State loaded
+DISTANCE_REACHED x=0.9 z=-10024.4 in 37.82s (2269 ticks + 24.4 extra distance)
+TEST_MOVE_SPEED_CASE 438 (deltaFrames = 50% @ 20 or 50% @ 21)
+State loaded
+DISTANCE_REACHED x=-2.4 z=-10052.5 in 44.08s (2645 ticks + 52.5 extra distance)
+TEST_MOVE_SPEED_CASE 439 (deltaFrames = 100% @ 23 or 0% @ 24)
+State loaded
+DISTANCE_REACHED x=7.9 z=-10069.8 in 48.70s (2922 ticks + 69.8 extra distance)
+TEST_MOVE_SPEED_CASE 440 (deltaFrames = 40% @ 25 or 60% @ 26)
+State loaded
+DISTANCE_REACHED x=9.4 z=-10072.7 in 53.80s (3228 ticks + 72.7 extra distance)
+TEST_MOVE_SPEED_CASE 441 (deltaFrames = 90% @ 28 or 10% @ 29)
+State loaded
+DISTANCE_REACHED x=84.8 z=-10125.1 in 66.52s (3991 ticks + 125.5 extra distance)
+TEST_MOVE_SPEED_CASE 442 (deltaFrames = 30% @ 30 or 70% @ 31)
+State loaded
+DISTANCE_REACHED x=5.7 z=-10079.8 in 65.52s (3931 ticks + 79.8 extra distance)
+TEST_MOVE_SPEED_CASE 443 (deltaFrames = 80% @ 3 or 20% @ 4)
+State loaded
+DISTANCE_REACHED x=-3.8 z=-10028.0 in 17.08s (1025 ticks + 28.0 extra distance)
+TEST_MOVE_SPEED_CASE 444 (deltaFrames = 30% @ 5 or 70% @ 6)
+State loaded
+DISTANCE_REACHED x=-2.9 z=-10027.0 in 18.57s (1114 ticks + 27.0 extra distance)
+TEST_MOVE_SPEED_CASE 445 (deltaFrames = 70% @ 8 or 30% @ 9)
+State loaded
+DISTANCE_REACHED x=-2.3 z=-10020.1 in 20.92s (1255 ticks + 20.1 extra distance)
+TEST_MOVE_SPEED_CASE 446 (deltaFrames = 20% @ 10 or 80% @ 11)
+State loaded
+DISTANCE_REACHED x=6.7 z=-10006.3 in 24.33s (1460 ticks + 6.3 extra distance)
+TEST_MOVE_SPEED_CASE 447 (deltaFrames = 60% @ 13 or 40% @ 14)
+State loaded
+DISTANCE_REACHED x=6.3 z=-10023.1 in 27.05s (1623 ticks + 23.1 extra distance)
+TEST_MOVE_SPEED_CASE 448 (deltaFrames = 10% @ 15 or 90% @ 16)
+State loaded
+DISTANCE_REACHED x=0.2 z=-10073.2 in 33.15s (1989 ticks + 73.2 extra distance)
+TEST_MOVE_SPEED_CASE 449 (deltaFrames = 60% @ 18 or 40% @ 19)
+State loaded
+DISTANCE_REACHED x=6.5 z=-10033.5 in 38.37s (2302 ticks + 33.5 extra distance)
+TEST_MOVE_SPEED_CASE 450 (deltaFrames = 100% @ 21 or 0% @ 22)
+State loaded
+DISTANCE_REACHED x=4.6 z=-10067.4 in 44.47s (2668 ticks + 67.4 extra distance)
+TEST_MOVE_SPEED_CASE 451 (deltaFrames = 50% @ 23 or 50% @ 24)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10017.1 in 49.38s (2963 ticks + 17.1 extra distance)
+TEST_MOVE_SPEED_CASE 452 (deltaFrames = 90% @ 26 or 10% @ 27)
+State loaded
+DISTANCE_REACHED x=6.5 z=-10079.7 in 55.68s (3341 ticks + 79.7 extra distance)
+TEST_MOVE_SPEED_CASE 453 (deltaFrames = 40% @ 28 or 60% @ 29)
+State loaded
+DISTANCE_REACHED x=8.7 z=-10042.0 in 53.42s (3205 ticks + 42.0 extra distance)
+TEST_MOVE_SPEED_CASE 454 (deltaFrames = 90% @ 1 or 10% @ 2)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10004.5 in 15.88s (953 ticks + 4.5 extra distance)
+TEST_MOVE_SPEED_CASE 455 (deltaFrames = 30% @ 3 or 70% @ 4)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10039.1 in 17.48s (1049 ticks + 39.1 extra distance)
+TEST_MOVE_SPEED_CASE 456 (deltaFrames = 80% @ 6 or 20% @ 7)
+State loaded
+DISTANCE_REACHED x=15.3 z=-10046.8 in 19.13s (1148 ticks + 46.8 extra distance)
+TEST_MOVE_SPEED_CASE 457 (deltaFrames = 20% @ 8 or 80% @ 9)
+State loaded
+DISTANCE_REACHED x=-3.1 z=-10070.1 in 21.87s (1312 ticks + 70.1 extra distance)
+TEST_MOVE_SPEED_CASE 458 (deltaFrames = 70% @ 11 or 30% @ 12)
+State loaded
+DISTANCE_REACHED x=2.1 z=-10038.3 in 25.63s (1538 ticks + 38.3 extra distance)
+TEST_MOVE_SPEED_CASE 459 (deltaFrames = 20% @ 13 or 80% @ 14)
+State loaded
+DISTANCE_REACHED x=5.3 z=-10136.5 in 29.47s (1768 ticks + 136.5 extra distance)
+TEST_MOVE_SPEED_CASE 460 (deltaFrames = 60% @ 16 or 40% @ 17)
+State loaded
+DISTANCE_REACHED x=2.3 z=-10003.4 in 34.73s (2084 ticks + 3.4 extra distance)
+TEST_MOVE_SPEED_CASE 461 (deltaFrames = 10% @ 18 or 90% @ 19)
+State loaded
+DISTANCE_REACHED x=4.0 z=-10016.6 in 40.35s (2421 ticks + 16.6 extra distance)
+TEST_MOVE_SPEED_CASE 462 (deltaFrames = 50% @ 21 or 50% @ 22)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10042.0 in 44.83s (2690 ticks + 42.0 extra distance)
+TEST_MOVE_SPEED_CASE 463 (deltaFrames = 100% @ 24 or 0% @ 25)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10025.4 in 50.42s (3025 ticks + 25.4 extra distance)
+TEST_MOVE_SPEED_CASE 464 (deltaFrames = 50% @ 26 or 50% @ 27)
+State loaded
+DISTANCE_REACHED x=11.9 z=-10083.5 in 55.68s (3341 ticks + 83.5 extra distance)
+TEST_MOVE_SPEED_CASE 465 (deltaFrames = 90% @ 29 or 10% @ 30)
+State loaded
+DISTANCE_REACHED x=-4.6 z=-10090.2 in 61.12s (3667 ticks + 90.2 extra distance)
+TEST_MOVE_SPEED_CASE 466 (deltaFrames = 40% @ 1 or 60% @ 2)
+State loaded
+DISTANCE_REACHED x=-2.0 z=-10013.6 in 16.15s (969 ticks + 13.6 extra distance)
+TEST_MOVE_SPEED_CASE 467 (deltaFrames = 80% @ 4 or 20% @ 5)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10007.2 in 17.43s (1046 ticks + 7.2 extra distance)
+TEST_MOVE_SPEED_CASE 468 (deltaFrames = 30% @ 6 or 70% @ 7)
+State loaded
+DISTANCE_REACHED x=-0.6 z=-10039.8 in 19.12s (1147 ticks + 39.8 extra distance)
+TEST_MOVE_SPEED_CASE 469 (deltaFrames = 80% @ 9 or 20% @ 10)
+State loaded
+DISTANCE_REACHED x=-0.0 z=-10033.4 in 21.95s (1317 ticks + 33.4 extra distance)
+TEST_MOVE_SPEED_CASE 470 (deltaFrames = 20% @ 11 or 80% @ 12)
+State loaded
+DISTANCE_REACHED x=-4.3 z=-10010.7 in 25.38s (1523 ticks + 10.7 extra distance)
+TEST_MOVE_SPEED_CASE 471 (deltaFrames = 70% @ 14 or 30% @ 15)
+State loaded
+DISTANCE_REACHED x=4.4 z=-10052.0 in 31.73s (1904 ticks + 52.0 extra distance)
+TEST_MOVE_SPEED_CASE 472 (deltaFrames = 10% @ 16 or 90% @ 17)
+State loaded
+DISTANCE_REACHED x=5.7 z=-10030.1 in 36.35s (2181 ticks + 30.1 extra distance)
+TEST_MOVE_SPEED_CASE 473 (deltaFrames = 60% @ 19 or 40% @ 20)
+State loaded
+DISTANCE_REACHED x=7.0 z=-10027.0 in 40.77s (2446 ticks + 27.0 extra distance)
+TEST_MOVE_SPEED_CASE 474 (deltaFrames = 10% @ 21 or 90% @ 22)
+State loaded
+DISTANCE_REACHED x=25.9 z=-10031.5 in 46.38s (2783 ticks + 31.5 extra distance)
+TEST_MOVE_SPEED_CASE 475 (deltaFrames = 50% @ 24 or 50% @ 25)
+State loaded
+DISTANCE_REACHED x=7.3 z=-10096.2 in 51.48s (3089 ticks + 96.3 extra distance)
+TEST_MOVE_SPEED_CASE 476 (deltaFrames = 100% @ 27 or 0% @ 28)
+State loaded
+DISTANCE_REACHED x=17.4 z=-10066.5 in 57.17s (3430 ticks + 66.5 extra distance)
+TEST_MOVE_SPEED_CASE 477 (deltaFrames = 40% @ 29 or 60% @ 30)
+State loaded
+DISTANCE_REACHED x=4.4 z=-10027.9 in 64.15s (3849 ticks + 27.9 extra distance)
+TEST_MOVE_SPEED_CASE 478 (deltaFrames = 90% @ 2 or 10% @ 3)
+State loaded
+DISTANCE_REACHED x=4.4 z=-10008.5 in 16.35s (981 ticks + 8.5 extra distance)
+TEST_MOVE_SPEED_CASE 479 (deltaFrames = 40% @ 4 or 60% @ 5)
+State loaded
+DISTANCE_REACHED x=-12.7 z=-10017.1 in 18.07s (1084 ticks + 17.1 extra distance)
+TEST_MOVE_SPEED_CASE 480 (deltaFrames = 80% @ 7 or 20% @ 8)
+State loaded
+DISTANCE_REACHED x=2.7 z=-10025.7 in 20.05s (1203 ticks + 25.7 extra distance)
+TEST_MOVE_SPEED_CASE 481 (deltaFrames = 30% @ 9 or 70% @ 10)
+State loaded
+DISTANCE_REACHED x=6.6 z=-10051.0 in 22.33s (1340 ticks + 51.0 extra distance)
+TEST_MOVE_SPEED_CASE 482 (deltaFrames = 70% @ 12 or 30% @ 13)
+State loaded
+DISTANCE_REACHED x=-6.6 z=-10071.5 in 26.88s (1613 ticks + 71.5 extra distance)
+TEST_MOVE_SPEED_CASE 483 (deltaFrames = 20% @ 14 or 80% @ 15)
+State loaded
+DISTANCE_REACHED x=-3.6 z=-10143.8 in 31.12s (1867 ticks + 143.8 extra distance)
+TEST_MOVE_SPEED_CASE 484 (deltaFrames = 70% @ 17 or 30% @ 18)
+State loaded
+DISTANCE_REACHED x=-6.3 z=-10048.3 in 35.78s (2147 ticks + 48.3 extra distance)
+TEST_MOVE_SPEED_CASE 485 (deltaFrames = 10% @ 19 or 90% @ 20)
+State loaded
+DISTANCE_REACHED x=-3.5 z=-10093.8 in 40.48s (2429 ticks + 93.8 extra distance)
+TEST_MOVE_SPEED_CASE 486 (deltaFrames = 60% @ 22 or 40% @ 23)
+State loaded
+DISTANCE_REACHED x=5.9 z=-10035.5 in 45.97s (2758 ticks + 35.5 extra distance)
+TEST_MOVE_SPEED_CASE 487 (deltaFrames = 100% @ 25 or 0% @ 26)
+State loaded
+DISTANCE_REACHED x=14.6 z=-10050.2 in 53.37s (3202 ticks + 50.2 extra distance)
+TEST_MOVE_SPEED_CASE 488 (deltaFrames = 50% @ 27 or 50% @ 28)
+State loaded
+DISTANCE_REACHED x=-1.6 z=-10010.6 in 57.78s (3467 ticks + 10.6 extra distance)
+TEST_MOVE_SPEED_CASE 489 (deltaFrames = 100% @ 30 or 0% @ 31)
+State loaded
+DISTANCE_REACHED x=-7.7 z=-10002.9 in 63.02s (3781 ticks + 2.9 extra distance)
+TEST_MOVE_SPEED_CASE 490 (deltaFrames = 40% @ 2 or 60% @ 3)
+State loaded
+DISTANCE_REACHED x=-10.8 z=-10021.7 in 16.68s (1001 ticks + 21.8 extra distance)
+TEST_MOVE_SPEED_CASE 491 (deltaFrames = 90% @ 5 or 10% @ 6)
+State loaded
+DISTANCE_REACHED x=1.8 z=-10005.8 in 18.12s (1087 ticks + 5.8 extra distance)
+TEST_MOVE_SPEED_CASE 492 (deltaFrames = 30% @ 7 or 70% @ 8)
+State loaded
+DISTANCE_REACHED x=-3.1 z=-10017.1 in 20.68s (1241 ticks + 17.1 extra distance)
+TEST_MOVE_SPEED_CASE 493 (deltaFrames = 80% @ 10 or 20% @ 11)
+State loaded
+DISTANCE_REACHED x=6.2 z=-10041.2 in 23.82s (1429 ticks + 41.2 extra distance)
+TEST_MOVE_SPEED_CASE 494 (deltaFrames = 30% @ 12 or 70% @ 13)
+State loaded
+DISTANCE_REACHED x=2.7 z=-10070.6 in 30.30s (1818 ticks + 70.6 extra distance)
+TEST_MOVE_SPEED_CASE 495 (deltaFrames = 70% @ 15 or 30% @ 16)
+State loaded
+DISTANCE_REACHED x=3.4 z=-10082.0 in 30.88s (1853 ticks + 82.0 extra distance)
+TEST_MOVE_SPEED_CASE 496 (deltaFrames = 20% @ 17 or 80% @ 18)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10028.7 in 36.82s (2209 ticks + 28.7 extra distance)
+TEST_MOVE_SPEED_CASE 497 (deltaFrames = 60% @ 20 or 40% @ 21)
+State loaded
+DISTANCE_REACHED x=6.6 z=-10071.2 in 42.53s (2552 ticks + 71.2 extra distance)
+TEST_MOVE_SPEED_CASE 498 (deltaFrames = 10% @ 22 or 90% @ 23)
+State loaded
+DISTANCE_REACHED x=6.6 z=-10018.1 in 50.02s (3001 ticks + 18.1 extra distance)
+TEST_MOVE_SPEED_CASE 499 (deltaFrames = 60% @ 25 or 40% @ 26)
+State loaded
+DISTANCE_REACHED x=3.3 z=-10064.7 in 55.92s (3355 ticks + 64.7 extra distance)
+TEST_MOVE_SPEED_CASE 500 (deltaFrames = 100% @ 28 or 0% @ 29)
+State loaded
+DISTANCE_REACHED x=-15.3 z=-10032.7 in 66.28s (3977 ticks + 32.7 extra distance)
+TEST_MOVE_SPEED_CASE 501 (deltaFrames = 50% @ 30 or 50% @ 31)
+State loaded
+DISTANCE_REACHED x=7.0 z=-10039.7 in 64.58s (3875 ticks + 39.7 extra distance)
+TEST_MOVE_SPEED_CASE 502 (deltaFrames = 90% @ 3 or 10% @ 4)
+State loaded
+DISTANCE_REACHED x=-4.2 z=-10022.0 in 16.70s (1002 ticks + 22.0 extra distance)
+TEST_MOVE_SPEED_CASE 503 (deltaFrames = 40% @ 5 or 60% @ 6)
+State loaded
+DISTANCE_REACHED x=-5.6 z=-10020.3 in 18.58s (1115 ticks + 20.3 extra distance)
+TEST_MOVE_SPEED_CASE 504 (deltaFrames = 90% @ 8 or 10% @ 9)
+State loaded
+DISTANCE_REACHED x=-6.6 z=-10004.7 in 20.80s (1248 ticks + 4.7 extra distance)
+TEST_MOVE_SPEED_CASE 505 (deltaFrames = 30% @ 10 or 70% @ 11)
+State loaded
+DISTANCE_REACHED x=12.0 z=-10018.8 in 24.63s (1478 ticks + 18.8 extra distance)
+TEST_MOVE_SPEED_CASE 506 (deltaFrames = 80% @ 13 or 20% @ 14)
+State loaded
+DISTANCE_REACHED x=-6.8 z=-10058.2 in 28.17s (1690 ticks + 58.2 extra distance)
+TEST_MOVE_SPEED_CASE 507 (deltaFrames = 20% @ 15 or 80% @ 16)
+State loaded
+DISTANCE_REACHED x=2.0 z=-10015.8 in 32.15s (1929 ticks + 15.8 extra distance)
+TEST_MOVE_SPEED_CASE 508 (deltaFrames = 70% @ 18 or 30% @ 19)
+State loaded
+DISTANCE_REACHED x=-0.8 z=-10044.4 in 41.50s (2490 ticks + 44.4 extra distance)
+TEST_MOVE_SPEED_CASE 509 (deltaFrames = 20% @ 20 or 80% @ 21)
+State loaded
+DISTANCE_REACHED x=-7.3 z=-10000.4 in 44.73s (2684 ticks + 0.4 extra distance)
+TEST_MOVE_SPEED_CASE 510 (deltaFrames = 60% @ 23 or 40% @ 24)
+State loaded
+DISTANCE_REACHED x=5.4 z=-10001.7 in 46.42s (2785 ticks + 1.7 extra distance)
+TEST_MOVE_SPEED_CASE 511 (deltaFrames = 10% @ 25 or 90% @ 26)
+State loaded
+DISTANCE_REACHED x=-5.2 z=-10085.3 in 53.55s (3213 ticks + 85.3 extra distance)
+TEST_MOVE_SPEED_CASE 512 (deltaFrames = 50% @ 28 or 50% @ 29)
+State loaded
+DISTANCE_REACHED x=-2.2 z=-10083.4 in 62.73s (3764 ticks + 83.4 extra distance)
+TEST_MOVE_SPEED_CASE 513 (deltaFrames = 100% @ 1 or 0% @ 2)
+State loaded
+DISTANCE_REACHED x=0.4 z=-10006.3 in 15.80s (948 ticks + 6.3 extra distance)
+TEST_MOVE_SPEED_CASE 514 (deltaFrames = 50% @ 3 or 50% @ 4)
+State loaded
+DISTANCE_REACHED x=-1.7 z=-10018.6 in 17.40s (1044 ticks + 18.6 extra distance)
+TEST_MOVE_SPEED_CASE 515 (deltaFrames = 90% @ 6 or 10% @ 7)
+State loaded
+DISTANCE_REACHED x=-3.2 z=-10031.3 in 19.02s (1141 ticks + 31.3 extra distance)
+TEST_MOVE_SPEED_CASE 516 (deltaFrames = 40% @ 8 or 60% @ 9)
+State loaded
+DISTANCE_REACHED x=-4.3 z=-10066.1 in 21.23s (1274 ticks + 66.1 extra distance)
+TEST_MOVE_SPEED_CASE 517 (deltaFrames = 80% @ 11 or 20% @ 12)
+State loaded
+DISTANCE_REACHED x=4.2 z=-10049.4 in 24.28s (1457 ticks + 49.4 extra distance)
+TEST_MOVE_SPEED_CASE 518 (deltaFrames = 30% @ 13 or 70% @ 14)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10086.1 in 30.40s (1824 ticks + 86.1 extra distance)
+TEST_MOVE_SPEED_CASE 519 (deltaFrames = 80% @ 16 or 20% @ 17)
+State loaded
+DISTANCE_REACHED x=4.4 z=-10028.9 in 34.05s (2043 ticks + 28.9 extra distance)
+TEST_MOVE_SPEED_CASE 520 (deltaFrames = 20% @ 18 or 80% @ 19)
+State loaded
+DISTANCE_REACHED x=43.5 z=-10022.7 in 38.88s (2333 ticks + 22.8 extra distance)
+TEST_MOVE_SPEED_CASE 521 (deltaFrames = 70% @ 21 or 30% @ 22)
+State loaded
+DISTANCE_REACHED x=9.0 z=-10018.0 in 44.05s (2643 ticks + 18.0 extra distance)
+TEST_MOVE_SPEED_CASE 522 (deltaFrames = 10% @ 23 or 90% @ 24)
+State loaded
+DISTANCE_REACHED x=9.7 z=-10015.7 in 48.62s (2917 ticks + 15.7 extra distance)
+TEST_MOVE_SPEED_CASE 523 (deltaFrames = 60% @ 26 or 40% @ 27)
+State loaded
+DISTANCE_REACHED x=-7.9 z=-10042.5 in 55.47s (3328 ticks + 42.5 extra distance)
+TEST_MOVE_SPEED_CASE 524 (deltaFrames = 10% @ 28 or 90% @ 29)
+State loaded
+DISTANCE_REACHED x=-8.7 z=-10083.5 in 59.75s (3585 ticks + 83.5 extra distance)
+TEST_MOVE_SPEED_CASE 525 (deltaFrames = 50% @ 1 or 50% @ 2)
+State loaded
+DISTANCE_REACHED x=-12.5 z=-10006.6 in 16.15s (969 ticks + 6.6 extra distance)
+TEST_MOVE_SPEED_CASE 526 (deltaFrames = 100% @ 4 or 0% @ 5)
+State loaded
+DISTANCE_REACHED x=-10.9 z=-10035.5 in 17.68s (1061 ticks + 35.5 extra distance)
+TEST_MOVE_SPEED_CASE 527 (deltaFrames = 40% @ 6 or 60% @ 7)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10013.4 in 19.60s (1176 ticks + 13.4 extra distance)
+TEST_MOVE_SPEED_CASE 528 (deltaFrames = 90% @ 9 or 10% @ 10)
+State loaded
+DISTANCE_REACHED x=-0.6 z=-10011.8 in 22.00s (1320 ticks + 11.8 extra distance)
+TEST_MOVE_SPEED_CASE 529 (deltaFrames = 40% @ 11 or 60% @ 12)
+State loaded
+DISTANCE_REACHED x=0.9 z=-10032.3 in 24.77s (1486 ticks + 32.3 extra distance)
+TEST_MOVE_SPEED_CASE 530 (deltaFrames = 80% @ 14 or 20% @ 15)
+State loaded
+DISTANCE_REACHED x=-0.3 z=-10036.5 in 30.30s (1818 ticks + 36.5 extra distance)
+TEST_MOVE_SPEED_CASE 531 (deltaFrames = 30% @ 16 or 70% @ 17)
+State loaded
+DISTANCE_REACHED x=-1.4 z=-10084.9 in 34.83s (2090 ticks + 84.9 extra distance)
+TEST_MOVE_SPEED_CASE 532 (deltaFrames = 70% @ 19 or 30% @ 20)
+State loaded
+DISTANCE_REACHED x=-7.4 z=-10016.8 in 41.83s (2510 ticks + 16.8 extra distance)
+TEST_MOVE_SPEED_CASE 533 (deltaFrames = 20% @ 21 or 80% @ 22)
+State loaded
+DISTANCE_REACHED x=5.1 z=-10051.2 in 44.35s (2661 ticks + 51.2 extra distance)
+TEST_MOVE_SPEED_CASE 534 (deltaFrames = 70% @ 24 or 30% @ 25)
+State loaded
+DISTANCE_REACHED x=10.2 z=-10021.9 in 51.05s (3063 ticks + 21.9 extra distance)
+TEST_MOVE_SPEED_CASE 535 (deltaFrames = 10% @ 26 or 90% @ 27)
+State loaded
+DISTANCE_REACHED x=-8.1 z=-10103.5 in 57.85s (3471 ticks + 103.5 extra distance)
+TEST_MOVE_SPEED_CASE 536 (deltaFrames = 60% @ 29 or 40% @ 30)
+State loaded
+DISTANCE_REACHED x=6.8 z=-10054.3 in 61.28s (3677 ticks + 54.3 extra distance)
+TEST_MOVE_SPEED_CASE 537 (deltaFrames = 100% @ 2 or 0% @ 3)
+State loaded
+DISTANCE_REACHED x=-0.4 z=-10005.2 in 16.25s (975 ticks + 5.2 extra distance)
+TEST_MOVE_SPEED_CASE 538 (deltaFrames = 50% @ 4 or 50% @ 5)
+State loaded
+DISTANCE_REACHED x=-7.4 z=-10018.9 in 18.02s (1081 ticks + 18.9 extra distance)
+TEST_MOVE_SPEED_CASE 539 (deltaFrames = 100% @ 7 or 0% @ 8)
+State loaded
+DISTANCE_REACHED x=-0.2 z=-10009.7 in 20.20s (1212 ticks + 9.7 extra distance)
+TEST_MOVE_SPEED_CASE 540 (deltaFrames = 40% @ 9 or 60% @ 10)
+State loaded
+DISTANCE_REACHED x=4.8 z=-10031.2 in 22.10s (1326 ticks + 31.2 extra distance)
+TEST_MOVE_SPEED_CASE 541 (deltaFrames = 90% @ 12 or 10% @ 13)
+State loaded
+DISTANCE_REACHED x=-0.7 z=-10031.8 in 26.02s (1561 ticks + 31.8 extra distance)
+TEST_MOVE_SPEED_CASE 542 (deltaFrames = 30% @ 14 or 70% @ 15)
+State loaded
+DISTANCE_REACHED x=-8.3 z=-10078.9 in 30.17s (1810 ticks + 78.9 extra distance)
+TEST_MOVE_SPEED_CASE 543 (deltaFrames = 80% @ 17 or 20% @ 18)
+State loaded
+DISTANCE_REACHED x=-0.0 z=-10044.8 in 36.43s (2186 ticks + 44.8 extra distance)
+TEST_MOVE_SPEED_CASE 544 (deltaFrames = 30% @ 19 or 70% @ 20)
+State loaded
+DISTANCE_REACHED x=1.6 z=-10132.2 in 37.47s (2248 ticks + 132.2 extra distance)
+TEST_MOVE_SPEED_CASE 545 (deltaFrames = 70% @ 22 or 30% @ 23)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10024.9 in 47.58s (2855 ticks + 24.9 extra distance)
+TEST_MOVE_SPEED_CASE 546 (deltaFrames = 20% @ 24 or 80% @ 25)
+State loaded
+DISTANCE_REACHED x=-3.7 z=-10083.3 in 51.70s (3102 ticks + 83.3 extra distance)
+TEST_MOVE_SPEED_CASE 547 (deltaFrames = 60% @ 27 or 40% @ 28)
+State loaded
+DISTANCE_REACHED x=10.4 z=-10008.9 in 58.47s (3508 ticks + 9.0 extra distance)
+TEST_MOVE_SPEED_CASE 548 (deltaFrames = 10% @ 29 or 90% @ 30)
+State loaded
+DISTANCE_REACHED x=7.4 z=-10027.8 in 61.82s (3709 ticks + 27.8 extra distance)
+TEST_MOVE_SPEED_CASE 549 (deltaFrames = 60% @ 2 or 40% @ 3)
+State loaded
+DISTANCE_REACHED x=0.5 z=-10002.1 in 16.57s (994 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 550 (deltaFrames = 100% @ 5 or 0% @ 6)
+State loaded
+DISTANCE_REACHED x=1.6 z=-10037.7 in 18.18s (1091 ticks + 37.7 extra distance)
+TEST_MOVE_SPEED_CASE 551 (deltaFrames = 50% @ 7 or 50% @ 8)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10034.1 in 19.65s (1179 ticks + 34.1 extra distance)
+TEST_MOVE_SPEED_CASE 552 (deltaFrames = 100% @ 10 or 0% @ 11)
+State loaded
+DISTANCE_REACHED x=-2.8 z=-10006.4 in 23.02s (1381 ticks + 6.4 extra distance)
+TEST_MOVE_SPEED_CASE 553 (deltaFrames = 40% @ 12 or 60% @ 13)
+State loaded
+DISTANCE_REACHED x=-2.8 z=-10052.5 in 25.22s (1513 ticks + 52.5 extra distance)
+TEST_MOVE_SPEED_CASE 554 (deltaFrames = 90% @ 15 or 10% @ 16)
+State loaded
+DISTANCE_REACHED x=-7.0 z=-10005.3 in 31.48s (1889 ticks + 5.3 extra distance)
+TEST_MOVE_SPEED_CASE 555 (deltaFrames = 30% @ 17 or 70% @ 18)
+State loaded
+DISTANCE_REACHED x=10.3 z=-10003.0 in 38.37s (2302 ticks + 3.0 extra distance)
+TEST_MOVE_SPEED_CASE 556 (deltaFrames = 80% @ 20 or 20% @ 21)
+State loaded
+DISTANCE_REACHED x=0.7 z=-10003.3 in 43.10s (2586 ticks + 3.3 extra distance)
+TEST_MOVE_SPEED_CASE 557 (deltaFrames = 30% @ 22 or 70% @ 23)
+State loaded
+DISTANCE_REACHED x=-5.8 z=-10093.4 in 48.45s (2907 ticks + 93.4 extra distance)
+TEST_MOVE_SPEED_CASE 558 (deltaFrames = 70% @ 25 or 30% @ 26)
+State loaded
+DISTANCE_REACHED x=-2.9 z=-10093.0 in 53.17s (3190 ticks + 93.0 extra distance)
+TEST_MOVE_SPEED_CASE 559 (deltaFrames = 20% @ 27 or 80% @ 28)
+State loaded
+DISTANCE_REACHED x=-10.4 z=-10110.4 in 67.22s (4033 ticks + 110.4 extra distance)
+TEST_MOVE_SPEED_CASE 560 (deltaFrames = 60% @ 30 or 40% @ 31)
+State loaded
+DISTANCE_REACHED x=-3.9 z=-10011.9 in 60.82s (3649 ticks + 11.9 extra distance)
+TEST_MOVE_SPEED_CASE 561 (deltaFrames = 10% @ 2 or 90% @ 3)
+State loaded
+DISTANCE_REACHED x=1.0 z=-10009.7 in 16.88s (1013 ticks + 9.7 extra distance)
+TEST_MOVE_SPEED_CASE 562 (deltaFrames = 60% @ 5 or 40% @ 6)
+State loaded
+DISTANCE_REACHED x=1.7 z=-10013.9 in 18.65s (1119 ticks + 13.9 extra distance)
+TEST_MOVE_SPEED_CASE 563 (deltaFrames = 100% @ 8 or 0% @ 9)
+State loaded
+DISTANCE_REACHED x=0.8 z=-10012.2 in 20.82s (1249 ticks + 12.2 extra distance)
+TEST_MOVE_SPEED_CASE 564 (deltaFrames = 50% @ 10 or 50% @ 11)
+State loaded
+DISTANCE_REACHED x=-5.4 z=-10013.2 in 23.67s (1420 ticks + 13.2 extra distance)
+TEST_MOVE_SPEED_CASE 565 (deltaFrames = 90% @ 13 or 10% @ 14)
+State loaded
+DISTANCE_REACHED x=6.3 z=-10085.1 in 29.48s (1769 ticks + 85.1 extra distance)
+TEST_MOVE_SPEED_CASE 566 (deltaFrames = 40% @ 15 or 60% @ 16)
+State loaded
+DISTANCE_REACHED x=3.4 z=-10004.3 in 33.05s (1983 ticks + 4.3 extra distance)
+TEST_MOVE_SPEED_CASE 567 (deltaFrames = 90% @ 18 or 10% @ 19)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10093.4 in 38.62s (2317 ticks + 93.4 extra distance)
+TEST_MOVE_SPEED_CASE 568 (deltaFrames = 30% @ 20 or 70% @ 21)
+State loaded
+DISTANCE_REACHED x=11.3 z=-10073.3 in 43.52s (2611 ticks + 73.3 extra distance)
+TEST_MOVE_SPEED_CASE 569 (deltaFrames = 80% @ 23 or 20% @ 24)
+State loaded
+DISTANCE_REACHED x=5.9 z=-10002.1 in 47.20s (2832 ticks + 2.1 extra distance)
+TEST_MOVE_SPEED_CASE 570 (deltaFrames = 20% @ 25 or 80% @ 26)
+State loaded
+DISTANCE_REACHED x=-7.3 z=-10095.3 in 55.48s (3329 ticks + 95.4 extra distance)
+TEST_MOVE_SPEED_CASE 571 (deltaFrames = 70% @ 28 or 30% @ 29)
+State loaded
+DISTANCE_REACHED x=-14.6 z=-10042.8 in 59.92s (3595 ticks + 42.8 extra distance)
+TEST_MOVE_SPEED_CASE 572 (deltaFrames = 20% @ 30 or 80% @ 31)
+State loaded
+DISTANCE_REACHED x=2.9 z=-10049.5 in 65.23s (3914 ticks + 49.5 extra distance)
+TEST_MOVE_SPEED_CASE 573 (deltaFrames = 60% @ 3 or 40% @ 4)
+State loaded
+DISTANCE_REACHED x=2.3 z=-10033.9 in 17.22s (1033 ticks + 33.9 extra distance)
+TEST_MOVE_SPEED_CASE 574 (deltaFrames = 10% @ 5 or 90% @ 6)
+State loaded
+DISTANCE_REACHED x=-0.9 z=-10033.2 in 18.80s (1128 ticks + 33.2 extra distance)
+TEST_MOVE_SPEED_CASE 575 (deltaFrames = 50% @ 8 or 50% @ 9)
+State loaded
+DISTANCE_REACHED x=10.9 z=-10012.9 in 21.12s (1267 ticks + 12.9 extra distance)
+TEST_MOVE_SPEED_CASE 576 (deltaFrames = 100% @ 11 or 0% @ 12)
+State loaded
+DISTANCE_REACHED x=2.4 z=-10055.0 in 24.40s (1464 ticks + 55.0 extra distance)
+TEST_MOVE_SPEED_CASE 577 (deltaFrames = 50% @ 13 or 50% @ 14)
+State loaded
+DISTANCE_REACHED x=-10.9 z=-10086.4 in 30.20s (1812 ticks + 86.5 extra distance)
+TEST_MOVE_SPEED_CASE 578 (deltaFrames = 90% @ 16 or 10% @ 17)
+State loaded
+DISTANCE_REACHED x=-5.5 z=-10033.3 in 33.82s (2029 ticks + 33.3 extra distance)
+TEST_MOVE_SPEED_CASE 579 (deltaFrames = 40% @ 18 or 60% @ 19)
+State loaded
+DISTANCE_REACHED x=2.5 z=-10009.6 in 38.80s (2328 ticks + 9.6 extra distance)
+TEST_MOVE_SPEED_CASE 580 (deltaFrames = 80% @ 21 or 20% @ 22)
+State loaded
+DISTANCE_REACHED x=-5.8 z=-10016.6 in 45.58s (2735 ticks + 16.6 extra distance)
+TEST_MOVE_SPEED_CASE 581 (deltaFrames = 30% @ 23 or 70% @ 24)
+State loaded
+DISTANCE_REACHED x=13.2 z=-10021.1 in 48.62s (2917 ticks + 21.1 extra distance)
+TEST_MOVE_SPEED_CASE 582 (deltaFrames = 80% @ 26 or 20% @ 27)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10052.1 in 58.97s (3538 ticks + 52.1 extra distance)
+TEST_MOVE_SPEED_CASE 583 (deltaFrames = 20% @ 28 or 80% @ 29)
+State loaded
+DISTANCE_REACHED x=8.1 z=-10049.0 in 58.58s (3515 ticks + 49.0 extra distance)
+TEST_MOVE_SPEED_CASE 584 (deltaFrames = 70% @ 1 or 30% @ 2)
+State loaded
+DISTANCE_REACHED x=6.9 z=-10008.1 in 16.00s (960 ticks + 8.1 extra distance)
+TEST_MOVE_SPEED_CASE 585 (deltaFrames = 10% @ 3 or 90% @ 4)
+State loaded
+DISTANCE_REACHED x=-2.4 z=-10025.7 in 17.45s (1047 ticks + 25.7 extra distance)
+TEST_MOVE_SPEED_CASE 586 (deltaFrames = 60% @ 6 or 40% @ 7)
+State loaded
+DISTANCE_REACHED x=-4.4 z=-10049.3 in 19.45s (1167 ticks + 49.3 extra distance)
+TEST_MOVE_SPEED_CASE 587 (deltaFrames = 10% @ 8 or 90% @ 9)
+State loaded
+DISTANCE_REACHED x=-9.9 z=-10056.6 in 21.23s (1274 ticks + 56.6 extra distance)
+TEST_MOVE_SPEED_CASE 588 (deltaFrames = 50% @ 11 or 50% @ 12)
+State loaded
+DISTANCE_REACHED x=-4.4 z=-10068.1 in 25.92s (1555 ticks + 68.1 extra distance)
+TEST_MOVE_SPEED_CASE 589 (deltaFrames = 100% @ 14 or 0% @ 15)
+State loaded
+DISTANCE_REACHED x=1.2 z=-10069.5 in 29.42s (1765 ticks + 69.5 extra distance)
+TEST_MOVE_SPEED_CASE 590 (deltaFrames = 40% @ 16 or 60% @ 17)
+State loaded
+DISTANCE_REACHED x=2.1 z=-10007.8 in 33.78s (2027 ticks + 7.8 extra distance)
+TEST_MOVE_SPEED_CASE 591 (deltaFrames = 90% @ 19 or 10% @ 20)
+State loaded
+DISTANCE_REACHED x=0.5 z=-10048.3 in 40.43s (2426 ticks + 48.3 extra distance)
+TEST_MOVE_SPEED_CASE 592 (deltaFrames = 40% @ 21 or 60% @ 22)
+State loaded
+DISTANCE_REACHED x=-1.3 z=-10032.0 in 46.45s (2787 ticks + 32.0 extra distance)
+TEST_MOVE_SPEED_CASE 593 (deltaFrames = 80% @ 24 or 20% @ 25)
+State loaded
+DISTANCE_REACHED x=13.2 z=-10042.2 in 49.63s (2978 ticks + 42.2 extra distance)
+TEST_MOVE_SPEED_CASE 594 (deltaFrames = 30% @ 26 or 70% @ 27)
+State loaded
+DISTANCE_REACHED x=13.9 z=-10020.9 in 53.42s (3205 ticks + 21.0 extra distance)
+TEST_MOVE_SPEED_CASE 595 (deltaFrames = 70% @ 29 or 30% @ 30)
+State loaded
+DISTANCE_REACHED x=0.0 z=-10037.3 in 60.58s (3635 ticks + 37.3 extra distance)
+TEST_MOVE_SPEED_CASE 596 (deltaFrames = 20% @ 1 or 80% @ 2)
+State loaded
+DISTANCE_REACHED x=-1.5 z=-10009.8 in 16.18s (971 ticks + 9.8 extra distance)
+TEST_MOVE_SPEED_CASE 597 (deltaFrames = 70% @ 4 or 30% @ 5)
+State loaded
+DISTANCE_REACHED x=5.3 z=-10017.3 in 17.78s (1067 ticks + 17.3 extra distance)
+TEST_MOVE_SPEED_CASE 598 (deltaFrames = 10% @ 6 or 90% @ 7)
+State loaded
+DISTANCE_REACHED x=-1.2 z=-10003.1 in 20.03s (1202 ticks + 3.1 extra distance)
+TEST_MOVE_SPEED_CASE 599 (deltaFrames = 60% @ 9 or 40% @ 10)
+State loaded
+DISTANCE_REACHED x=45.8 z=-10049.2 in 22.12s (1327 ticks + 49.3 extra distance)
+TEST_MOVE_SPEED_CASE 600 (deltaFrames = 100% @ 12 or 0% @ 13)
+State loaded
+DISTANCE_REACHED x=1.0 z=-10022.5 in 26.22s (1573 ticks + 22.5 extra distance)
+TEST_MOVE_SPEED_CASE 601 (deltaFrames = 50% @ 14 or 50% @ 15)
+State loaded
+DISTANCE_REACHED x=-1.8 z=-10090.2 in 28.77s (1726 ticks + 90.2 extra distance)
+TEST_MOVE_SPEED_CASE 602 (deltaFrames = 100% @ 17 or 0% @ 18)
+State loaded
+DISTANCE_REACHED x=3.6 z=-10063.1 in 36.00s (2160 ticks + 63.1 extra distance)
+TEST_MOVE_SPEED_CASE 603 (deltaFrames = 40% @ 19 or 60% @ 20)
+State loaded
+DISTANCE_REACHED x=-5.3 z=-10089.3 in 41.83s (2510 ticks + 89.3 extra distance)
+TEST_MOVE_SPEED_CASE 604 (deltaFrames = 90% @ 22 or 10% @ 23)
+State loaded
+DISTANCE_REACHED x=-2.9 z=-10005.3 in 46.05s (2763 ticks + 5.3 extra distance)
+TEST_MOVE_SPEED_CASE 605 (deltaFrames = 30% @ 24 or 70% @ 25)
+State loaded
+DISTANCE_REACHED x=-6.8 z=-10066.3 in 51.92s (3115 ticks + 66.3 extra distance)
+TEST_MOVE_SPEED_CASE 606 (deltaFrames = 80% @ 27 or 20% @ 28)
+State loaded
+DISTANCE_REACHED x=4.9 z=-10081.5 in 56.68s (3401 ticks + 81.5 extra distance)
+TEST_MOVE_SPEED_CASE 607 (deltaFrames = 30% @ 29 or 70% @ 30)
+State loaded
+DISTANCE_REACHED x=-1.6 z=-10061.2 in 62.90s (3774 ticks + 61.2 extra distance)
+TEST_MOVE_SPEED_CASE 608 (deltaFrames = 70% @ 2 or 30% @ 3)
+State loaded
+DISTANCE_REACHED x=-4.8 z=-10005.4 in 16.55s (993 ticks + 5.4 extra distance)
+TEST_MOVE_SPEED_CASE 609 (deltaFrames = 20% @ 4 or 80% @ 5)
+State loaded
+DISTANCE_REACHED x=-17.9 z=-10019.7 in 18.03s (1082 ticks + 19.8 extra distance)
+TEST_MOVE_SPEED_CASE 610 (deltaFrames = 60% @ 7 or 40% @ 8)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10044.0 in 20.02s (1201 ticks + 44.0 extra distance)
+TEST_MOVE_SPEED_CASE 611 (deltaFrames = 10% @ 9 or 90% @ 10)
+State loaded
+DISTANCE_REACHED x=-2.1 z=-10029.4 in 22.95s (1377 ticks + 29.4 extra distance)
+TEST_MOVE_SPEED_CASE 612 (deltaFrames = 60% @ 12 or 40% @ 13)
+State loaded
+DISTANCE_REACHED x=1.4 z=-10007.0 in 26.27s (1576 ticks + 7.0 extra distance)
+TEST_MOVE_SPEED_CASE 613 (deltaFrames = 100% @ 15 or 0% @ 16)
+State loaded
+DISTANCE_REACHED x=3.3 z=-10060.9 in 31.77s (1906 ticks + 60.9 extra distance)
+TEST_MOVE_SPEED_CASE 614 (deltaFrames = 50% @ 17 or 50% @ 18)
+State loaded
+DISTANCE_REACHED x=4.7 z=-10032.6 in 37.35s (2241 ticks + 32.6 extra distance)
+TEST_MOVE_SPEED_CASE 615 (deltaFrames = 90% @ 20 or 10% @ 21)
+State loaded
+DISTANCE_REACHED x=23.2 z=-10095.6 in 41.22s (2473 ticks + 95.6 extra distance)
+TEST_MOVE_SPEED_CASE 616 (deltaFrames = 40% @ 22 or 60% @ 23)
+State loaded
+DISTANCE_REACHED x=6.0 z=-10002.9 in 46.75s (2805 ticks + 2.9 extra distance)
+TEST_MOVE_SPEED_CASE 617 (deltaFrames = 90% @ 25 or 10% @ 26)
+State loaded
+DISTANCE_REACHED x=-5.2 z=-10049.9 in 53.13s (3188 ticks + 49.9 extra distance)
+TEST_MOVE_SPEED_CASE 618 (deltaFrames = 30% @ 27 or 70% @ 28)
+State loaded
+DISTANCE_REACHED x=13.8 z=-10012.8 in 62.83s (3770 ticks + 12.8 extra distance)
+TEST_MOVE_SPEED_CASE 619 (deltaFrames = 80% @ 30 or 20% @ 31)
+State loaded

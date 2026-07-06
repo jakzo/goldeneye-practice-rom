@@ -43,6 +43,7 @@ STAN_NAMES := \
     Tbg_sevx_all_p_stanZ \
     Tbg_silo_all_p_stanZ \
     Tbg_stat_all_p_stanZ \
+    Tbg_test_all_p_stanZ \
     Tbg_tra_all_p_stanZ
 
 STAN_O_FILES := $(foreach name,$(STAN_NAMES),$(BUILD_DIR)/$(OBSEG_DIR)/stan/$(name).o)

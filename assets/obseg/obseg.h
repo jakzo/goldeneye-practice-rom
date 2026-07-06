@@ -36,6 +36,8 @@ extern u8 bg_lip_all_p_seg[];
 extern u8 bg_len_all_p_seg[];
 extern u8 bg_wax_all_p_seg[];
 extern u8 bg_pam_all_p_seg[];
+extern u8 Tbg_test_all_p_stanZ[];
+extern u8 bg_test_all_p_seg[];
 
 extern u8 CarmourguardZ[];
 extern u8 CbaronsamediZ[];
@@ -635,6 +637,7 @@ extern u8 UsetupsevxZ[];
 extern u8 UsetupsevxbZ[];
 extern u8 UsetupsiloZ[];
 extern u8 UsetupstatueZ[];
+extern u8 UsetuptestZ[];
 extern u8 UsetuptraZ[];
 
 	extern u8 LameE[];

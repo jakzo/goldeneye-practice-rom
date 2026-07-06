@@ -822,7 +822,11 @@ char *setup_text_pointers[] = {
     "UsetupdishZ","UsetupcaveZ","UsetupcatZ","UsetupcradZ","UsetupshoZ","UsetupsevxbZ",
     "UsetupeldZ","UsetupimpZ","UsetupashZ","UsetuplueZ","UsetupameZ","UsetupritZ",
     "UsetupoatZ","UsetupearZ","UsetupleeZ","UsetuplipZ","UsetuplenZ","UsetupwaxZ",
-    "UsetuppamZ", NULL, NULL
+    "UsetuppamZ",
+#ifdef PRACTICE_ROM
+    "UsetuptestZ",
+#endif
+    NULL, NULL
 };
 
 

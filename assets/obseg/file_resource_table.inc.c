@@ -39,6 +39,9 @@ struct fileentry file_resource_table[] = {
     {BG_LEN_ALL_P, "bg/bg_len_all_p.seg", &bg_len_all_p_seg},
     {BG_WAX_ALL_P, "bg/bg_wax_all_p.seg", &bg_wax_all_p_seg},
     {BG_PAM_ALL_P, "bg/bg_pam_all_p.seg", &bg_pam_all_p_seg},
+#ifdef PRACTICE_ROM
+    {BG_TEST_ALL_P, "bg/bg_test_all_p.seg", &bg_test_all_p_seg},
+#endif
 
     {ARMOURGUARD, "CarmourguardZ", &CarmourguardZ},
     {BARONSAMEDI, "CbaronsamediZ", &CbaronsamediZ},
@@ -588,6 +591,9 @@ struct fileentry file_resource_table[] = {
     {BG_SEVX_ALL_P_STAN, "Tbg_sevx_all_p_stanZ", &Tbg_sevx_all_p_stanZ},
     {BG_SILO_ALL_P_STAN, "Tbg_silo_all_p_stanZ", &Tbg_silo_all_p_stanZ},
     {BG_STAT_ALL_P_STAN, "Tbg_stat_all_p_stanZ", &Tbg_stat_all_p_stanZ},
+#ifdef PRACTICE_ROM
+    {BG_TEST_ALL_P_STAN, "Tbg_test_all_p_stanZ", &Tbg_test_all_p_stanZ},
+#endif
     {BG_TRA_ALL_P_STAN, "Tbg_tra_all_p_stanZ", &Tbg_tra_all_p_stanZ},
     {BG_WAX_ALL_P_STAN, "Tbg_wax_all_p_stanZ", &UbriefarchZ},
 
@@ -646,6 +652,9 @@ struct fileentry file_resource_table[] = {
     {SETUPSEVXB, "UsetupsevxbZ", &UsetupsevxbZ},
     {SETUPSILO, "UsetupsiloZ", &UsetupsiloZ},
     {SETUPSTATUE, "UsetupstatueZ", &UsetupstatueZ},
+#ifdef PRACTICE_ROM
+    {SETUPTEST, "UsetuptestZ", &UsetuptestZ},
+#endif
     {SETUPTRA, "UsetuptraZ", &UsetuptraZ},
 
     {AMEE, "LameE", &LameE},
@@ -868,7 +877,7 @@ struct fileentry file_resource_table[] = {
 #ifdef VERSION_EU
     {WAXP, "LwaxP", &LwaxP},
 #endif
-    
+
     {OBENDSEG, "ob/ob_end.seg", &ob__ob_end_seg},
     {0},
     {0},

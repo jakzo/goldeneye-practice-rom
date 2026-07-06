@@ -45,9 +45,9 @@ def parse_level_ids():
 
     values = {}
     current = -1
-    for entry in match.group(1).split(","):
-        entry = entry.strip()
-        if not entry:
+    for entry in match.group(1).split("\n"):
+        entry = entry.strip(",").strip()
+        if not entry or not entry.startswith("LEVELID_"):
             continue
         name, separator, expression = entry.partition("=")
         name = name.strip()

@@ -132,6 +132,9 @@ LEVELID langGetLangBankIndexFromStagenum(LEVELID level)
 
     switch(level)
     {
+#ifdef PRACTICE_ROM
+        case LEVELID_TEST:
+#endif
         case LEVELID_DAM:
             return_id = LDAM;
             break;

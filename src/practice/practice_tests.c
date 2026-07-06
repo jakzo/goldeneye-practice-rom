@@ -33,16 +33,24 @@ extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 #define STATE_TRAIN_HATCH 8
 #define STATE_CAVERNS_ATTACHMENTS 9
 #define STATE_CORRUPT_FREELIST 10
+#define TEST_MOVE_SPEED 11
 // --- end test cases ---
 
 static s32 g_save_test_timer = -1;
 static u32 case_delta = 0;
 static s32 g_practice_test_case;
+static s32 g_TestMoveCaseIndex = -1;
+static f32 g_TestMoveStartX;
+static f32 g_TestMoveStartZ;
+static s32 g_mission_timer_start;
 
 void practice_tests_set_case(s32 test_case) {
   g_practice_test_case = test_case;
   g_save_test_timer = -1;
   case_delta = 0;
+  g_TestMoveCaseIndex = -1;
+  g_TestMoveStartX = 0.0f;
+  g_TestMoveStartZ = 0.0f;
 }
 
 s32 practice_tests_boot_level(s32 test_case) {
@@ -63,6 +71,8 @@ s32 practice_tests_boot_level(s32 test_case) {
     return LEVELID_TRAIN;
   case STATE_CAVERNS_ATTACHMENTS:
     return LEVELID_CAVERNS;
+  case TEST_MOVE_SPEED:
+    return LEVELID_TEST;
   default:
     return LEVELID_NONE;
   }
@@ -101,6 +111,42 @@ static bool after_frames(u32 num_frames) {
   return g_save_test_timer == case_delta;
 }
 
+#if defined(VERSION_EU)
+#define TEST_MOVE_SPEED_MAX_TIME60 150
+#else
+#define TEST_MOVE_SPEED_MAX_TIME60 180
+#endif
+
+typedef struct TestMoveCase {
+  s32 lag_chance_numerator;
+  s32 lag_chance_denominator;
+  s32 base_delta_frames;
+  s32 expected_ticks;
+} TestMoveCase;
+static struct TestMoveCase g_TestMoveCases[] = {
+    {0, 10, 1, 751},
+    // TODO: This is not deterministic for some reason
+    // {0, 10, 2, 764},
+
+    // {0, 10, 1},  {1, 10, 1},  {2, 10, 1},  {4, 10, 1},  {6, 10, 1},
+    // {8, 10, 1},  {0, 10, 2},  {5, 10, 2},  {0, 10, 3},  {5, 10, 3},
+    // {0, 10, 4},  {0, 10, 5},  {0, 10, 6},  {0, 10, 7},  {0, 10, 8},
+    // {0, 10, 9},  {0, 10, 10}, {0, 10, 11}, {0, 10, 12}, {0, 10, 13},
+    // {0, 10, 14}, {0, 10, 15},
+};
+static TestMoveCase get_test_move_case(s32 index) {
+  if (index < 0 || index >= ARRAYCOUNT(g_TestMoveCases)) {
+    TestMoveCase empty = {0, 0, 0, 0};
+    return empty;
+  }
+  return g_TestMoveCases[index];
+
+  // Endless random test cases
+  // u32 random = ((u32)index * 1664525u + 1013904223u) >> 16;
+  // TestMoveCase test_case = {random % 10, 10, (random / 10) % 30 + 1, 0};
+  // return test_case;
+}
+
 void practice_tests_tick() {
 #ifdef DEV
   if (g_practice_test_case == 0) {
@@ -119,6 +165,90 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case TEST_MOVE_SPEED: {
+#define DISTANCE 10000.0f
+    f32 x = g_CurrentPlayer->prop->pos.x;
+    f32 z = g_CurrentPlayer->prop->pos.z;
+    f32 distance_x = x - g_TestMoveStartX;
+    f32 distance_z = z - g_TestMoveStartZ;
+    f32 exceeded_distance =
+        sqrtf(distance_x * distance_x + distance_z * distance_z) - DISTANCE;
+    TestMoveCase test_case =
+        get_test_move_case(g_TestMoveCaseIndex < 0 ? 0 : g_TestMoveCaseIndex);
+
+    if (test_case.base_delta_frames == 0) {
+      g_SimulatedButtons = 0;
+      break;
+    }
+
+    // g_SimulatedButtons |= U_CBUTTONS;
+    g_SimulatedButtons |= U_CBUTTONS | R_CBUTTONS;
+
+    if (g_TestMoveCaseIndex >= 0) {
+      g_ForcedDeltaFrames =
+          g_save_test_timer % test_case.lag_chance_denominator <
+                  test_case.lag_chance_numerator
+              ? test_case.base_delta_frames + 1
+              : test_case.base_delta_frames;
+    }
+
+    if (g_TestMoveCaseIndex >= 0 && exceeded_distance >= 0) {
+      s32 ticks = mission_timer - g_mission_timer_start;
+      emu_log("DISTANCE_REACHED x=%.1f z=%.1f in %.2fs (%d ticks + %.1f extra "
+              "distance)",
+              distance_x, distance_z, (f32)ticks / 60.0f, ticks,
+              exceeded_distance);
+    }
+
+    if (g_TestMoveCaseIndex == -1) {
+      // Wait for max move speed
+      if (g_save_test_timer == 250) {
+        g_TestMoveStartX = x;
+        g_TestMoveStartZ = z;
+        g_mission_timer_start = mission_timer;
+        save_game_state();
+      }
+      if (g_save_test_timer < 280) {
+        break;
+      }
+    }
+
+    if (g_TestMoveCaseIndex == -1 || exceeded_distance >= 0) {
+      TestMoveCase next_test_case = get_test_move_case(++g_TestMoveCaseIndex);
+      s32 ticks = mission_timer - g_mission_timer_start;
+      if (exceeded_distance >= 0 && test_case.expected_ticks != 0 &&
+          test_case.expected_ticks != ticks) {
+        emu_log("TEST_FAILED expected=%d ticks, actual=%d",
+                test_case.expected_ticks, ticks);
+      }
+      if (next_test_case.base_delta_frames == 0) {
+        emu_log("TEST_COMPLETE");
+      } else {
+        g_ForcedDeltaFrames = next_test_case.lag_chance_denominator > 0 &&
+                                      next_test_case.lag_chance_numerator > 0
+                                  ? next_test_case.base_delta_frames + 1
+                                  : next_test_case.base_delta_frames;
+        emu_log(
+            "TEST_MOVE_SPEED_CASE %d (deltaFrames = %d%% @ %d or %d%% @ %d)",
+            g_TestMoveCaseIndex,
+            (next_test_case.lag_chance_denominator -
+             next_test_case.lag_chance_numerator) *
+                100 / next_test_case.lag_chance_denominator,
+            next_test_case.base_delta_frames,
+            next_test_case.lag_chance_numerator * 100 /
+                next_test_case.lag_chance_denominator,
+            next_test_case.base_delta_frames + 1);
+      }
+
+      // Teleport back to start position
+      load_game_state();
+
+      // Reset timer
+      g_save_test_timer = 0;
+    }
+    break;
+  }
+
   case STATE_DOOR: {
     PropRecord *door = NULL;
     PropRecord *p = NULL;
@@ -359,8 +489,7 @@ void practice_tests_tick() {
 
       if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON) &&
           prop->obj != NULL && prop->obj->prop == prop &&
-          prop->obj->type == PROPDEF_PROP &&
-          prop->obj->obj == PROP_HATCHBOLT) {
+          prop->obj->type == PROPDEF_PROP && prop->obj->obj == PROP_HATCHBOLT) {
         hatch_part_count++;
       }
     }
@@ -417,9 +546,8 @@ void practice_tests_tick() {
         emu_log("SAVE_DONE");
       }
     } else if (after_frames(2)) {
-      PropRecord *post_save_prop =
-          chrGiveWeapon(test_chr, PROP_CHRKALASH, ITEM_AK47,
-                        PROPFLAG_WEAPON_LEFTHANDED);
+      PropRecord *post_save_prop = chrGiveWeapon(
+          test_chr, PROP_CHRKALASH, ITEM_AK47, PROPFLAG_WEAPON_LEFTHANDED);
 
       if (post_save_prop == NULL) {
         emu_log("POST_SAVE_WEAPON_NOT_CREATED");
@@ -435,8 +563,7 @@ void practice_tests_tick() {
       for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
         PropRecord *prop = &pos_data_entry[i];
 
-        if ((prop->type == PROP_TYPE_OBJ ||
-             prop->type == PROP_TYPE_WEAPON) &&
+        if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON) &&
             prop->obj != NULL && prop->obj->prop == prop &&
             prop->obj->type == PROPDEF_PROP &&
             prop->obj->obj == PROP_HATCHBOLT) {
@@ -453,8 +580,8 @@ void practice_tests_tick() {
       if (hatch_part_count != saved_hatch_part_count) {
         emu_log("TEST_FAILED");
       }
-      if (test_chr->weapons_held[GUNLEFT] != NULL ||
-          post_save_weapon == NULL || post_save_weapon->prop != NULL) {
+      if (test_chr->weapons_held[GUNLEFT] != NULL || post_save_weapon == NULL ||
+          post_save_weapon->prop != NULL) {
         emu_log("POST_SAVE_WEAPON_NOT_REMOVED");
         emu_log("TEST_FAILED");
       }
@@ -550,9 +677,8 @@ void practice_tests_tick() {
       saved_chr_prop_index = get_prop_index(test_chr->prop);
       saved_child_head_index = get_prop_index(test_chr->prop->child);
       saved_hat_index = get_prop_index(test_chr->handle_positiondata_hat);
-      for (child = test_chr->prop->child; child != NULL &&
-                                         saved_child_count <
-                                             MAX_SAVED_TEST_CHILDREN;
+      for (child = test_chr->prop->child;
+           child != NULL && saved_child_count < MAX_SAVED_TEST_CHILDREN;
            child = child->prev) {
         saved_children[saved_child_count].index = get_prop_index(child);
         saved_children[saved_child_count].prev = get_prop_index(child->prev);
@@ -569,8 +695,7 @@ void practice_tests_tick() {
       PropRecord *hat = get_prop_by_index(saved_hat_index);
 
       if (test_chr != NULL && test_chr->prop != NULL) {
-        chrGiveWeapon(test_chr, PROP_CHRMP5K, ITEM_MP5K,
-                      PROPFLAG_CONCEAL_GUN);
+        chrGiveWeapon(test_chr, PROP_CHRMP5K, ITEM_MP5K, PROPFLAG_CONCEAL_GUN);
         chrDropItems(test_chr);
 
         if (hat != NULL && hat->obj != NULL) {
@@ -682,7 +807,7 @@ void practice_tests_tick() {
 }
 
 #ifdef DEV
-extern s32 speedgraphframes; // finalized per-frame delta
+extern s32 speedgraphframes;
 
 // Determinism check for loading a save state. Save once, then repeatedly load
 // the state and log LOG_FRAMES consecutive frames of (deltaFrames, RNG seeds).
@@ -694,7 +819,7 @@ extern s32 speedgraphframes; // finalized per-frame delta
 //
 // Runs from updateFrameCounters (via practice_tests_frame) once the frame delta
 // and RNG seeds are finalized for the frame, before gameplay consumes any RNG.
-void practice_tests_frame(void) {
+void practice_tests_frame() {
   enum { PH_WAIT_FP, PH_SETTLE, PH_RUN, PH_DONE };
   static s32 phase = PH_WAIT_FP;
   static s32 iteration = 0;

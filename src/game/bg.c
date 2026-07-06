@@ -238,6 +238,9 @@ struct levelentry levelinfotable[] = {
     {LEVELID_CUBA,     "bg/bg_len_all_p.seg",  "Tbg_len_all_p_stanZ",  0.094662853, 1.0,        6.6844921},
     {LEVELID_WAX,      "bg/bg_wax_all_p.seg",  "Tbg_wax_all_p_stanZ",  0.94285715,  1.0,        10.123456},
     {LEVELID_PAM,      "bg/bg_pam_all_p.seg",  "Tbg_pam_all_p_stanZ",  0.94285715,  1.0,        10.123456},
+#ifdef PRACTICE_ROM
+    {LEVELID_TEST,     "bg/bg_test_all_p.seg", "Tbg_test_all_p_stanZ", 1.0,         1.0,        1.0},
+#endif
     {LEVELID_MAX,      "bg/bgx.seg",           "TbgxZ",                0.94285715,  1.0,        1.0}
 };
 
@@ -2235,7 +2238,11 @@ glabel load_bg_file
 /* 0E8CC4 7F0B4194 AE510000 */  sw    $s1, ($s2)
 /* 0E8CC8 7F0B4198 26310001 */  addiu $s1, $s1, 1
 .L7F0B419C:
+#ifdef PRACTICE_ROM
+/* 0E8CCC 7F0B419C 2A210027 */  slti  $at, $s1, 0x27
+#else
 /* 0E8CCC 7F0B419C 2A210026 */  slti  $at, $s1, 0x26
+#endif
 /* 0E8CD0 7F0B41A0 1420FFF9 */  bnez  $at, .L7F0B4188
 /* 0E8CD4 7F0B41A4 24420018 */   addiu $v0, $v0, 0x18
 /* 0E8CD8 7F0B41A8 0FC2ED34 */  jal   init_lightfixture_tables
@@ -2706,7 +2713,11 @@ glabel load_bg_file
 /* 0E5EC0 7F0B34D0 AE510000 */  sw    $s1, ($s2)
 /* 0E5EC4 7F0B34D4 26310001 */  addiu $s1, $s1, 1
 .L7F0B34D8:
+#ifdef PRACTICE_ROM
+/* 0E5EC8 7F0B34D8 2A210027 */  slti  $at, $s1, 0x27
+#else
 /* 0E5EC8 7F0B34D8 2A210026 */  slti  $at, $s1, 0x26
+#endif
 /* 0E5ECC 7F0B34DC 1420FFF9 */  bnez  $at, .L7F0B34C4
 /* 0E5ED0 7F0B34E0 24420018 */   addiu $v0, $v0, 0x18
 /* 0E5ED4 7F0B34E4 0FC2EA34 */  jal   init_lightfixture_tables
@@ -13448,7 +13459,6 @@ glabel sub_GAME_7F0BA2D4
 /* 0EF0EC 7F0BA5BC 27BD00B8 */   addiu $sp, $sp, 0xb8
 )
 #endif
-
 
 
 

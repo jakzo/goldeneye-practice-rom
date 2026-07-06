@@ -40,6 +40,9 @@ typedef enum FILEINDEXID
     BG_LEN_ALL_P,
     BG_WAX_ALL_P,
     BG_PAM_ALL_P,
+#ifdef PRACTICE_ROM
+    BG_TEST_ALL_P,
+#endif
     ARMOURGUARD,
     BARONSAMEDI,
     BLUECAMGUARD,
@@ -588,6 +591,9 @@ typedef enum FILEINDEXID
     BG_SEVX_ALL_P_STAN,
     BG_SILO_ALL_P_STAN,
     BG_STAT_ALL_P_STAN,
+#ifdef PRACTICE_ROM
+    BG_TEST_ALL_P_STAN,
+#endif
     BG_TRA_ALL_P_STAN,
     BG_WAX_ALL_P_STAN,
     
@@ -646,6 +652,9 @@ typedef enum FILEINDEXID
     SETUPSEVXB,
     SETUPSILO,
     SETUPSTATUE,
+#ifdef PRACTICE_ROM
+    SETUPTEST,
+#endif
     SETUPTRA,
 
     AMEE,
