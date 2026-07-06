@@ -29,7 +29,9 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and fix 
 
 ## Remaining
 
-- Exploded props become charred and deformed, but when saving these exploded props they are not restored on state load (neither the original nor exploded prop)
+- Lights in the roof of the Bunker control room can be shot out, but they do not turn back on after restoring state
+  - The glass shards that come out after shooting are not affected by save state either
+- Saving object deformation vertices can cost 20kb+, can we save the seeds used to deform them instead?
 - Crashes when loading state sometimes?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 

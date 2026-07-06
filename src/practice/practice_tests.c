@@ -24,6 +24,9 @@ extern u64 g_tlbRandomSeed;
 extern s32 propdoorInteract(PropRecord *doorprop);
 extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
 extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
+extern ModelNode *sub_GAME_7F04B478(ObjectRecord *obj);
+extern bool sub_GAME_7F04B590(ModelFileHeader *header, ModelNode *node);
+extern void objDeform(ObjectRecord *obj, s32 destroyed_level);
 
 // --- start test cases ---
 #define STATE_DOOR 1
@@ -39,6 +42,7 @@ extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 #define TEST_MOVE_SPEED 11
 #define STATE_TINTED_GLASS_PORTAL 12
 #define STATE_BULLET_CASINGS 13
+#define STATE_DESTROYED_PROP 14
 // --- end test cases ---
 
 #define MAX_TEST_TINTED_GLASS 32
@@ -68,6 +72,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case RNG_LOAD:
   case STATE_CORRUPT_FREELIST:
   case STATE_BULLET_CASINGS:
+  case STATE_DESTROYED_PROP:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
     return LEVELID_BUNKER1;
@@ -177,6 +182,114 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case STATE_DESTROYED_PROP: {
+    static s16 saved_prop_index;
+    static u32 saved_vertex_hash;
+    PropRecord *prop;
+    ObjectRecord *obj;
+    ModelNode *node;
+    struct ModelRoData_DisplayList_CollisionRecord *rodata;
+    struct ModelRwData_DisplayList_CollisionRecord *rwdata;
+    u32 vertex_hash;
+    s32 i;
+
+    if (after_frames(30)) {
+      saved_prop_index = -1;
+
+      for (prop = ptr_obj_pos_list_first_entry; prop != NULL;
+           prop = prop->next) {
+        if (prop->type != PROP_TYPE_OBJ || prop->obj == NULL ||
+            prop->obj->prop != prop || prop->obj->model == NULL ||
+            prop->obj->model->obj == NULL ||
+            (prop->obj->flags2 & PROPFLAG2_00002000)) {
+          continue;
+        }
+
+        node = sub_GAME_7F04B478(prop->obj);
+        if (node != NULL &&
+            (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
+            sub_GAME_7F04B590(prop->obj->model->obj, node)) {
+          break;
+        }
+      }
+
+      if (prop == NULL) {
+        emu_log("DEFORMABLE_PROP_NOT_FOUND");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      obj = prop->obj;
+      obj->state |= PROPSTATE_DESTROYED;
+      obj->maxdamage = 0.0f;
+      objDeform(obj, 1);
+
+      node = sub_GAME_7F04B478(obj);
+      rodata =
+          (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+      rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
+          modelGetNodeRwData(obj->model, node);
+      if (rwdata == NULL || rwdata->Vertices == NULL ||
+          rwdata->Vertices == rodata->Vertices) {
+        emu_log("PROP_NOT_DEFORMED");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      vertex_hash = 2166136261u;
+      for (i = 0; i < rodata->numVertices * sizeof(Vertex); i++) {
+        vertex_hash =
+            (vertex_hash ^ ((u8 *)rwdata->Vertices)[i]) * 16777619u;
+      }
+      saved_vertex_hash = vertex_hash;
+      saved_prop_index = get_prop_index(prop);
+      emu_log("TRIGGER_SAVE");
+      save_game_state();
+      emu_log("SAVE_DONE");
+    } else if (after_frames(2)) {
+      prop = get_prop_by_index(saved_prop_index);
+      obj = prop != NULL ? prop->obj : NULL;
+      if (obj != NULL) {
+        obj->maxdamage = 4.0f;
+        objDeform(obj, 2);
+      }
+    } else if (after_frames(2)) {
+      emu_log("TRIGGER_LOAD");
+      load_game_state();
+      emu_log("LOAD_DONE");
+    } else if (after_frames(2)) {
+      prop = get_prop_by_index(saved_prop_index);
+      obj = prop != NULL ? prop->obj : NULL;
+      node = obj != NULL ? sub_GAME_7F04B478(obj) : NULL;
+
+      if (obj == NULL || obj->prop != prop || node == NULL ||
+          !(obj->state & PROPSTATE_DESTROYED)) {
+        emu_log("DESTROYED_PROP_NOT_RESTORED");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      rodata =
+          (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+      rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
+          modelGetNodeRwData(obj->model, node);
+      vertex_hash = 2166136261u;
+      for (i = 0; i < rodata->numVertices * sizeof(Vertex); i++) {
+        vertex_hash =
+            (vertex_hash ^ ((u8 *)rwdata->Vertices)[i]) * 16777619u;
+      }
+
+      if (rwdata->Vertices == rodata->Vertices ||
+          vertex_hash != saved_vertex_hash) {
+        emu_log("DEFORMATION_NOT_RESTORED hash=%x saved=%x", vertex_hash,
+                saved_vertex_hash);
+        emu_log("TEST_FAILED");
+      } else {
+        emu_log("TEST_COMPLETE");
+      }
+    }
+  } break;
+
   case STATE_BULLET_CASINGS: {
     static CasingRecord saved_casings[4];
     static const s32 saved_indices[4] = {3, 5, 9, 12};

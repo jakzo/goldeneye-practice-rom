@@ -5,6 +5,7 @@
 #include "chrlv.h"
 #include "chrobjdata.h"
 #include "chrobjhandler.h"
+#include "emu_log.h"
 #include "explosions.h"
 #include "gun.h"
 #include "loadobjectmodel.h"
@@ -27,7 +28,11 @@ extern void door7F052B00(DoorRecord *door);
 extern void sub_GAME_7F052D8C(DoorRecord *door);
 extern union ModelRwData *modelGetNodeRwData(Model *Objinst, ModelNode *root);
 extern void sub_GAME_7F050DE8(Model *model);
-extern void objDeform(ObjectRecord *obj, s32 arg1);
+extern ModelNode *sub_GAME_7F04B478(ObjectRecord *obj);
+extern bool sub_GAME_7F04B590(ModelFileHeader *header, ModelNode *node);
+extern Vertex *sub_GAME_7F09BE4C(s32 vertexCount, s32 allocationType,
+                                 ModelFileHeader *header, s32 destroyedLevel);
+extern void sub_GAME_7F09C044(Vertex *vertices);
 extern PathRecord *pathFindById(s32 ID);
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern AIRecord *ailistFindById(s32 ID);
@@ -63,6 +68,7 @@ extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 
 static ModelNode *get_model_node_by_index(ModelFileHeader *header,
                                           s16 targetIndex);
+static u32 g_object_deformation_state_size;
 
 static u8 save_portal_closed_state(s32 portal) {
   if (portal == -1) {
@@ -1144,6 +1150,99 @@ static void load_obj_allocation_state(StateStream *stream,
   alloc->setupCmdIndex = (s16)read_u16(stream);
 }
 
+/*
+ * objDeform replaces the first collision display-list node's vertex pointer
+ * with a randomly deformed copy. Replaying objDeform on load cannot reproduce
+ * the saved mesh (and may deform an already-deformed mesh), so preserve the
+ * allocated vertices themselves.
+ */
+static void save_object_deformation(StateStream *stream, ObjectRecord *obj) {
+  ModelNode *node = NULL;
+  struct ModelRoData_DisplayList_CollisionRecord *rodata = NULL;
+  struct ModelRwData_DisplayList_CollisionRecord *rwdata = NULL;
+  u16 vertexCount = 0;
+
+  if (obj != NULL && objGetDestroyedLevel(obj) > 0 && obj->model != NULL &&
+      obj->model->obj != NULL) {
+    node = sub_GAME_7F04B478(obj);
+  }
+  if (node != NULL &&
+      (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
+      sub_GAME_7F04B590(obj->model->obj, node)) {
+    rodata =
+        (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+    rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
+        modelGetNodeRwData(obj->model, node);
+    if (rodata != NULL && rwdata != NULL && rodata->numVertices > 0 &&
+        rwdata->Vertices != NULL && rwdata->Vertices != rodata->Vertices) {
+      vertexCount = (u16)rodata->numVertices;
+    }
+  }
+
+  write_u16(stream, vertexCount);
+  g_object_deformation_state_size +=
+      sizeof(vertexCount) + vertexCount * sizeof(Vertex);
+  if (vertexCount > 0) {
+    write_bytes(stream, rwdata->Vertices, vertexCount * sizeof(Vertex));
+  }
+}
+
+static void load_object_deformation(StateStream *stream, ObjectRecord *obj,
+                                    bool clearCurrent) {
+  u16 vertexCount = read_u16(stream);
+  ModelNode *node = NULL;
+  struct ModelRoData_DisplayList_CollisionRecord *rodata = NULL;
+  struct ModelRwData_DisplayList_CollisionRecord *rwdata = NULL;
+  Vertex *vertices = NULL;
+
+  if (obj != NULL && obj->model != NULL && obj->model->obj != NULL) {
+    node = sub_GAME_7F04B478(obj);
+  }
+  if (node != NULL &&
+      (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
+      sub_GAME_7F04B590(obj->model->obj, node)) {
+    rodata =
+        (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+    rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
+        modelGetNodeRwData(obj->model, node);
+  }
+
+  if ((clearCurrent || vertexCount > 0) && rwdata != NULL && rodata != NULL &&
+      rwdata->Vertices != rodata->Vertices) {
+    sub_GAME_7F09C044(rwdata->Vertices);
+    rwdata->Vertices = rodata->Vertices;
+  }
+
+  if (vertexCount == 0) {
+    return;
+  }
+
+  if (rodata == NULL || rwdata == NULL ||
+      rodata->numVertices != vertexCount) {
+    stream_seek(stream, stream->base_address + stream->total_processed +
+                            vertexCount * sizeof(Vertex));
+    practiceLogError(
+        "Destroyed prop deformation does not match model (saved=%d, live=%d)",
+        vertexCount, rodata != NULL ? rodata->numVertices : -1);
+    assert(FALSE);
+    return;
+  }
+
+  vertices =
+      sub_GAME_7F09BE4C(vertexCount, 0xB0B, obj->model->obj,
+                        objGetDestroyedLevel(obj));
+  if (vertices == NULL) {
+    stream_seek(stream, stream->base_address + stream->total_processed +
+                            vertexCount * sizeof(Vertex));
+    practiceLogError("Could not allocate destroyed prop deformation vertices");
+    assert(FALSE);
+    return;
+  }
+
+  read_bytes(stream, vertices, vertexCount * sizeof(Vertex));
+  rwdata->Vertices = vertices;
+}
+
 static void save_object_base(StateStream *stream, ObjectRecord *obj) {
   s16 projIdx = -1;
   s16 embIdx = -1;
@@ -1213,12 +1312,14 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
     }
   }
   write_u32(stream, switchStates);
+  save_object_deformation(stream, obj);
 }
 
 static bool load_object_base(StateStream *stream, ObjectRecord *obj,
                              PropRecord *prop, s16 *attachmentNodeIdx) {
   PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
-  s32 destroyedLvl;
+  bool liveWasDestroyed =
+      prop != NULL && objGetDestroyedLevel(obj) > 0;
   s16 projectileIdx;
   s16 embedmentIdx;
   u32 switchStates;
@@ -1283,12 +1384,10 @@ static bool load_object_base(StateStream *stream, ObjectRecord *obj,
     sub_GAME_7F050DE8(obj->model);
   }
 
-  if (prop != NULL) {
-    destroyedLvl = objGetDestroyedLevel(obj);
-    if (destroyedLvl > 0) {
-      objDeform(obj, destroyedLvl);
-    }
-  }
+  // Toggle-relation rebuilding can reset display-list runtime data, so install
+  // the saved vertex buffer only after the model's switches are reapplied.
+  load_object_deformation(stream, prop != NULL ? obj : NULL,
+                          liveWasDestroyed);
 
   return TRUE;
 }
@@ -2050,6 +2149,7 @@ bool save_props_state(StateStream *stream) {
   s32 i;
   u32 pi;
 
+  g_object_deformation_state_size = 0;
   headerOffset = stream->base_address + stream->total_processed;
 
   // Placeholder header fields
@@ -2424,6 +2524,9 @@ bool save_props_state(StateStream *stream) {
   save_flying_particles_state(stream);
   save_gun_effects_state(stream);
   save_casings_state(stream);
+
+  emu_log("SAVE_STATE_DEFORMATION_BYTES=%u",
+          g_object_deformation_state_size);
 
   /* Patch the props header with the real size and record count. */
   u32 totalPropsSize = stream->total_processed - dataStart;
