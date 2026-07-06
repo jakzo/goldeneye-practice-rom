@@ -22,6 +22,14 @@ In GoldenEye 007, everything in the level that is not static level geometry (the
   are enabled, but a respawning pickup is disabled without being delisted so
   its `timetoregen` continues to tick. Inactive setup objects may also retain a
   live `obj->prop` binding. Save/free-list code must account for both cases.
+- Room membership is also indexed separately through
+  `RoomPropListChunkIndexes` and `RoomPropListChunks`. These tables are derived
+  from root props' `rooms[]` lists by `chrpropRegisterRooms`; they are not
+  serialized as authoritative state. Save-state loading clears them before prop
+  replacement and rebuilds them after props, attachments, and the player/viewer
+  prop are restored. This prevents loading gameplay from a level-end cutscene
+  from leaving stale room chunk data that makes `roomGetProps` return garbage
+  prop indices.
 
 ---
 
@@ -70,8 +78,9 @@ typedef struct PropRecord
                                                          *        next attachment sibling otherwise. */
     u8                 rooms[PROPRECORD_STAN_ROOM_LEN]; /* 0x2c - Up to three room IDs (0-254), followed
                                                          *        by 0xFF; all four bytes are serialized.
-                                                         *        CHRs are deregistered before replacement
-                                                         *        and registered in the restored rooms. */
+                                                         *        This is the authoritative room membership
+                                                         *        on load; room lookup chunk tables are
+                                                         *        rebuilt from restored root props. */
     s32                unk30;                           /* 0x30 - Unused/Unknown. */
 } PropRecord;
 ```

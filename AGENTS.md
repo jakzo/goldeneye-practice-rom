@@ -87,6 +87,23 @@ In general all features should have a corresponding setting, or multiple if the 
 
 ---
 
+## Save State
+
+When implementing or fixing anything to do with save states, read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and make sure to:
+
+- See `practice_states_*.c` files for the current state of the code
+- Remove the item from the "Remaining" section once fixed
+- No need to update the changelog or SAVE_STATE_VERSION
+- If you notice some other state that is not supported yet and should be, implement it immediately if simple, otherwise add it to the Remaining list to do it later
+- If there is a case that might need to be considered but you are not sure (for example, if a field is normally null or a pointer but theoretically the object pointed to could have been freed, though there is no evidence of this) then add an invariant assertion and emit an error log if it fails, no need to handle the case gracefully
+- Where practical, add a regression test or modify an existing one
+- After fixing the bug, ask the user to manually test to ensure the bug is fixed
+- Default to saving state of fields when you are not sure if they are needed or not (better to save too much than too little)
+- If you notice any documentation (either in the `docs` files or in comments) is incorrect or too vague, tell me which docs you want to update and after I have confirmed that the fix worked, update the docs
+- Also if the fix was narrow (e.g. targets a single prop type) check if the fix would also apply to other prop types
+
+---
+
 ## Assembly & C Integration (GLOBAL_ASM)
 
 The codebase heavily utilizes standard decompilation patterns to bridge C with yet-unmatched assembly code.

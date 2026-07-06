@@ -14,18 +14,7 @@ Everything should now be implemented. Right now bugs and missing bits are being 
 
 ## Prompt
 
-Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and fix save/load state support for the first item in "Remaining". Make sure to:
-
-- See `practice_states_*.c` files for the current state of the code
-- Remove the item from the "Remaining" section once fixed
-- No need to update the changelog or SAVE_STATE_VERSION
-- If you notice some other state that is not supported yet and should be, implement it immediately if simple, otherwise add it to the Remaining list to do it later
-- If there is a case that might need to be considered but you are not sure (for example, if a field is normally null or a pointer but theoretically the object pointed to could have been freed, though there is no evidence of this) then add an invariant assertion and emit an error log if it fails, no need to handle the case gracefully
-- Where practical, add a regression test or modify an existing one
-- After fixing the bug, ask the user to manually test to ensure the bug is fixed
-- Default to saving state of fields when you are not sure if they are needed or not (better to save too much than too little)
-- If you notice any documentation (either in the `docs` files or in comments) is incorrect or too vague, tell me which docs you want to update and after I have confirmed that the fix worked, update the docs
-- Also if the fix was narrow (e.g. targets a single prop type) check if the fix would also apply to other prop types
+Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and implement or fix save/load state support for the first item in "Remaining".
 
 ## Remaining
 
@@ -174,6 +163,16 @@ Add any general advice helpful for future agents working on this feature here. B
   the glass omit the room on the viewer's side, so the pane is then culled
   before it can render or reopen its own portal. Control's vertically stacked
   windows expose this clearly.
+- **Room Prop Lists Are Derived State**: `RoomPropListChunkIndexes` and
+  `RoomPropListChunks` are room-to-prop lookup indexes built by
+  `chrpropRegisterRooms`, not authoritative saved state. Loading gameplay from
+  a different lifecycle moment, such as an ending cutscene, can leave these
+  chunk tables stale or corrupted even when each restored `PropRecord::rooms`
+  list is correct. Clear the chunk tables before destructive prop replacement,
+  then rebuild them after props, attachments, and the player/viewer prop have
+  been restored by walking the active root prop list and registering each
+  restored room list. Otherwise `roomGetProps`/LOS collision can read garbage
+  prop indices and crash on the first post-load tick.
 - **Discard Post-Save CHR Equipment**: A guard can acquire a different weapon
   or hat after saving. When loading, an old attachment not named by the save
   must be freed, not detached and activated as a dropped item. Activating it

@@ -54,8 +54,10 @@ These features have some minor bugs or limitations but should be usable:
         - If there is some state not saved that DOES affect gameplay, let me know (@jakzo on Discord)
     - Not fully stable, expect occassional crashes
         - If you can reliably reproduce the crash, let me know so I can fix it (@jakzo on Discord)
+    - "Why don't things play out the exact same way when I load state then leave the game alone?"
+        - The game doesn't run with the **exact** same performance each time after restoring state and this causes the random number generator to become out of sync which means anything using randomness in the game (everything from visuals to collisions) will diverge
 - **Grenade camera**
-    - When throwing grenades, shows a picture-in-picture view that follows the grenade so you can see where it landed
+    - When throwing most projectiles, shows a picture-in-picture view that follows it so you can see where it landed
 
 ## Development
 
