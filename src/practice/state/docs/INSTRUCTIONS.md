@@ -23,12 +23,13 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and fix 
 - If there is a case that might need to be considered but you are not sure (for example, if a field is normally null or a pointer but theoretically the object pointed to could have been freed, though there is no evidence of this) then add an invariant assertion and emit an error log if it fails, no need to handle the case gracefully
 - Where practical, add a regression test or modify an existing one
 - After fixing the bug, ask the user to manually test to ensure the bug is fixed
-- If you notice any documentation (either in the `docs` files or in comments) is incorrect, tell the user about it and after they have confirmed that the fix worked, update the docs
+- If you notice any documentation (either in the `docs` files or in comments) is incorrect, tell me which docs you want to update and after I have confirmed that the fix worked, update the docs
 
 ## Remaining
 
+- After loading state some panes of tinted glass in the level Control become invisible from certain angles
+- Bullet casings ejected from Bond's gun are not save/loaded
 - Exploded props become charred and deformed, but when saving these exploded props they are not restored on state load (neither the original nor exploded prop)
-- Some tinted glass in Control disappears from certain angles after loading it seems?
 - Crashes when loading state sometimes?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 

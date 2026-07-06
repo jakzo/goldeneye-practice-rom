@@ -1,7 +1,16 @@
 - Finish state loading
 - Lag monitor
     - Global setting
+    - Show instantaneous predicted speed loss and frames dropped
+    - Small graph of speed loss
+- Lag impact summary
+    - On statistics page show how much lag impacted the time (next to splits?)
+    - During the run collect frames dropped while running
+    - Add it all together to predict how much faster the same distance could have been traveled without lag
 - Deterministic replay system
+- Align lag
+    - Measure the amount of lag the original ROM gets compared to the practice ROM
+    - Implement efficiency improvements to bring the practice ROM's lag roughly in line with the original
 - TLB improvements
 - Add more splits
 - Finish grenade cam

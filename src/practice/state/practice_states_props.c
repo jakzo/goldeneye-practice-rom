@@ -14,6 +14,7 @@
 #include "practice_states_utils.h"
 #include "practice_ui.h"
 #include "unk_0A1DA0.h"
+#include <assert.h>
 #include <bondconstants.h>
 #include <string.h>
 #include <ultra64.h>
@@ -52,6 +53,9 @@ extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 
 #define BULLET_EFFECT_BUFFER_LEN 20
 #define BULLET_SPARK_BUFFER_LEN 50
+
+static ModelNode *get_model_node_by_index(ModelFileHeader *header,
+                                          s16 targetIndex);
 
 /*
  * The non-EU spark/dust pool uses 0x3c-byte entries. Its first 0x2c bytes have
@@ -565,21 +569,31 @@ static bool prop_is_active_list_member(PropRecord *prop) {
 }
 
 /*
- * CHR child objects are disabled and removed from the active list while held,
+ * Child objects are disabled and removed from the active list while held,
  * worn, embedded, or concealed. They still own real ObjectRecords/Models and
  * their prev/next fields are the child-sibling graph, so serialize them as full
- * prop records instead of reconstructing guard equipment from convenience
- * pointers alone.
+ * prop records instead of reconstructing them from convenience pointers.
  */
-static bool prop_is_chr_child_object(PropRecord *prop) {
+static bool prop_is_saved_child_object(PropRecord *prop) {
   if (prop == NULL || prop->parent == NULL ||
-      prop->parent->type != PROP_TYPE_CHR || prop->parent->chr == NULL ||
       (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON) ||
       prop->obj == NULL) {
     return FALSE;
   }
 
-  return TRUE;
+  if (prop->parent->type == PROP_TYPE_CHR &&
+      prop->parent->chr != NULL) {
+    return TRUE;
+  }
+
+  // Sticky objects embedded in object geometry are disabled and delisted, just
+  // like CHR equipment, but remain in the parent's recursively-ticked child
+  // graph. Mines attached to doors take this path.
+  return (prop->obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED) &&
+         (prop->parent->type == PROP_TYPE_OBJ ||
+          prop->parent->type == PROP_TYPE_DOOR ||
+          prop->parent->type == PROP_TYPE_WEAPON) &&
+         prop->parent->obj != NULL;
 }
 
 static void detach_old_chr_attachment(ChrRecord *chr, PropRecord *prop,
@@ -789,10 +803,64 @@ static void restore_concealed_chr_item(PropRecord *prop,
   obj->projectile = NULL;
 }
 
+static bool restore_embedded_object(PropRecord *prop, PropRecord *parent,
+                                    s16 attachmentNodeIndex) {
+  ObjectRecord *obj;
+  ObjectRecord *parentObj;
+  ModelNode *attachmentNode;
+
+  if (prop == NULL || parent == NULL ||
+      (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON) ||
+      (parent->type != PROP_TYPE_OBJ && parent->type != PROP_TYPE_DOOR &&
+       parent->type != PROP_TYPE_WEAPON) ||
+      prop->obj == NULL || parent->obj == NULL) {
+    practiceLogError("Embedded prop has invalid restored parent relationship");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  obj = prop->obj;
+  parentObj = parent->obj;
+  if (obj->embedment == NULL || obj->model == NULL ||
+      parentObj->model == NULL || parentObj->model->obj == NULL) {
+    practiceLogError("Embedded prop has incomplete restored state");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  attachmentNode =
+      get_model_node_by_index(parentObj->model->obj, attachmentNodeIndex);
+  if (attachmentNode == NULL) {
+    practiceLogError("Embedded prop attachment node index %d is invalid",
+                     attachmentNodeIndex);
+    assert(FALSE);
+    return FALSE;
+  }
+
+  if (prop->parent == NULL && (prop->flags & PROPFLAG_ENABLED)) {
+    chrpropDeregisterRooms(prop);
+    chrpropDelist(prop);
+  } else if (prop->parent != NULL) {
+    objDetach(prop);
+  }
+
+  chrpropReparent(prop, parent);
+  chrpropDisable(prop);
+  obj->model->attachedto = parentObj->model;
+  obj->model->attachedto_objinst = attachmentNode;
+  return TRUE;
+}
+
 static void removePropAtIndex(s16 index) {
   PropRecord *toClear = get_prop_by_index(index);
-  if (toClear == NULL || !(toClear->flags & PROPFLAG_ENABLED))
+  if (toClear == NULL)
     return;
+
+  // Embedded mines are disabled and absent from the active list. They still
+  // need removing when their slot is absent from the save.
+  if (!(toClear->flags & PROPFLAG_ENABLED) && toClear->parent == NULL) {
+    return;
+  }
 
   // Player/viewer presence props are owned by the bond/viewer-player loaders,
   // not the generic prop add/remove path. They are always saved records (so a
@@ -839,6 +907,72 @@ static s16 get_prop_index_for_object(ObjectRecord *obj) {
   }
 
   return -1;
+}
+
+static bool find_model_node_index(ModelNode *node, ModelNode *target,
+                                  s32 *nextIndex, s32 limit, s16 *result) {
+  while (node != NULL && *nextIndex < limit) {
+    s32 currentIndex = (*nextIndex)++;
+
+    if (node == target) {
+      *result = currentIndex;
+      return TRUE;
+    }
+    if (find_model_node_index(node->Child, target, nextIndex, limit, result)) {
+      return TRUE;
+    }
+    node = node->Next;
+  }
+
+  return FALSE;
+}
+
+static s16 get_model_node_index(ModelFileHeader *header, ModelNode *target) {
+  s16 result = -1;
+  s32 nextIndex = 0;
+  s32 limit;
+
+  if (header == NULL || header->RootNode == NULL || target == NULL) {
+    return -1;
+  }
+
+  limit = header->numRecords > 0 ? header->numRecords : 0x7fff;
+  find_model_node_index(header->RootNode, target, &nextIndex, limit, &result);
+  return result;
+}
+
+static ModelNode *find_model_node_by_index(ModelNode *node, s16 targetIndex,
+                                           s32 *nextIndex, s32 limit) {
+  while (node != NULL && *nextIndex < limit) {
+    ModelNode *result;
+    s32 currentIndex = (*nextIndex)++;
+
+    if (currentIndex == targetIndex) {
+      return node;
+    }
+    result =
+        find_model_node_by_index(node->Child, targetIndex, nextIndex, limit);
+    if (result != NULL) {
+      return result;
+    }
+    node = node->Next;
+  }
+
+  return NULL;
+}
+
+static ModelNode *get_model_node_by_index(ModelFileHeader *header,
+                                          s16 targetIndex) {
+  s32 nextIndex = 0;
+  s32 limit;
+
+  if (header == NULL || header->RootNode == NULL || targetIndex < 0) {
+    return NULL;
+  }
+
+  limit = header->numRecords > 0 ? header->numRecords : 0x7fff;
+  return find_model_node_by_index(header->RootNode, targetIndex, &nextIndex,
+                                  limit);
 }
 
 static void save_projectile(StateStream *stream, Projectile *proj) {
@@ -956,6 +1090,7 @@ static void load_obj_allocation_state(StateStream *stream,
 static void save_object_base(StateStream *stream, ObjectRecord *obj) {
   s16 projIdx = -1;
   s16 embIdx = -1;
+  s16 attachmentNodeIdx = -1;
   u32 switchStates = 0;
 
   write_u16(stream, obj->extrascale);
@@ -985,6 +1120,24 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
   }
   write_u16(stream, embIdx);
 
+  if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED) {
+    if (obj->prop == NULL || obj->prop->parent == NULL || obj->model == NULL ||
+        obj->model->attachedto == NULL ||
+        obj->model->attachedto_objinst == NULL) {
+      practiceLogError("Embedded prop has incomplete attachment pointers");
+      assert(FALSE);
+    } else {
+      attachmentNodeIdx =
+          get_model_node_index(obj->model->attachedto->obj,
+                               obj->model->attachedto_objinst);
+      if (attachmentNodeIdx < 0) {
+        practiceLogError("Embedded prop attachment node is not in parent model");
+        assert(FALSE);
+      }
+    }
+  }
+  write_u16(stream, attachmentNodeIdx);
+
   if (obj->model != NULL && obj->model->obj != NULL) {
     s32 i;
     s32 numSw = obj->model->obj->numSwitches;
@@ -1006,7 +1159,7 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
 }
 
 static bool load_object_base(StateStream *stream, ObjectRecord *obj,
-                             PropRecord *prop) {
+                             PropRecord *prop, s16 *attachmentNodeIdx) {
   PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
   s32 destroyedLvl;
   s16 projectileIdx;
@@ -1030,6 +1183,11 @@ static bool load_object_base(StateStream *stream, ObjectRecord *obj,
 
   projectileIdx = (s16)read_u16(stream);
   embedmentIdx = (s16)read_u16(stream);
+  if (attachmentNodeIdx != NULL) {
+    *attachmentNodeIdx = (s16)read_u16(stream);
+  } else {
+    read_u16(stream);
+  }
   switchStates = read_u32(stream);
 
   // Projectile and embedment occupy the same union slot. Restore only the
@@ -1737,11 +1895,11 @@ static void skip_prop_data(StateStream *stream, u8 type) {
   if (type == PROP_TYPE_DOOR) {
     ObjectRecord temp_obj;
     DoorRecord temp_door;
-    load_object_base(stream, &temp_obj, NULL);
+    load_object_base(stream, &temp_obj, NULL, NULL);
     load_door_record(stream, &temp_door);
   } else if (type == PROP_TYPE_OBJ || type == PROP_TYPE_WEAPON) {
     TempObjectRecord temp_obj;
-    if (load_object_base(stream, &temp_obj.base, NULL)) {
+    if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
       load_object_subtype(stream, &temp_obj.base);
     }
   } else if (type == PROP_TYPE_EXPLOSION) {
@@ -1821,7 +1979,8 @@ bool save_props_state(StateStream *stream) {
     PropRecord *prop = get_prop_by_index(i);
 
     if (prop == NULL ||
-        (!prop_is_active_list_member(prop) && !prop_is_chr_child_object(prop))) {
+        (!prop_is_active_list_member(prop) &&
+         !prop_is_saved_child_object(prop))) {
       continue;
     }
 
@@ -2167,6 +2326,7 @@ typedef struct SavedPropLinks {
   u16 child;
   u16 prev;
   u16 next;
+  s16 attachmentNode;
 } SavedPropLinks;
 
 typedef struct PendingChrAttachments {
@@ -2223,35 +2383,50 @@ static void cleanup_live_chr_children(PropRecord *chr_prop,
   chr_prop->child = NULL;
 }
 
-static bool saved_link_names_chr_child(const SavedPropLinks *savedLinks,
-                                       s32 recordCount, u16 childIndex,
-                                       u16 chrIndex) {
+static bool saved_link_names_child(const SavedPropLinks *savedLinks,
+                                   s32 recordCount, u16 childIndex,
+                                   u16 parentIndex) {
   s32 i;
 
   for (i = 0; i < recordCount; i++) {
-    if (savedLinks[i].index == childIndex && savedLinks[i].parent == chrIndex) {
+    if (savedLinks[i].index == childIndex &&
+        savedLinks[i].parent == parentIndex) {
       PropRecord *child = get_prop_by_index(childIndex);
-      return child != NULL && child->parent == get_prop_by_index(chrIndex);
+      return child != NULL && child->parent == get_prop_by_index(parentIndex);
     }
   }
 
   return FALSE;
 }
 
-static PropRecord *get_saved_chr_child_link(const SavedPropLinks *savedLinks,
-                                            s32 recordCount, u16 childIndex,
-                                            u16 chrIndex) {
+static PropRecord *get_saved_child_link(const SavedPropLinks *savedLinks,
+                                        s32 recordCount, u16 childIndex,
+                                        u16 parentIndex) {
   if ((s16)childIndex < 0 ||
-      !saved_link_names_chr_child(savedLinks, recordCount, childIndex,
-                                  chrIndex)) {
+      !saved_link_names_child(savedLinks, recordCount, childIndex,
+                              parentIndex)) {
     return NULL;
   }
 
   return get_prop_by_index(childIndex);
 }
 
-static void rebuild_saved_chr_child_links(const SavedPropLinks *savedLinks,
-                                          s32 recordCount) {
+static bool prop_can_own_saved_children(PropRecord *prop) {
+  if (prop == NULL) {
+    return FALSE;
+  }
+  if (prop->type == PROP_TYPE_CHR) {
+    return prop->chr != NULL && prop->chr->prop == prop;
+  }
+  if (prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_DOOR ||
+      prop->type == PROP_TYPE_WEAPON) {
+    return prop->obj != NULL && prop->obj->prop == prop;
+  }
+  return FALSE;
+}
+
+static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
+                                      s32 recordCount) {
   s32 i;
 
   for (i = 0; i < recordCount; i++) {
@@ -2262,9 +2437,8 @@ static void rebuild_saved_chr_child_links(const SavedPropLinks *savedLinks,
     }
 
     parent = get_prop_by_index(savedLinks[i].index);
-    if (parent != NULL && parent->type == PROP_TYPE_CHR &&
-        parent->chr != NULL && parent->chr->prop == parent) {
-      parent->child = get_saved_chr_child_link(
+    if (prop_can_own_saved_children(parent)) {
+      parent->child = get_saved_child_link(
           savedLinks, recordCount, savedLinks[i].child, savedLinks[i].index);
     }
   }
@@ -2279,18 +2453,17 @@ static void rebuild_saved_chr_child_links(const SavedPropLinks *savedLinks,
 
     prop = get_prop_by_index(savedLinks[i].index);
     parent = get_prop_by_index(savedLinks[i].parent);
-    if (prop == NULL || parent == NULL || parent->type != PROP_TYPE_CHR ||
-        parent->chr == NULL || parent->chr->prop != parent ||
+    if (prop == NULL || !prop_can_own_saved_children(parent) ||
         prop->parent != parent) {
       continue;
     }
 
-    prop->prev = get_saved_chr_child_link(savedLinks, recordCount,
-                                          savedLinks[i].prev,
-                                          savedLinks[i].parent);
-    prop->next = get_saved_chr_child_link(savedLinks, recordCount,
-                                          savedLinks[i].next,
-                                          savedLinks[i].parent);
+    prop->prev = get_saved_child_link(savedLinks, recordCount,
+                                      savedLinks[i].prev,
+                                      savedLinks[i].parent);
+    prop->next = get_saved_child_link(savedLinks, recordCount,
+                                      savedLinks[i].next,
+                                      savedLinks[i].parent);
   }
 }
 
@@ -2597,7 +2770,8 @@ bool load_props_state(StateStream *stream) {
         return FALSE;
       }
 
-      if (!load_object_base(stream, obj, prop)) {
+      if (!load_object_base(stream, obj, prop,
+                            &savedLinks[i].attachmentNode)) {
         return FALSE;
       }
 
@@ -2645,7 +2819,7 @@ bool load_props_state(StateStream *stream) {
       if (obj == NULL) {
         // Just skip the rest
         TempObjectRecord temp_obj;
-        if (load_object_base(stream, &temp_obj.base, NULL)) {
+        if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
           load_object_subtype(stream, &temp_obj.base);
         }
         break;
@@ -2667,7 +2841,8 @@ bool load_props_state(StateStream *stream) {
         sub_GAME_7F050DE8(obj->model);
       }
 
-      if (!load_object_base(stream, obj, prop)) {
+      if (!load_object_base(stream, obj, prop,
+                            &savedLinks[i].attachmentNode)) {
         return FALSE;
       }
 
@@ -2771,14 +2946,22 @@ bool load_props_state(StateStream *stream) {
 
     prop = get_prop_by_index(savedLinks[i].index);
     parent = get_prop_by_index(savedLinks[i].parent);
-    restore_concealed_chr_item(prop, parent);
+    if (prop != NULL && prop->obj != NULL &&
+        (prop->obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)) {
+      if (!restore_embedded_object(prop, parent,
+                                   savedLinks[i].attachmentNode)) {
+        return FALSE;
+      }
+    } else {
+      restore_concealed_chr_item(prop, parent);
+    }
   }
 
   // Attachment restoration uses engine helpers that freely rewrite prev/next
   // while moving objects between active-list and child-list states. Reinstall
   // the saved CHR child graph afterward so prev remains the child-walk link and
   // next remains its reverse link for drop/teardown code.
-  rebuild_saved_chr_child_links(savedLinks, recordCount);
+  rebuild_saved_child_links(savedLinks, recordCount);
 
   /* Resolve projectile references only after all saved props are processed. */
   for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
