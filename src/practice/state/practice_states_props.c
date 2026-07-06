@@ -56,6 +56,7 @@ extern struct sImageTableEntry *scattered_explosions;
 extern struct sImageTableEntry *flareimage2;
 extern CartridgeModelFileRecord ejected_cartridge[];
 extern s32 dword_CODE_bss_80075DB0;
+extern u32 num_obj_position_data_entries;
 #if !defined(VERSION_EU)
 extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 #endif
@@ -631,6 +632,49 @@ static bool prop_is_active_list_member(PropRecord *prop) {
   }
 
   return FALSE;
+}
+
+static void reset_room_prop_lists(void) {
+  s32 i;
+  s32 j;
+
+  if (ptr_list_object_lookup_indices != NULL) {
+    ptr_list_object_lookup_indices[0] = -1;
+  }
+  num_obj_position_data_entries = 1;
+
+  if (RoomPropListChunkIndexes != NULL) {
+    for (i = 0; i < g_MaxNumRooms; i++) {
+      RoomPropListChunkIndexes[i] = -1;
+    }
+  }
+
+  if (RoomPropListChunks != NULL) {
+    for (i = 0; i < BSS_8007161C_LEN; i++) {
+      RoomPropListChunks[i].propnums[0] = -2;
+      for (j = 1; j < BSS_8007161C_DATA_LEN; j++) {
+        RoomPropListChunks[i].propnums[j] = -1;
+      }
+    }
+  }
+}
+
+static void rebuild_room_prop_lists_from_active_props(void) {
+  PropRecord *prop;
+  s32 guard = 0;
+
+  reset_room_prop_lists();
+
+  for (prop = ptr_obj_pos_list_first_entry;
+       prop != NULL && guard++ < POS_DATA_ENTRY_LEN; prop = prop->next) {
+    if (prop->parent == NULL && prop->rooms[0] != 0xff) {
+      chrpropRegisterRooms(prop);
+    }
+  }
+
+  if (guard >= POS_DATA_ENTRY_LEN) {
+    practiceLogWarn("Active prop list loop detected while rebuilding rooms");
+  }
 }
 
 /*
@@ -2728,6 +2772,11 @@ bool load_props_state(StateStream *stream) {
   g_NumExplosionEntries = read_u32(stream);
   g_NumSmokeEntries = read_u32(stream);
 
+  // The current room registration tables may belong to a different lifecycle
+  // moment (for example, a level-end cutscene). Rebuild from the restored prop
+  // records instead of walking stale chunk links during replacement.
+  reset_room_prop_lists();
+
   /* Clear and restore active projectiles. */
   for (pi = 0; pi < PROJECTILES_ARR_MAX; pi++) {
     projectileOwnerPropIndices[pi] = -1;
@@ -3278,6 +3327,8 @@ bool load_props_state(StateStream *stream) {
   if (!load_viewer_players_state(stream)) {
     return FALSE;
   }
+
+  rebuild_room_prop_lists_from_active_props();
 
   // Restore scorch marks and bullet holes now that the prop table is rebuilt,
   // so prop-attached impacts can resolve their saved prop index.
