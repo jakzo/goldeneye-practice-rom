@@ -1,4 +1,5 @@
 #include "practice_states_props.h"
+#include "bg.h"
 #include "chr.h"
 #include "chrai.h"
 #include "chrlv.h"
@@ -53,9 +54,37 @@ extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 
 #define BULLET_EFFECT_BUFFER_LEN 20
 #define BULLET_SPARK_BUFFER_LEN 50
+#define BG_PORTAL_MAX 200
 
 static ModelNode *get_model_node_by_index(ModelFileHeader *header,
                                           s16 targetIndex);
+
+static u8 save_portal_closed_state(s32 portal) {
+  if (portal == -1) {
+    return 0xff;
+  }
+  if (portal < 0 || portal >= BG_PORTAL_MAX) {
+    practiceLogError("Tinted glass has invalid portal index %d", portal);
+    assert(FALSE);
+    return 0xff;
+  }
+  return bgGetDataPortalsControlBytes1Bit1(portal) != 0;
+}
+
+static void load_portal_closed_state(s32 portal, u8 closed) {
+  if (portal == -1 && closed == 0xff) {
+    return;
+  }
+  if (portal < 0 || portal >= BG_PORTAL_MAX || closed > 1) {
+    practiceLogError("Tinted glass portal state is invalid (%d, %d)", portal,
+                     closed);
+    assert(FALSE);
+    return;
+  }
+
+  // A zero toggle sets the "closed" bit; a nonzero toggle clears it.
+  bgToggleDataPortalsContrlBytes1Bit1(portal, closed == 0);
+}
 
 /*
  * The non-EU spark/dust pool uses 0x3c-byte entries. Its first 0x2c bytes have
@@ -1864,6 +1893,7 @@ static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
     tgl->calculatedopacity = read_u32(stream);
     tgl->portalnum = read_u32(stream);
     tgl->unk90 = read_f32(stream);
+    load_portal_closed_state(tgl->portalnum, read_u8(stream));
     break;
   }
   case PROPDEF_TANK: {
@@ -2224,6 +2254,7 @@ bool save_props_state(StateStream *stream) {
           write_u32(stream, tgl->calculatedopacity);
           write_u32(stream, tgl->portalnum);
           write_f32(stream, tgl->unk90);
+          write_u8(stream, save_portal_closed_state(tgl->portalnum));
           break;
         }
         case PROPDEF_TANK: {
@@ -2561,7 +2592,7 @@ bool load_props_state(StateStream *stream) {
                             savedPropType == PROP_TYPE_WEAPON;
     bool createdChrProp = FALSE;
     bool createdObjProp = FALSE;
-    bool shouldRebuildObjectRooms = FALSE;
+    bool shouldRegisterObjectRooms = FALSE;
 
     for (c = 0; c < i; c++) {
       if (savedLinks[c].index == savedPropIndex) {
@@ -2714,8 +2745,8 @@ bool load_props_state(StateStream *stream) {
         ((savedPropType == PROP_TYPE_OBJ || savedPropType == PROP_TYPE_WEAPON) &&
          prop->parent == NULL && prop_is_active_list_member(prop))) {
       chrpropDeregisterRooms(prop);
-      shouldRebuildObjectRooms = savedPropType != PROP_TYPE_VIEWER &&
-                                 (s16)savedPropParentIdx < 0;
+      shouldRegisterObjectRooms = savedPropType != PROP_TYPE_VIEWER &&
+                                  (s16)savedPropParentIdx < 0;
     }
 
     // Apply the common PropRecord fields. The active-list/attachment-graph
@@ -2848,17 +2879,19 @@ bool load_props_state(StateStream *stream) {
 
       load_object_subtype(stream, obj);
 
-      // Rebuild root object room membership and dynamic collision geometry from
-      // the restored transform. Movable objects such as Train crates can move
-      // after saving; simply restoring prop/runtime positions leaves their
-      // allocated collision block and room lists at the pre-load location.
-      if ((createdObjProp || shouldRebuildObjectRooms) &&
+      // The serialized room list is authoritative. Recalculating it here can
+      // traverse the currently closed portal belonging to tinted glass and
+      // strand the pane in only the room on the far side of itself, making it
+      // impossible to render from the near side. Register the exact saved list
+      // after any live/recreated object's old registration was removed.
+      if ((createdObjProp || shouldRegisterObjectRooms) &&
           (s16)savedPropParentIdx < 0) {
-        setupUpdateObjectRoomPosition(obj);
-        if (obj->ptr_allocated_collisiondata_block != NULL) {
-          chrobjCollisionRelated(obj);
-        }
-      } else if (obj->ptr_allocated_collisiondata_block != NULL) {
+        chrpropRegisterRooms(prop);
+      }
+
+      // Dynamic collision geometry is still rebuilt from the restored
+      // transform; this is independent of room-list registration.
+      if (obj->ptr_allocated_collisiondata_block != NULL) {
         chrobjCollisionRelated(obj);
       }
       break;

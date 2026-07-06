@@ -23,11 +23,12 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and fix 
 - If there is a case that might need to be considered but you are not sure (for example, if a field is normally null or a pointer but theoretically the object pointed to could have been freed, though there is no evidence of this) then add an invariant assertion and emit an error log if it fails, no need to handle the case gracefully
 - Where practical, add a regression test or modify an existing one
 - After fixing the bug, ask the user to manually test to ensure the bug is fixed
-- If you notice any documentation (either in the `docs` files or in comments) is incorrect, tell me which docs you want to update and after I have confirmed that the fix worked, update the docs
+- Default to saving state of fields when you are not sure if they are needed or not (better to save too much than too little)
+- If you notice any documentation (either in the `docs` files or in comments) is incorrect or too vague, tell me which docs you want to update and after I have confirmed that the fix worked, update the docs
+- Also if the fix was narrow (e.g. targets a single prop type) check if the fix would also apply to other prop types
 
 ## Remaining
 
-- After loading state some panes of tinted glass in the level Control become invisible from certain angles
 - Bullet casings ejected from Bond's gun are not save/loaded
 - Exploded props become charred and deformed, but when saving these exploded props they are not restored on state load (neither the original nor exploded prop)
 - Crashes when loading state sometimes?
@@ -164,6 +165,13 @@ Add any general advice helpful for future agents working on this feature here. B
     - Explosions/smoke: rebuilt via `create_explosion_prop`/`create_smoke_prop` using a free `g_ExplosionBuffer`/`g_SmokeBuffer` entry.
     - Do not assume setup geometry persists. Destroyable setup objects can be freed completely; Train's 20 cuttable floor strips are ordinary `PROPDEF_PROP` records whose slots can then be reused. Recreate any missing setup-backed object from its saved command index. Doors still rely on their persistent live prop.
       Each object/door/weapon record carries an `ObjAllocationState` (model id, subtype, setup-command index) ahead of its payload so the destination prop can be built before the payload is consumed, mirroring `ChrAllocationState` for CHRs. The active-list links (`first`/`current`) and the per-prop `prev/next` are rebuilt from the restored indices; the attachment graph (`parent`/`child`) is owned by `restore_chr_attachments`. Disabled mid-regeneration props remain on the active list and are serialized; disabled attached equipment is restored through its owning CHR. **This is new, hard-to-test code** — the dominant test is save → play (collect items, kill guards, throw grenades, open doors) → load and confirm the saved world is faithfully restored without crashes.
+- **Saved Prop Rooms Are Authoritative**: Deregister a reused root prop from its
+  live rooms, restore its serialized room list, then register that exact list.
+  Do not call `setupUpdateObjectRoomPosition` during load. Its spatial search
+  depends on current portal visibility; a closed tinted-glass portal can make
+  the glass omit the room on the viewer's side, so the pane is then culled
+  before it can render or reopen its own portal. Control's vertically stacked
+  windows expose this clearly.
 - **Discard Post-Save CHR Equipment**: A guard can acquire a different weapon
   or hat after saving. When loading, an old attachment not named by the save
   must be freed, not detached and activated as a dropped item. Activating it

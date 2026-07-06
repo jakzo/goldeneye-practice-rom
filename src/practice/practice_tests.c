@@ -1,4 +1,5 @@
 #include "practice_tests.h"
+#include "bg.h"
 #include "bondview.h"
 #include "chr.h"
 #include "chrai.h"
@@ -11,6 +12,7 @@
 #include "state/practice_states.h"
 #include "state/practice_states_utils.h"
 #include <bondgame.h>
+#include <string.h>
 #include <ultra64.h>
 
 extern s32 g_ClockTimer;
@@ -34,7 +36,10 @@ extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 #define STATE_CAVERNS_ATTACHMENTS 9
 #define STATE_CORRUPT_FREELIST 10
 #define TEST_MOVE_SPEED 11
+#define STATE_TINTED_GLASS_PORTAL 12
 // --- end test cases ---
+
+#define MAX_TEST_TINTED_GLASS 32
 
 static s32 g_save_test_timer = -1;
 static u32 case_delta = 0;
@@ -71,6 +76,8 @@ s32 practice_tests_boot_level(s32 test_case) {
     return LEVELID_TRAIN;
   case STATE_CAVERNS_ATTACHMENTS:
     return LEVELID_CAVERNS;
+  case STATE_TINTED_GLASS_PORTAL:
+    return LEVELID_CONTROL;
   case TEST_MOVE_SPEED:
     return LEVELID_TEST;
   default:
@@ -167,6 +174,95 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case STATE_TINTED_GLASS_PORTAL: {
+    static s32 portal = -1;
+    static s32 saved_closed;
+    static s16 saved_indices[MAX_TEST_TINTED_GLASS];
+    static u8 saved_rooms[MAX_TEST_TINTED_GLASS][4];
+    static s32 saved_count;
+
+    if (after_frames(30)) {
+      PropRecord *prop;
+
+      portal = -1;
+      saved_count = 0;
+      for (prop = ptr_obj_pos_list_first_entry; prop != NULL;
+           prop = prop->next) {
+        if ((prop->type == PROP_TYPE_OBJ ||
+             prop->type == PROP_TYPE_WEAPON) &&
+            prop->obj != NULL &&
+            prop->obj->type == PROPDEF_TINTED_GLASS) {
+          TintedGlassRecord *glass = (TintedGlassRecord *)prop->obj;
+
+          if (saved_count >= MAX_TEST_TINTED_GLASS) {
+            emu_log("TOO_MANY_TINTED_GLASS_PROPS");
+            emu_log("TEST_FAILED");
+            break;
+          }
+          saved_indices[saved_count] = get_prop_index(prop);
+          saved_rooms[saved_count][0] = prop->rooms[0];
+          saved_rooms[saved_count][1] = prop->rooms[1];
+          saved_rooms[saved_count][2] = prop->rooms[2];
+          saved_rooms[saved_count][3] = prop->rooms[3];
+          saved_count++;
+
+          if (glass->portalnum >= 0) {
+            portal = glass->portalnum;
+          }
+        }
+      }
+
+      if (portal < 0 || saved_count == 0) {
+        emu_log("TINTED_GLASS_PORTAL_NOT_FOUND");
+        emu_log("TEST_FAILED");
+      } else {
+        saved_closed = bgGetDataPortalsControlBytes1Bit1(portal) != 0;
+        emu_log("TRIGGER_SAVE portal=%d closed=%d", portal, saved_closed);
+        save_game_state();
+        emu_log("SAVE_DONE");
+      }
+    } else if (after_frames(2)) {
+      if (portal >= 0) {
+        bgToggleDataPortalsContrlBytes1Bit1(portal, saved_closed);
+        if ((bgGetDataPortalsControlBytes1Bit1(portal) != 0) == saved_closed) {
+          emu_log("PORTAL_STATE_NOT_CHANGED");
+          emu_log("TEST_FAILED");
+        }
+      }
+    } else if (after_frames(2)) {
+      if (portal >= 0) {
+        s32 i;
+        bool rooms_match = TRUE;
+
+        emu_log("TRIGGER_LOAD");
+        load_game_state();
+        emu_log("LOAD_DONE");
+        if ((bgGetDataPortalsControlBytes1Bit1(portal) != 0) != saved_closed) {
+          emu_log("TINTED_GLASS_PORTAL_NOT_RESTORED");
+          emu_log("TEST_FAILED");
+        }
+
+        for (i = 0; i < saved_count; i++) {
+          PropRecord *glass = get_prop_by_index(saved_indices[i]);
+          if (glass == NULL ||
+              memcmp(glass->rooms, saved_rooms[i], sizeof(saved_rooms[i])) !=
+                  0) {
+            emu_log("TINTED_GLASS_ROOMS_CHANGED prop=%d",
+                    saved_indices[i]);
+            rooms_match = FALSE;
+          }
+        }
+
+        if (!rooms_match) {
+          emu_log("TEST_FAILED");
+        } else if ((bgGetDataPortalsControlBytes1Bit1(portal) != 0) ==
+                   saved_closed) {
+          emu_log("TEST_COMPLETE");
+        }
+      }
+    }
+  } break;
+
   case TEST_MOVE_SPEED: {
 #define DISTANCE 10000.0f
     f32 x = g_CurrentPlayer->prop->pos.x;

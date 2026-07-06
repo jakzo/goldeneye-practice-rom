@@ -490,10 +490,13 @@ toward older siblings. Examples:
 
 ### Calculated / Rebuildable
 
-- Room registration for root props can be recalculated from object matrix and
-  position by `setupUpdateObjectRoomPosition`
+- During normal gameplay, room registration for root props can be recalculated
+  from object matrix and position by `setupUpdateObjectRoomPosition`
   ([`src/game/loadobjectmodel.c`](../../../game/loadobjectmodel.c#L250)).
-  Attached props usually clear `stan` and are not normal room-registered roots.
+  Save-state loading must instead register the exact serialized rooms: the
+  recalculation depends on current portal visibility and can strand tinted
+  glass on the far side of its own closed portal. Attached props usually clear
+  `stan` and are not normal room-registered roots.
 - `PROPFLAG_ONSCREEN` is per-frame visibility. Restoring it exactly is usually
   less important than letting the next visibility pass recalculate it, except
   embedded render/drop code can branch on it during the same frame.
@@ -538,8 +541,9 @@ To restore guard attachments correctly:
    `model->attachedto_objinst`. For guard hands/head, use the guard model
    switches. For embedded props, use the saved parent model/node and embedment
    matrix.
-8. Restore or recompute room registration. Root props should be registered;
-   attached props are normally deregistered and have `stan == NULL`.
+8. Restore the exact serialized room registration for root props; do not
+   recompute it during load. Attached props are normally deregistered and have
+   `stan == NULL`.
 9. Preserve pending drop state. If `CHRHIDDEN_DROP_HELD_ITEMS` is set and child
    projectile `droptype` is saved, load must not accidentally complete or clear
    the scheduled drop.
