@@ -17,11 +17,13 @@ This ROM provides tools for practicing speedruns of Goldeneye 007 on the Nintend
 
 ## Features
 
-- **Timer displayed during levels**
+- **Timer displayed during gameplay**
 - **End screen timer displays hundredths**
 - **Time scale control**
     - During gameplay press `L + D-Left` to decrease game speed by 10%
     - During gameplay press `L + D-Right` to increase game speed by 10%
+- **Speedometer**
+    - Displays Bond's current horizontal movement speed (moving up and down does not affect the displayed speed)
 - **Skip level intro cutscenes**
     - Starting a level goes straight into it, rather than playing the intro cutscene
 - **Skips legal and logo screens on game startup**
@@ -32,6 +34,7 @@ This ROM provides tools for practicing speedruns of Goldeneye 007 on the Nintend
 
 - **Dam**
     - Indicator for when the gate guard has loaded in
+    - Option to never play the gate intro cutscene
 - **Runway**
     - Splits
 
@@ -46,11 +49,6 @@ These features have some minor bugs or limitations but should be usable:
         - If there is some state not saved that DOES affect gameplay, let me know (@jakzo on Discord)
     - Not fully stable, expect occassional crashes
         - If you can reliably reproduce the crash, let me know so I can fix it (@jakzo on Discord)
-
-### ⚠️ Alpha features
-
-These features have many significant bugs and are unfinished. You should not expect them to work properly:
-
 - **Grenade camera**
     - When throwing grenades, shows a picture-in-picture view that follows the grenade so you can see where it landed
 

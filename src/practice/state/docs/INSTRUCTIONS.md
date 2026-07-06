@@ -29,7 +29,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and fix 
 
 ## Remaining
 
-- Bullet casings ejected from Bond's gun are not save/loaded
 - Exploded props become charred and deformed, but when saving these exploded props they are not restored on state load (neither the original nor exploded prop)
 - Crashes when loading state sometimes?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)

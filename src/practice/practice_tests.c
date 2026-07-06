@@ -5,6 +5,7 @@
 #include "chrai.h"
 #include "chrobjhandler.h"
 #include "emu_log.h"
+#include "gun.h"
 #include "joy.h"
 #include "objecthandler.h"
 #include "player.h"
@@ -37,6 +38,7 @@ extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 #define STATE_CORRUPT_FREELIST 10
 #define TEST_MOVE_SPEED 11
 #define STATE_TINTED_GLASS_PORTAL 12
+#define STATE_BULLET_CASINGS 13
 // --- end test cases ---
 
 #define MAX_TEST_TINTED_GLASS 32
@@ -65,6 +67,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case FIRE_SLOWMO:
   case RNG_LOAD:
   case STATE_CORRUPT_FREELIST:
+  case STATE_BULLET_CASINGS:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
     return LEVELID_BUNKER1;
@@ -174,6 +177,67 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case STATE_BULLET_CASINGS: {
+    static CasingRecord saved_casings[4];
+    static const s32 saved_indices[4] = {3, 5, 9, 12};
+    ModelFileHeader *headers[4];
+    s32 i;
+    s32 j;
+    bool ok;
+
+    if (after_frames(30)) {
+      headers[0] = &cartridge_header;
+      headers[1] = &cartrifle_header;
+      headers[2] = &cartblue_header;
+      headers[3] = &cartshell_header;
+      bzero(g_Casings, sizeof(g_Casings));
+      for (i = 0; i < ARRAYCOUNT(saved_casings); i++) {
+        CasingRecord *casing = &g_Casings[saved_indices[i]];
+        casing->floor_y_pos = -123.5f - i;
+        casing->pos.x = 10.0f + i;
+        casing->pos.y = 20.0f + i;
+        casing->pos.z = 30.0f + i;
+        casing->vel.x = 1.0f + i;
+        casing->vel.y = 2.0f + i;
+        casing->vel.z = 3.0f + i;
+        casing->header = headers[i];
+        saved_casings[i] = *casing;
+      }
+      emu_log("TRIGGER_SAVE");
+      save_game_state();
+      emu_log("SAVE_DONE");
+    } else if (after_frames(2)) {
+      bzero(g_Casings, sizeof(g_Casings));
+      g_Casings[7].header = &cartrifle_header;
+      emu_log("TRIGGER_LOAD");
+      load_game_state();
+      emu_log("LOAD_DONE");
+
+      ok = TRUE;
+      for (i = 0; i < ARRAYCOUNT(saved_casings); i++) {
+        for (j = 0; j < sizeof(CasingRecord); j++) {
+          if (((u8 *)&g_Casings[saved_indices[i]])[j] !=
+              ((u8 *)&saved_casings[i])[j]) {
+            ok = FALSE;
+          }
+        }
+      }
+      for (i = 0; i < ARRAYCOUNT(g_Casings); i++) {
+        if (i != saved_indices[0] && i != saved_indices[1] &&
+            i != saved_indices[2] && i != saved_indices[3] &&
+            g_Casings[i].header != NULL) {
+          ok = FALSE;
+        }
+      }
+      if (ok) {
+        emu_log("TEST_COMPLETE");
+      } else {
+        emu_log("CASINGS_NOT_RESTORED");
+        emu_log("TEST_FAILED");
+      }
+    }
+  } break;
+
   case STATE_TINTED_GLASS_PORTAL: {
     static s32 portal = -1;
     static s32 saved_closed;

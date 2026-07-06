@@ -6,6 +6,7 @@
 #include "chrobjdata.h"
 #include "chrobjhandler.h"
 #include "explosions.h"
+#include "gun.h"
 #include "loadobjectmodel.h"
 #include "lvl.h"
 #include "objecthandler.h"
@@ -48,12 +49,16 @@ extern bondstruct_unk_8007A170 dword_CODE_bss_8007A170[20];
 extern struct sImageTableEntry *explosion_smokeimages;
 extern struct sImageTableEntry *scattered_explosions;
 extern struct sImageTableEntry *flareimage2;
+extern CartridgeModelFileRecord ejected_cartridge[];
+extern s32 dword_CODE_bss_80075DB0;
 #if !defined(VERSION_EU)
 extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 #endif
 
 #define BULLET_EFFECT_BUFFER_LEN 20
 #define BULLET_SPARK_BUFFER_LEN 50
+#define CASING_BUFFER_LEN 20
+#define CASING_MODEL_COUNT 4
 #define BG_PORTAL_MAX 200
 
 static ModelNode *get_model_node_by_index(ModelFileHeader *header,
@@ -121,6 +126,31 @@ static u32 get_bullet_effect_image_by_id(u8 id) {
   default:
     return 0;
   }
+}
+
+static u8 get_casing_model_id(ModelFileHeader *header) {
+  s32 i;
+
+  for (i = 0; i < CASING_MODEL_COUNT; i++) {
+    if (ejected_cartridge[i].header == header) {
+      return i;
+    }
+  }
+
+  practiceLogError("Active casing has unknown model header %08x", header);
+  assert(FALSE);
+  return 0xff;
+}
+
+static ModelFileHeader *get_casing_model_by_id(u8 id) {
+  if (id >= CASING_MODEL_COUNT ||
+      ejected_cartridge[id].header == NULL) {
+    practiceLogError("Saved casing has invalid model id %d", id);
+    assert(FALSE);
+    return NULL;
+  }
+
+  return ejected_cartridge[id].header;
 }
 
 // Allocation metadata serialized ahead of an object/door/weapon payload so the
@@ -1720,6 +1750,71 @@ static void load_gun_effects_state(StateStream *stream) {
 #endif
 }
 
+/*
+ * Ejected first-person cartridge casings live in a fixed global pool rather
+ * than the prop table. The model headers are level-lifetime allocations loaded
+ * by init_ejected_cartridges, but store a stable table index rather than an
+ * absolute pointer so a state remains valid if their addresses ever move.
+ */
+static void save_casings_state(StateStream *stream) {
+  s32 i;
+  u8 count = 0;
+
+  for (i = 0; i < CASING_BUFFER_LEN; i++) {
+    if (g_Casings[i].header != NULL) {
+      count++;
+    }
+  }
+
+  write_u8(stream, count);
+  for (i = 0; i < CASING_BUFFER_LEN; i++) {
+    CasingRecord casing;
+
+    if (g_Casings[i].header == NULL) {
+      continue;
+    }
+
+    casing = g_Casings[i];
+    write_u8(stream, i);
+    write_u8(stream, get_casing_model_id(casing.header));
+    casing.header = NULL;
+    write_bytes(stream, &casing, sizeof(CasingRecord));
+  }
+}
+
+static void load_casings_state(StateStream *stream) {
+  s32 i;
+  u8 count;
+
+  bzero(g_Casings, sizeof(g_Casings));
+  count = read_u8(stream);
+  if (count > CASING_BUFFER_LEN) {
+    practiceLogError("Saved casing count is invalid (%d)", count);
+    assert(FALSE);
+    return;
+  }
+
+  for (i = 0; i < count; i++) {
+    CasingRecord casing;
+    u8 index = read_u8(stream);
+    u8 model_id = read_u8(stream);
+
+    read_bytes(stream, &casing, sizeof(CasingRecord));
+    casing.header = get_casing_model_by_id(model_id);
+
+    if (index >= CASING_BUFFER_LEN) {
+      practiceLogError("Saved casing has invalid pool index %d", index);
+      assert(FALSE);
+      continue;
+    }
+    g_Casings[index] = casing;
+  }
+
+  // The casing impact sound graph was stopped before loading. Do not retain
+  // its now-defunct ALSoundState handle in this global slot.
+  dword_CODE_bss_80075DB0 = 0;
+}
+
 static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
   switch (obj->type) {
   case PROPDEF_PROP:
@@ -2330,6 +2425,7 @@ bool save_props_state(StateStream *stream) {
   save_decals_state(stream);
   save_flying_particles_state(stream);
   save_gun_effects_state(stream);
+  save_casings_state(stream);
 
   /* Patch the props header with the real size and record count. */
   u32 totalPropsSize = stream->total_processed - dataStart;
@@ -3087,6 +3183,7 @@ bool load_props_state(StateStream *stream) {
   load_decals_state(stream);
   load_flying_particles_state(stream);
   load_gun_effects_state(stream);
+  load_casings_state(stream);
 
   return TRUE;
 }
