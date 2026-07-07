@@ -112,6 +112,7 @@ extern void *memcpy(void *dst, const void *src, size_t count);
 #define LINE_SPACING 0
 #define GAME_UNITS_PER_METER 100.0f
 #define GAME_TICKS_PER_SECOND 60.0f
+#define LAG_ESTIMATE_MAX_DISPLAY_FRAMES 99
 
 typedef enum {
   LOG_LEVEL_DEBUG,
@@ -501,7 +502,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
       }
 
       sprintf(lag_buf, "+%.1f (%d)", strafe_100m_lag_time_added(dropped_frames),
-              dropped_frames);
+              dropped_frames > 99 ? 99 : dropped_frames);
       gdl = renderText(gdl, &lag_x, &hud_y, lag_buf, ptrFontBankGothicChars,
                        ptrFontBankGothic, 0xFFFFFFFF, viGetX(), viGetY());
       hud_x += 54;
