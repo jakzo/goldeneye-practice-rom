@@ -464,6 +464,29 @@ Gfx *practice_ui_render(Gfx *gdl) {
                      ptrFontZurichBold, p_color, viGetX(), viGetY());
     hud_x += 8;
 
+    // For use with frame counter scripts
+    // {
+    //   char timer_buf[24];
+    //   static u32 rendered_frame_count = 0;
+    //   s32 timer_x = hud_x;
+    //   s32 mission_time = getMissiontimer();
+    //   s32 color = is_timer_active ? 0xFFFFFFFF : 0xA0A0A0FF;
+
+    //   if (mission_time == 0) {
+    //     rendered_frame_count = 0;
+    //   } else {
+    //     rendered_frame_count++;
+    //   }
+
+    //   sprintf(timer_buf, "%d - %d - %d", mission_time, rendered_frame_count,
+    //           speedgraphframes);
+    //   gdl = renderText(gdl, &timer_x, &hud_y, timer_buf,
+    //   ptrFontBankGothicChars,
+    //                    ptrFontBankGothic, color, viGetX(), viGetY());
+
+    //   hud_x += 120;
+    // }
+
     // Render mission timer next to the "P" indicator
     if (practice.show_mission_timer) {
       char timer_buf[16];
