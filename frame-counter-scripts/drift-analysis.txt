@@ -1,0 +1,13 @@
+Runway with ~7 frame duration
+START = 2 - 1 - 2 @ 5:48.20
+END = 116354 - 19173 - 6 @ 38:12.74
+MISSION TIMER = 32:19.23
+DURATION = 32:24.54
+RATIO = 0.997215
+
+Surface 1 with ~1.3 frame duration
+START = 2 - 1 - 2 @ 6:52.06
+END = 117559 - 76960 - 1 @ 39:36.84
+MISSION TIMER = 32:39.31
+DURATION = 32:44.78
+RATIO = 0.997270
