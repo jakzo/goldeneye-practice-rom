@@ -7,6 +7,7 @@
 #include "ramrom.h"
 #include <PR/R4300.h>
 #include "thread_config.h"
+#include "emu_log.h"
 
 /**
  * @file deb_video.c
@@ -314,7 +315,127 @@ u32 D_80024184[4] = {0};
 void crashMain(void* arg0);
 
 void crashPrintDescription(u32 mask, char *label, struct regDesc_t *description);
+#ifdef PRACTICE_ROM
+static void crashLogFault(OSThread *thread);
+#endif
 // end forward declarations
+
+#ifdef PRACTICE_ROM
+static char *crashGetExceptionName(u32 cause)
+{
+    switch (cause & CAUSE_EXCMASK)
+    {
+        case EXC_INT: return "interrupt";
+        case EXC_MOD: return "tlb_mod";
+        case EXC_RMISS: return "tlb_load";
+        case EXC_WMISS: return "tlb_store";
+        case EXC_RADE: return "addr_load";
+        case EXC_WADE: return "addr_store";
+        case EXC_IBE: return "bus_fetch";
+        case EXC_DBE: return "bus_data";
+        case EXC_SYSCALL: return "syscall";
+        case EXC_BREAK: return "break";
+        case EXC_II: return "reserved_instr";
+        case EXC_CPU: return "cop_unusable";
+        case EXC_OV: return "overflow";
+        case EXC_TRAP: return "trap";
+        case EXC_VCEI: return "vce_fetch";
+        case EXC_FPE: return "fp";
+        case EXC_WATCH: return "watch";
+        case EXC_VCED: return "vce_data";
+        default: return "unknown";
+    }
+}
+
+static bool crashIsRamAddress(u32 address)
+{
+    return (address >= 0x80000000U) && (address < 0x80800000U) && ((address & 3) == 0);
+}
+
+static void crashLogU64(char *name, u64 value)
+{
+    emu_log("%s=%08x%08x", name, (u32)(value >> 32), (u32)value);
+}
+
+static void crashLogRegs(OSThread *thread)
+{
+    __OSThreadContext *ctx = &thread->context;
+
+    crashLogU64("at", ctx->at);
+    crashLogU64("v0", ctx->v0);
+    crashLogU64("v1", ctx->v1);
+    crashLogU64("a0", ctx->a0);
+    crashLogU64("a1", ctx->a1);
+    crashLogU64("a2", ctx->a2);
+    crashLogU64("a3", ctx->a3);
+    crashLogU64("t0", ctx->t0);
+    crashLogU64("t1", ctx->t1);
+    crashLogU64("t2", ctx->t2);
+    crashLogU64("t3", ctx->t3);
+    crashLogU64("t4", ctx->t4);
+    crashLogU64("t5", ctx->t5);
+    crashLogU64("t6", ctx->t6);
+    crashLogU64("t7", ctx->t7);
+    crashLogU64("s0", ctx->s0);
+    crashLogU64("s1", ctx->s1);
+    crashLogU64("s2", ctx->s2);
+    crashLogU64("s3", ctx->s3);
+    crashLogU64("s4", ctx->s4);
+    crashLogU64("s5", ctx->s5);
+    crashLogU64("s6", ctx->s6);
+    crashLogU64("s7", ctx->s7);
+    crashLogU64("t8", ctx->t8);
+    crashLogU64("t9", ctx->t9);
+    crashLogU64("gp", ctx->gp);
+    crashLogU64("sp", ctx->sp);
+    crashLogU64("s8", ctx->s8);
+    crashLogU64("ra", ctx->ra);
+    crashLogU64("lo", ctx->lo);
+    crashLogU64("hi", ctx->hi);
+}
+
+static void crashLogBacktrace(OSThread *thread)
+{
+    __OSThreadContext *ctx = &thread->context;
+    u32 *sp = (u32 *)(u32)ctx->sp;
+    s32 i;
+
+    emu_log("CRASH_BT pc=%08x sp=%08x ra=%08x",
+            ctx->pc + ((ctx->cause & CAUSE_BD) ? 4 : 0), (u32)sp, (u32)ctx->ra);
+
+    if (!crashIsRamAddress((u32)sp))
+    {
+        emu_log("CRASH_STACK unavailable sp=%08x", (u32)sp);
+        return;
+    }
+
+    for (i = 0; i < 16; i += 4)
+    {
+        emu_log("CRASH_STACK sp+%02x %08x %08x %08x %08x",
+                i * 4, sp[i], sp[i + 1], sp[i + 2], sp[i + 3]);
+    }
+}
+
+static void crashLogFault(OSThread *thread)
+{
+    __OSThreadContext *ctx = &thread->context;
+    u32 fault_pc;
+
+    fault_pc = ctx->pc + ((ctx->cause & CAUSE_BD) ? 4 : 0);
+
+    emu_log("CRASH_BEGIN");
+    emu_log("CRASH_THREAD id=%d pri=%d state=%04x flags=%04x",
+            thread->id, thread->priority, thread->state, thread->flags);
+    emu_log("CRASH_CAUSE name=%s code=%02x raw=%08x bd=%d",
+            crashGetExceptionName(ctx->cause), (ctx->cause & CAUSE_EXCMASK) >> CAUSE_EXCSHIFT,
+            ctx->cause, (ctx->cause & CAUSE_BD) != 0);
+    emu_log("CRASH_CPU epc=%08x fault_pc=%08x badvaddr=%08x sr=%08x fpcsr=%08x rcp=%08x",
+            ctx->pc, fault_pc, ctx->badvaddr, ctx->sr, ctx->fpcsr, ctx->rcp);
+    crashLogRegs(thread);
+    crashLogBacktrace(thread);
+    emu_log("CRASH_END");
+}
+#endif
 
 /**
  * 5AE0    70004EE0
@@ -372,6 +493,9 @@ void crashMain(void* arg0)
         }
         else
         {
+#ifdef PRACTICE_ROM
+            crashLogFault(curr);
+#endif
             break;
         }
     }

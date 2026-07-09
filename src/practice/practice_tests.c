@@ -44,6 +44,9 @@ extern void objDeform(ObjectRecord *obj, s32 destroyed_level);
 #define STATE_DESTROYED_PROP 13
 // --- end test cases ---
 
+// Left out of test cases since it cannot assert
+#define CRASH 14
+
 #define MAX_TEST_TINTED_GLASS 32
 
 static s32 g_save_test_timer = -1;
@@ -71,6 +74,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case RNG_LOAD:
   case STATE_CORRUPT_FREELIST:
   case STATE_DESTROYED_PROP:
+  case CRASH:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
     return LEVELID_BUNKER1;
@@ -284,7 +288,8 @@ void practice_tests_tick() {
         emu_log("TEST_COMPLETE");
       }
     }
-  } break;
+    break;
+  }
 
   case STATE_TINTED_GLASS_PORTAL: {
     static s32 portal = -1;
@@ -369,7 +374,8 @@ void practice_tests_tick() {
         }
       }
     }
-  } break;
+    break;
+  }
 
   case TEST_MOVE_SPEED: {
 #define DISTANCE 10000.0f
@@ -487,9 +493,10 @@ void practice_tests_tick() {
     } else if (after_frames(2)) {
       emu_log("TEST_COMPLETE");
     }
-  } break;
+    break;
+  }
 
-  case STATE_GRENADE:
+  case STATE_GRENADE: {
     if (after_frames(20)) {
       emu_log("TRIGGER_SAVE");
       save_game_state();
@@ -538,6 +545,7 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+  }
 
   case STATE_BUNKER: {
     static s32 previous_chr_count = -1;
@@ -597,7 +605,7 @@ void practice_tests_tick() {
     break;
   }
 
-  case STATE_DAM:
+  case STATE_DAM: {
     if (after_frames(30)) {
       emu_log("TRIGGER_SAVE");
       save_game_state();
@@ -610,8 +618,9 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+  }
 
-  case STATE_CORRUPT_FREELIST:
+  case STATE_CORRUPT_FREELIST: {
     if (after_frames(30)) {
       emu_log("TRIGGER_SAVE");
       save_game_state();
@@ -628,6 +637,7 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+  }
 
   case STATE_ARCHIVES_KEY: {
     static PropRecord *key;
@@ -679,7 +689,8 @@ void practice_tests_tick() {
         emu_log("TEST_FAILED");
       }
     }
-  } break;
+    break;
+  }
 
   case STATE_TRAIN_HATCH: {
     static s32 saved_hatch_part_count;
@@ -802,7 +813,8 @@ void practice_tests_tick() {
     } else if (after_frames(30)) {
       emu_log("TEST_COMPLETE");
     }
-  } break;
+    break;
+  }
 
   case STATE_CAVERNS_ATTACHMENTS: {
     static s16 saved_chr_prop_index;
@@ -965,9 +977,10 @@ void practice_tests_tick() {
     } else if (after_frames(30)) {
       emu_log("TEST_COMPLETE");
     }
-  } break;
+    break;
+  }
 
-  case FIRE_SLOWMO:
+  case FIRE_SLOWMO: {
     // The first-person gun must fire only when simulation time advances. A shot
     // (ammo decrement) on a frame where no time passed (prev_clock == 0) means
     // the gun fired while frozen/slowed -- the bug.
@@ -1005,6 +1018,19 @@ void practice_tests_tick() {
       emu_log("TEST_COMPLETE");
     }
     break;
+  }
+
+  case CRASH: {
+    if (after_frames(30)) {
+      volatile u32 *crash_ptr = (volatile u32 *)0;
+
+      emu_log("TRIGGER_CRASH");
+      *crash_ptr = 0x43524153;
+      emu_log("Shouldn't have reached here...");
+      emu_log("TEST_FAILED");
+    }
+    break;
+  }
 
   default:
     break;

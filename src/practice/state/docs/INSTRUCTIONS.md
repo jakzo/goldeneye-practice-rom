@@ -18,6 +18,7 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining
 
+- Runway loading after plane cutscene makes plane disappear and a bunch of things break on load
 - Windows in Archives do not get restored after being smashed
 - After dying the game shows a replay of your death and turns the sfx volume down, but when loading state back to alive the volume stays lowered
 - Lights in the roof of the Bunker control room can be shot out, but they do not turn back on after restoring state
