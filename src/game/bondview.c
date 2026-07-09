@@ -11738,6 +11738,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 
 #if PRACTICE_ROM
     if (!practice_check_hotkeys()) {
+        practice_tests_tick();
 #endif
 
     if ((g_CameraMode == CAMERAMODE_NONE) || ((g_CameraMode == CAMERAMODE_FP) && (is_timer_active != 0)) || (g_CameraMode == CAMERAMODE_FADE_TO_TITLE))
@@ -11746,10 +11747,6 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
         {
             mission_timer += g_ClockTimer;
         }
-
-#ifdef PRACTICE_ROM
-        practice_tests_tick();
-#endif
 
         MoveBond(stick_x, stick_y, buttons, (u16) g_CurrentPlayer->buttons_pressed);
     }

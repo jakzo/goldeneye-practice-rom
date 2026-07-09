@@ -3,9 +3,11 @@
 #include "bondview.h"
 #include "chr.h"
 #include "chrai.h"
+#include "chrlv.h"
 #include "chrobjhandler.h"
 #include "emu_log.h"
 #include "gun.h"
+#include "initanitable.h"
 #include "joy.h"
 #include "objecthandler.h"
 #include "player.h"
@@ -22,11 +24,13 @@ extern u64 g_randomSeed;
 extern u64 g_chrObjRandomSeed;
 extern u64 g_tlbRandomSeed;
 extern s32 propdoorInteract(PropRecord *doorprop);
+extern s32 object_interaction(PropRecord *prop);
 extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
 extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 extern ModelNode *sub_GAME_7F04B478(ObjectRecord *obj);
 extern bool sub_GAME_7F04B590(ModelFileHeader *header, ModelNode *node);
 extern void objDeform(ObjectRecord *obj, s32 destroyed_level);
+extern bool bondinvCheckHasKeyFlags(u32 wantkeyflags);
 extern bool g_DebugLogsEnabled;
 
 // --- start test cases ---
@@ -44,6 +48,7 @@ extern bool g_DebugLogsEnabled;
 #define STATE_TINTED_GLASS_PORTAL 12
 #define STATE_DESTROYED_PROP 13
 #define STATE_CONTROL 14
+#define STATE_RUNWAY_PLANE 15
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -78,6 +83,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case RNG_LOAD:
   case STATE_CORRUPT_FREELIST:
   case STATE_DESTROYED_PROP:
+  case STATE_RUNWAY_PLANE:
   case CRASH:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
@@ -188,6 +194,238 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case STATE_RUNWAY_PLANE: {
+    static s16 saved_plane_index;
+    static s16 saved_key_index;
+    static ModelAnimation *saved_anim;
+    static s16 saved_framea;
+    static s16 saved_frameb;
+    static f32 saved_speed;
+    static f32 saved_playspeed;
+    static coord3d saved_runtime_pos;
+    static coord3d saved_prop_pos;
+    PropRecord *prop;
+    AircraftRecord *air = NULL;
+    PropRecord *key_prop = NULL;
+    INV_ITEM_TYPE op;
+    s32 i;
+
+    if (after_frames(30)) {
+      saved_plane_index = -1;
+      saved_key_index = -1;
+
+      for (prop = ptr_obj_pos_list_first_entry; prop != NULL;
+           prop = prop->next) {
+        if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON) &&
+            prop->obj != NULL && prop->obj->type == PROPDEF_AIRCRAFT &&
+            prop->obj->model != NULL) {
+          air = (AircraftRecord *)prop->obj;
+          saved_plane_index = get_prop_index(prop);
+        } else if ((prop->type == PROP_TYPE_OBJ ||
+                    prop->type == PROP_TYPE_WEAPON) &&
+                   prop->obj != NULL && prop->obj->type == PROPDEF_KEY) {
+          key_prop = prop;
+          saved_key_index = get_prop_index(prop);
+        }
+      }
+
+      if (air == NULL) {
+        emu_log("RUNWAY_PLANE_NOT_FOUND");
+        emu_log("TEST_FAILED");
+        break;
+      }
+      if (key_prop == NULL) {
+        emu_log("RUNWAY_KEY_NOT_FOUND");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      saved_anim = air->model->anim;
+      saved_framea = air->model->framea;
+      saved_frameb = air->model->frameb;
+      saved_speed = air->model->speed;
+      saved_playspeed = air->model->playspeed;
+      saved_runtime_pos = air->runtime_pos;
+      saved_prop_pos = air->prop->pos;
+
+      emu_log("TRIGGER_SAVE");
+      save_game_state();
+      emu_log("SAVE_DONE");
+    } else if (after_frames(30)) {
+      key_prop = get_prop_by_index(saved_key_index);
+      if (key_prop == NULL || key_prop->obj == NULL ||
+          key_prop->obj->type != PROPDEF_KEY) {
+        emu_log("RUNWAY_KEY_LOST_BEFORE_PICKUP");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      op = collect_or_interact_object(key_prop, FALSE);
+      if (op == INV_ITEM_NONE) {
+        emu_log("RUNWAY_KEY_PICKUP_FAILED");
+        emu_log("TEST_FAILED");
+        break;
+      }
+      propExecuteTickOperation(key_prop, op);
+    } else if (after_frames(30)) {
+
+      if (!bondinvCheckHasKeyFlags(1)) {
+        emu_log("RUNWAY_KEY_NOT_HELD");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      prop = get_prop_by_index(saved_plane_index);
+      air = prop != NULL ? (AircraftRecord *)prop->obj : NULL;
+      if (air == NULL || air->model == NULL) {
+        emu_log("RUNWAY_PLANE_LOST_BEFORE_INTERACT");
+        emu_log("TEST_FAILED");
+        break;
+      }
+
+      op = propobjInteract(prop);
+      propExecuteTickOperation(prop, op);
+      if (op != INV_ITEM_NONE) {
+        emu_log("RUNWAY_PLANE_INTERACT_OP=%d", op);
+        emu_log("TEST_FAILED");
+        break;
+      }
+    } else if (after_frames(60)) {
+      prop = get_prop_by_index(saved_plane_index);
+      air = prop != NULL ? (AircraftRecord *)prop->obj : NULL;
+      if (air == NULL || air->model == NULL) {
+        emu_log("RUNWAY_PLANE_LOST_AFTER_INTERACT");
+        emu_log("TEST_FAILED");
+      } else if (air->model->anim !=
+                 animation_table_ptrs2[AIRCRAFT_ANIMATION_plane_runway]) {
+        emu_log("RUNWAY_PLANE_ANIM_NOT_TRIGGERED");
+        emu_log("TEST_FAILED");
+      } else {
+        emu_log("TRIGGER_LOAD");
+        load_game_state();
+        emu_log("LOAD_DONE");
+      }
+    } else if (after_frames(30)) {
+      prop = get_prop_by_index(saved_plane_index);
+      air = prop != NULL ? (AircraftRecord *)prop->obj : NULL;
+      if (air == NULL || air->model == NULL) {
+        emu_log("RUNWAY_PLANE_LOST_AFTER_LOAD");
+        emu_log("TEST_FAILED");
+      } else if (air->model->anim != saved_anim ||
+                 air->model->framea != saved_framea ||
+                 air->model->frameb != saved_frameb ||
+                 air->model->speed != saved_speed ||
+                 air->model->playspeed != saved_playspeed) {
+        emu_log("RUNWAY_PLANE_ANIM_NOT_RESTORED");
+        emu_log("TEST_FAILED");
+      } else if (air->runtime_pos.x != saved_runtime_pos.x ||
+                 air->runtime_pos.y != saved_runtime_pos.y ||
+                 air->runtime_pos.z != saved_runtime_pos.z ||
+                 prop->pos.x != saved_prop_pos.x ||
+                 prop->pos.y != saved_prop_pos.y ||
+                 prop->pos.z != saved_prop_pos.z) {
+        emu_log("RUNWAY_PLANE_POS_NOT_RESTORED");
+        emu_log("TEST_FAILED");
+      } else {
+        key_prop = get_prop_by_index(saved_key_index);
+        if (key_prop == NULL || key_prop->obj == NULL ||
+            key_prop->obj->type != PROPDEF_KEY) {
+          emu_log("RUNWAY_KEY_NOT_RESTORED_FOR_SECOND_SAVE");
+          emu_log("TEST_FAILED");
+          break;
+        }
+
+        op = collect_or_interact_object(key_prop, FALSE);
+        if (op == INV_ITEM_NONE) {
+          emu_log("RUNWAY_KEY_SECOND_PICKUP_FAILED");
+          emu_log("TEST_FAILED");
+          break;
+        }
+        propExecuteTickOperation(key_prop, op);
+
+        if (!bondinvCheckHasKeyFlags(1)) {
+          emu_log("RUNWAY_KEY_SECOND_NOT_HELD");
+          emu_log("TEST_FAILED");
+          break;
+        }
+
+        emu_log("TRIGGER_SAVE_KEY_HELD");
+        save_game_state();
+        emu_log("SAVE_KEY_HELD_DONE");
+
+        ((KeyRecord *)key_prop->obj)->keyflags = 0;
+
+        emu_log("TRIGGER_LOAD_KEY_HELD");
+        load_game_state();
+        emu_log("LOAD_KEY_HELD_DONE");
+
+        if (!bondinvCheckHasKeyFlags(1)) {
+          emu_log("RUNWAY_KEY_FLAGS_NOT_RESTORED");
+          emu_log("TEST_FAILED");
+          break;
+        }
+
+        prop = get_prop_by_index(saved_plane_index);
+        air = prop != NULL ? (AircraftRecord *)prop->obj : NULL;
+        if (air == NULL || air->model == NULL) {
+          emu_log("RUNWAY_PLANE_LOST_AFTER_KEY_LOAD");
+          emu_log("TEST_FAILED");
+          break;
+        }
+
+        op = propobjInteract(prop);
+        propExecuteTickOperation(prop, op);
+        if (op != INV_ITEM_NONE) {
+          emu_log("RUNWAY_PLANE_SECOND_INTERACT_OP=%d", op);
+          emu_log("TEST_FAILED");
+          break;
+        }
+
+        chrSetStageFlags(NULL, 0x1000);
+        air->state |= PROPSTATE_ACTIVATED;
+
+        for (i = 0; i < 120; i++) {
+          op = object_interaction(prop);
+          propExecuteTickOperation(prop, op);
+          if (op != INV_ITEM_NONE) {
+            emu_log("RUNWAY_PLANE_SECOND_TICK_OP=%d", op);
+            emu_log("TEST_FAILED");
+            break;
+          }
+
+          prop = get_prop_by_index(saved_plane_index);
+          air = prop != NULL ? (AircraftRecord *)prop->obj : NULL;
+          if (air == NULL || air->model == NULL ||
+              air->model->anim ==
+                  animation_table_ptrs2[AIRCRAFT_ANIMATION_plane_runway]) {
+            break;
+          }
+        }
+        if (op != INV_ITEM_NONE) {
+          break;
+        }
+
+        prop = get_prop_by_index(saved_plane_index);
+        air = prop != NULL ? (AircraftRecord *)prop->obj : NULL;
+        if (air == NULL || air->model == NULL) {
+          emu_log("RUNWAY_PLANE_LOST_AFTER_KEY_INTERACT");
+          emu_log("TEST_FAILED");
+        } else if (air->model->anim !=
+                   animation_table_ptrs2[AIRCRAFT_ANIMATION_plane_runway]) {
+          emu_log("RUNWAY_PLANE_KEY_LOAD_ANIM_NOT_TRIGGERED");
+          emu_log("TEST_FAILED");
+        } else {
+          emu_log("TRIGGER_LOAD_KEY_HELD_AGAIN");
+          load_game_state();
+          emu_log("LOAD_KEY_HELD_AGAIN_DONE");
+        }
+      }
+    } else if (after_frames(30)) {
+      emu_log("TEST_COMPLETE");
+    }
+    break;
+  }
+
   case STATE_DESTROYED_PROP: {
     static s16 saved_prop_index;
     static u32 saved_vertex_hash;

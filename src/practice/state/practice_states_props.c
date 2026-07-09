@@ -1,5 +1,6 @@
 #include "practice_states_props.h"
 #include "bg.h"
+#include "bondview.h"
 #include "chr.h"
 #include "chrai.h"
 #include "chrlv.h"
@@ -8,9 +9,11 @@
 #include "emu_log.h"
 #include "explosions.h"
 #include "gun.h"
+#include "initanitable.h"
 #include "loadobjectmodel.h"
 #include "lvl.h"
 #include "objecthandler.h"
+#include "player.h"
 #include "practice_states.h"
 #include "practice_states_chr.h"
 #include "practice_states_props.h"
@@ -71,6 +74,31 @@ static ModelNode *get_model_node_by_index(ModelFileHeader *header,
                                           s16 targetIndex);
 static u32 g_object_deformation_state_size;
 
+static bool prop_is_inventory_item(PropRecord *prop) {
+  InvItem *first;
+  InvItem *item;
+
+  if (prop == NULL || g_CurrentPlayer == NULL) {
+    return FALSE;
+  }
+
+  first = g_CurrentPlayer->ptr_inventory_first_in_cycle;
+  item = first;
+  if (item == NULL) {
+    return FALSE;
+  }
+
+  do {
+    if (item->type == INV_ITEM_PROP &&
+        item->type_inv_item.type_prop.prop == prop) {
+      return TRUE;
+    }
+    item = item->next;
+  } while (item != NULL && item != first);
+
+  return FALSE;
+}
+
 static u8 save_portal_closed_state(s32 portal) {
   if (portal == -1) {
     return 0xff;
@@ -81,6 +109,182 @@ static u8 save_portal_closed_state(s32 portal) {
     return 0xff;
   }
   return bgGetDataPortalsControlBytes1Bit1(portal) != 0;
+}
+
+static s32 get_animation_offset(const ModelAnimation *animation) {
+  if (animation == NULL) {
+    return -1;
+  }
+
+  return (const u8 *)animation - &ptr_animation_table->data[0];
+}
+
+static ModelAnimation *get_animation_by_offset(s32 offset) {
+  if (offset < 0) {
+    return NULL;
+  }
+
+  return (ModelAnimation *)&ptr_animation_table->data[offset];
+}
+
+static void save_object_model_animation(StateStream *stream,
+                                        const Model *model) {
+  ModelRwData_HeaderRecord *root_data;
+  bool has_root_data =
+      model != NULL && model->obj != NULL && model->obj->RootNode != NULL &&
+      (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
+
+  write_u32(stream, model != NULL ? get_animation_offset(model->anim) : -1);
+  write_u32(stream, model != NULL ? get_animation_offset(model->anim2) : -1);
+  write_u8(stream, model != NULL ? (u8)model->gunhand : 0);
+  write_u8(stream, model != NULL ? (u8)model->unk25 : 0);
+  write_u8(stream, model != NULL ? (u8)model->animlooping : 0);
+  write_u8(stream, model != NULL ? (u8)model->unk27 : 0);
+  write_f32(stream, model != NULL ? model->unk28 : 0.0f);
+  write_f32(stream, model != NULL ? model->unk2c : 0.0f);
+  write_u16(stream, model != NULL ? (u16)model->framea : 0);
+  write_u16(stream, model != NULL ? (u16)model->frameb : 0);
+  write_f32(stream, model != NULL ? model->endframe : -1.0f);
+  write_f32(stream, model != NULL ? model->speed : 0.0f);
+  write_f32(stream, model != NULL ? model->newspeed : 0.0f);
+  write_f32(stream, model != NULL ? model->oldspeed : 0.0f);
+  write_f32(stream, model != NULL ? model->timespeed : 0.0f);
+  write_f32(stream, model != NULL ? model->elapsespeed : 0.0f);
+  write_f32(stream, model != NULL ? model->unk58 : 0.0f);
+  write_f32(stream, model != NULL ? model->unk5c : 0.0f);
+  write_u16(stream, model != NULL ? (u16)model->frame2a : 0);
+  write_u16(stream, model != NULL ? (u16)model->frame2b : 0);
+  write_f32(stream, model != NULL ? model->unk6c : -1.0f);
+  write_f32(stream, model != NULL ? model->speed2 : 0.0f);
+  write_u32(stream, model != NULL ? model->unk74 : 0);
+  write_u32(stream, model != NULL ? model->unk78 : 0);
+  write_f32(stream, model != NULL ? model->unk7c : 0.0f);
+  write_u32(stream, model != NULL ? model->unk80 : 0);
+  write_f32(stream, model != NULL ? model->unk84 : 0.0f);
+  write_f32(stream, model != NULL ? model->unk88 : 0.0f);
+  write_u32(stream, model != NULL ? model->unk8c : 0);
+  write_f32(stream, model != NULL ? model->animloopframe : 0.0f);
+  write_f32(stream, model != NULL ? model->animloopmerge : 0.0f);
+  write_u32(stream, model != NULL ? model->unk9c : 0);
+  write_u32(stream, model != NULL ? model->unka0 : 0);
+  write_f32(stream, model != NULL ? model->playspeed : 1.0f);
+  write_f32(stream, model != NULL ? model->animrate : 1.0f);
+  write_f32(stream, model != NULL ? model->unkac : 0.0f);
+  write_f32(stream, model != NULL ? model->unkb0 : 0.0f);
+  write_f32(stream, model != NULL ? model->unkb4 : 0.0f);
+  write_f32(stream, model != NULL ? model->unkb8 : 0.0f);
+  write_u32(stream, model != NULL ? model->unkbc : 0);
+
+  write_u8(stream, has_root_data);
+  if (has_root_data) {
+    root_data =
+        (ModelRwData_HeaderRecord *)modelGetNodeRwData((Model *)model,
+                                                       model->obj->RootNode);
+    write_bytes(stream, root_data, sizeof(ModelRwData_HeaderRecord));
+  }
+}
+
+static void load_object_model_animation(StateStream *stream, Model *model) {
+  s32 anim_offset = read_u32(stream);
+  s32 anim2_offset = read_u32(stream);
+  s8 gunhand = (s8)read_u8(stream);
+  s8 unk25 = (s8)read_u8(stream);
+  s8 animlooping = (s8)read_u8(stream);
+  s8 unk27 = (s8)read_u8(stream);
+  f32 unk28 = read_f32(stream);
+  f32 unk2c = read_f32(stream);
+  s16 framea = (s16)read_u16(stream);
+  s16 frameb = (s16)read_u16(stream);
+  f32 endframe = read_f32(stream);
+  f32 speed = read_f32(stream);
+  f32 newspeed = read_f32(stream);
+  f32 oldspeed = read_f32(stream);
+  f32 timespeed = read_f32(stream);
+  f32 elapsespeed = read_f32(stream);
+  f32 unk58 = read_f32(stream);
+  f32 unk5c = read_f32(stream);
+  s16 frame2a = (s16)read_u16(stream);
+  s16 frame2b = (s16)read_u16(stream);
+  f32 unk6c = read_f32(stream);
+  f32 speed2 = read_f32(stream);
+  s32 unk74 = read_u32(stream);
+  s32 unk78 = read_u32(stream);
+  f32 unk7c = read_f32(stream);
+  s32 unk80 = read_u32(stream);
+  f32 unk84 = read_f32(stream);
+  f32 unk88 = read_f32(stream);
+  s32 unk8c = read_u32(stream);
+  f32 animloopframe = read_f32(stream);
+  f32 animloopmerge = read_f32(stream);
+  s32 unk9c = read_u32(stream);
+  s32 unka0 = read_u32(stream);
+  f32 playspeed = read_f32(stream);
+  f32 animrate = read_f32(stream);
+  f32 unkac = read_f32(stream);
+  f32 unkb0 = read_f32(stream);
+  f32 unkb4 = read_f32(stream);
+  f32 unkb8 = read_f32(stream);
+  s32 unkbc = read_u32(stream);
+  bool has_root_data = read_u8(stream);
+  ModelRwData_HeaderRecord root_data;
+
+  if (has_root_data) {
+    read_bytes(stream, &root_data, sizeof(ModelRwData_HeaderRecord));
+  }
+
+  if (model == NULL) {
+    return;
+  }
+
+  model->anim = get_animation_by_offset(anim_offset);
+  model->anim2 = get_animation_by_offset(anim2_offset);
+  model->gunhand = gunhand;
+  model->unk25 = unk25;
+  model->animlooping = animlooping;
+  model->unk27 = unk27;
+  model->unk28 = unk28;
+  model->unk2c = unk2c;
+  model->framea = framea;
+  model->frameb = frameb;
+  model->endframe = endframe;
+  model->speed = speed;
+  model->newspeed = newspeed;
+  model->oldspeed = oldspeed;
+  model->timespeed = timespeed;
+  model->elapsespeed = elapsespeed;
+  model->unk58 = unk58;
+  model->unk5c = unk5c;
+  model->frame2a = frame2a;
+  model->frame2b = frame2b;
+  model->unk6c = unk6c;
+  model->speed2 = speed2;
+  model->unk74 = unk74;
+  model->unk78 = unk78;
+  model->unk7c = unk7c;
+  model->unk80 = unk80;
+  model->unk84 = unk84;
+  model->unk88 = unk88;
+  model->unk8c = unk8c;
+  model->animloopframe = animloopframe;
+  model->animloopmerge = animloopmerge;
+  model->animflipfunc = 0;
+  model->unk9c = unk9c;
+  model->unka0 = unka0;
+  model->playspeed = playspeed;
+  model->animrate = animrate;
+  model->unkac = unkac;
+  model->unkb0 = unkb0;
+  model->unkb4 = unkb4;
+  model->unkb8 = unkb8;
+  model->unkbc = unkbc;
+
+  if (has_root_data && model->obj != NULL && model->obj->RootNode != NULL &&
+      (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
+    ModelRwData_HeaderRecord *dst =
+        (ModelRwData_HeaderRecord *)modelGetNodeRwData(model,
+                                                       model->obj->RootNode);
+    *dst = root_data;
+  }
 }
 
 static void load_portal_closed_state(s32 portal, u8 closed) {
@@ -2092,6 +2296,7 @@ static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
     u32 pathID = read_u32(stream);
     veh->path = (pathID != 0) ? pathFindById(pathID) : NULL;
     veh->nextstep = read_u32(stream);
+    veh->Sound = NULL;
     break;
   }
   case PROPDEF_AIRCRAFT: {
@@ -2111,6 +2316,8 @@ static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
     air->nextstep = read_u32(stream);
     u32 pathID = read_u32(stream);
     air->path = (pathID != 0) ? pathFindById(pathID) : NULL;
+    air->Sound = NULL;
+    load_object_model_animation(stream, air->model);
     break;
   }
   case PROPDEF_GLASS:
@@ -2162,6 +2369,7 @@ static void skip_prop_data(StateStream *stream, u8 type) {
     load_door_record(stream, &temp_door);
   } else if (type == PROP_TYPE_OBJ || type == PROP_TYPE_WEAPON) {
     TempObjectRecord temp_obj;
+    bzero(&temp_obj, sizeof(temp_obj));
     if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
       load_object_subtype(stream, &temp_obj.base);
     }
@@ -2243,7 +2451,8 @@ bool save_props_state(StateStream *stream) {
     PropRecord *prop = get_prop_by_index(i);
 
     if (prop == NULL || (!prop_is_active_list_member(prop) &&
-                         !prop_is_saved_child_object(prop))) {
+                         !prop_is_saved_child_object(prop) &&
+                         !prop_is_inventory_item(prop))) {
       continue;
     }
 
@@ -2472,6 +2681,7 @@ bool save_props_state(StateStream *stream) {
           write_f32(stream, air->yrot);
           write_u32(stream, air->nextstep);
           write_u32(stream, air->path ? air->path->ID : 0);
+          save_object_model_animation(stream, air->model);
           break;
         }
         case PROPDEF_GLASS:
@@ -3081,6 +3291,7 @@ bool load_props_state(StateStream *stream) {
       if (obj == NULL) {
         // Just skip the rest
         TempObjectRecord temp_obj;
+        bzero(&temp_obj, sizeof(temp_obj));
         if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
           load_object_subtype(stream, &temp_obj.base);
         }

@@ -18,7 +18,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining
 
-- Runway loading after plane cutscene makes plane disappear and a bunch of things break on load
 - Windows in Archives do not get restored after being smashed
 - After dying the game shows a replay of your death and turns the sfx volume down, but when loading state back to alive the volume stays lowered
 - Lights in the roof of the Bunker control room can be shot out, but they do not turn back on after restoring state
@@ -214,6 +213,13 @@ Add any general advice helpful for future agents working on this feature here. B
     - If the saved state has a prop but the current player does not (e.g., loading gameplay into a cutscene), allocate a new prop using `chrpropAllocate()`, initialize its fields, activate it, enable it, and register it to its rooms.
     - If the saved state does not have a prop but the current player does (e.g., loading a cutscene into active gameplay), deregister, delist, disable, and free the current player prop using `chrpropDeregisterRooms`, `chrpropDelist`, `chrpropDisable`, and `chrpropFree`.
     - If both have a prop, update its coordinates and rooms safely using room deregistration/registration.
+- **Aircraft Model Animation State**: Aircraft props such as Runway's plane are
+  driven by their `Model` animation controller, not only by `AircraftRecord`.
+  Restore `Model::anim`, frame, speed, loop, play-rate, and root RW data for
+  aircraft objects; otherwise loading across the plane cutscene keeps stale or
+  reset animation state and the plane can disappear or desynchronize. Clear
+  `AircraftRecord::Sound`/`VehichleRecord::Sound` on load because those
+  `ALSoundState` handles are dynamic and all SFX are stopped before restoring.
 
 ## Struct Analysis
 
