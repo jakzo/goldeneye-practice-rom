@@ -54,6 +54,12 @@ def parse_args():
         type=Path,
         help="write test results as JUnit XML",
     )
+    parser.add_argument(
+        "--build-mode",
+        choices=("dev", "release"),
+        default="dev",
+        help="build mode for the test ROM (default: dev)",
+    )
     return parser.parse_args()
 
 
@@ -109,9 +115,11 @@ def emulator_command():
     return None
 
 
-def build_tests():
+def build_tests(build_mode):
     jobs = os.cpu_count() or 1
-    command = ["make", f"-j{jobs}", "DEV=1"]
+    command = ["make", f"-j{jobs}"]
+    if build_mode == "dev":
+        command.append("DEV=1")
     with tempfile.TemporaryFile(mode="w+") as build_log:
         try:
             result = subprocess.run(
@@ -408,7 +416,7 @@ def main():
         return 1
 
     print("=== building test ROM ===", flush=True)
-    if not build_tests():
+    if not build_tests(args.build_mode):
         return 1
 
     results = []

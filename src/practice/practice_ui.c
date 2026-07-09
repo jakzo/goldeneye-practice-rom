@@ -129,6 +129,8 @@ typedef struct {
   s32 height;
 } LogMessage;
 
+bool g_DebugLogsEnabled = FALSE;
+
 static LogMessage g_LogQueue[MAX_LOG_MESSAGES];
 static s32 g_LogQueueStart = 0;
 static s32 g_LogQueueCount = 0;
@@ -197,7 +199,6 @@ static const char *get_emu_log_prefix(LogLevel level) {
 }
 
 static void write_log_message_to_emu(LogLevel level, const char *text) {
-#ifdef DEV
   char emu_text[LOG_MESSAGE_MAX_LEN + 8];
   const char *prefix = get_emu_log_prefix(level);
   s32 len = 0;
@@ -214,7 +215,6 @@ static void write_log_message_to_emu(LogLevel level, const char *text) {
 
   emu_text[len] = '\0';
   emu_log_write(emu_text);
-#endif
 }
 
 static void add_to_log_queue(LogLevel level, const char *fmt, va_list args) {
@@ -252,10 +252,14 @@ static void add_to_log_queue(LogLevel level, const char *fmt, va_list args) {
 }
 
 void practiceLogDebug(const char *fmt, ...) {
-#ifdef DEV
   char text[LOG_MESSAGE_MAX_LEN];
   va_list args;
   s32 len;
+
+#if !DEV
+  if (!g_DebugLogsEnabled)
+    return;
+#endif
 
   va_start(args, fmt);
   len = practice_vsnprintf(text, fmt, args);
@@ -264,9 +268,6 @@ void practiceLogDebug(const char *fmt, ...) {
   text[len] = '\n';
   text[len + 1] = '\0';
   emu_log_write(text);
-#else
-  (void)fmt;
-#endif
 }
 
 void practiceLogInfo(const char *fmt, ...) {

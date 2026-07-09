@@ -27,7 +27,6 @@ void load_chr_allocation_state(StateStream *stream,
 void load_chr_record(StateStream *stream, ChrRecord *chr,
                      ChrAttachmentIndices *attachments);
 void load_chr_prop_spatial_state(PropRecord *prop, const coord3d *pos,
-                                 s32 stan_offset, const u8 rooms[4],
-                                 bool is_new_prop);
+                                 s32 stan_offset, const u8 rooms[4]);
 
 #endif /* PRACTICE_STATES_CHR_H */

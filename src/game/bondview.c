@@ -11747,7 +11747,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
             mission_timer += g_ClockTimer;
         }
 
-#ifdef DEV
+#ifdef PRACTICE_ROM
         practice_tests_tick();
 #endif
 

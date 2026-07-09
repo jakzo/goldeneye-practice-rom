@@ -27,6 +27,7 @@ extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
 extern ModelNode *sub_GAME_7F04B478(ObjectRecord *obj);
 extern bool sub_GAME_7F04B590(ModelFileHeader *header, ModelNode *node);
 extern void objDeform(ObjectRecord *obj, s32 destroyed_level);
+extern bool g_DebugLogsEnabled;
 
 // --- start test cases ---
 #define STATE_DOOR 1
@@ -42,10 +43,11 @@ extern void objDeform(ObjectRecord *obj, s32 destroyed_level);
 #define TEST_MOVE_SPEED 11
 #define STATE_TINTED_GLASS_PORTAL 12
 #define STATE_DESTROYED_PROP 13
+#define STATE_CONTROL 14
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
-#define CRASH 14
+#define CRASH 999
 
 #define MAX_TEST_TINTED_GLASS 32
 
@@ -64,6 +66,8 @@ void practice_tests_set_case(s32 test_case) {
   g_TestMoveCaseIndex = -1;
   g_TestMoveStartX = 0.0f;
   g_TestMoveStartZ = 0.0f;
+
+  g_DebugLogsEnabled = test_case != 0;
 }
 
 s32 practice_tests_boot_level(s32 test_case) {
@@ -87,6 +91,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_CAVERNS_ATTACHMENTS:
     return LEVELID_CAVERNS;
   case STATE_TINTED_GLASS_PORTAL:
+  case STATE_CONTROL:
     return LEVELID_CONTROL;
   case TEST_MOVE_SPEED:
     return LEVELID_TEST;
@@ -167,7 +172,6 @@ static TestMoveCase get_test_move_case(s32 index) {
 }
 
 void practice_tests_tick() {
-#ifdef DEV
   if (g_practice_test_case == 0) {
     return;
   }
@@ -605,6 +609,7 @@ void practice_tests_tick() {
     break;
   }
 
+  case STATE_CONTROL:
   case STATE_DAM: {
     if (after_frames(30)) {
       emu_log("TRIGGER_SAVE");
@@ -1035,10 +1040,8 @@ void practice_tests_tick() {
   default:
     break;
   }
-#endif
 }
 
-#ifdef DEV
 extern s32 speedgraphframes;
 
 // Determinism check for loading a save state. Save once, then repeatedly load
@@ -1110,6 +1113,3 @@ void practice_tests_frame() {
     break;
   }
 }
-#else
-void practice_tests_frame() {}
-#endif

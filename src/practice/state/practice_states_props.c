@@ -150,8 +150,7 @@ static u8 get_casing_model_id(ModelFileHeader *header) {
 }
 
 static ModelFileHeader *get_casing_model_by_id(u8 id) {
-  if (id >= CASING_MODEL_COUNT ||
-      ejected_cartridge[id].header == NULL) {
+  if (id >= CASING_MODEL_COUNT || ejected_cartridge[id].header == NULL) {
     practiceLogError("Saved casing has invalid model id %d", id);
     assert(FALSE);
     return NULL;
@@ -218,9 +217,15 @@ static void retain_prop_from_free_list(PropRecord *prop) {
   }
 }
 
+static void forget_prop_rooms(PropRecord *prop) {
+  if (prop != NULL && !(prop->flags & 0x10)) {
+    prop->rooms[0] = 0xff;
+  }
+}
+
 static void clear_plain_prop(PropRecord *prop, bool release_prop) {
   if (prop->flags & PROPFLAG_ENABLED) {
-    chrpropDeregisterRooms(prop);
+    forget_prop_rooms(prop);
     chrpropDelist(prop);
     chrpropDisable(prop);
   }
@@ -264,7 +269,7 @@ static void destroy_chr_prop(PropRecord *prop, bool release_prop) {
   if (prop->chr != NULL && prop->chr->model != NULL) {
     disable_sounds_attached_to_player_then_something(prop);
   } else if (prop->flags & PROPFLAG_ENABLED) {
-    chrpropDeregisterRooms(prop);
+    forget_prop_rooms(prop);
   }
 
   if (prop->flags & PROPFLAG_ENABLED) {
@@ -360,7 +365,7 @@ static PropRecord *create_chr_prop(PropRecord *prop,
 
   // Initialization calculates and registers rooms. The saved common prop
   // payload will install the authoritative room list immediately afterward.
-  chrpropDeregisterRooms(result);
+  forget_prop_rooms(result);
   return result;
 }
 
@@ -644,16 +649,18 @@ static void reset_room_prop_lists(void) {
   num_obj_position_data_entries = 1;
 
   if (RoomPropListChunkIndexes != NULL) {
+    volatile s16 *indexes = RoomPropListChunkIndexes;
     for (i = 0; i < g_MaxNumRooms; i++) {
-      RoomPropListChunkIndexes[i] = -1;
+      indexes[i] = -1;
     }
   }
 
   if (RoomPropListChunks != NULL) {
     for (i = 0; i < BSS_8007161C_LEN; i++) {
-      RoomPropListChunks[i].propnums[0] = -2;
+      volatile s16 *propnums = RoomPropListChunks[i].propnums;
+      propnums[0] = -2;
       for (j = 1; j < BSS_8007161C_DATA_LEN; j++) {
-        RoomPropListChunks[i].propnums[j] = -1;
+        propnums[j] = -1;
       }
     }
   }
@@ -690,8 +697,7 @@ static bool prop_is_saved_child_object(PropRecord *prop) {
     return FALSE;
   }
 
-  if (prop->parent->type == PROP_TYPE_CHR &&
-      prop->parent->chr != NULL) {
+  if (prop->parent->type == PROP_TYPE_CHR && prop->parent->chr != NULL) {
     return TRUE;
   }
 
@@ -742,7 +748,7 @@ static bool attach_prop_to_chr(ChrRecord *chr, PropRecord *prop,
   // leave the active list first; a prop that was already a child simply has its
   // stale sibling links overwritten.
   if (prop->parent == NULL && (prop->flags & PROPFLAG_ENABLED)) {
-    chrpropDeregisterRooms(prop);
+    forget_prop_rooms(prop);
     chrpropDelist(prop);
   } else if (prop->parent != NULL && prop->parent != chr->prop) {
     objDetach(prop);
@@ -877,8 +883,7 @@ static void restore_chr_attachments(PropRecord *chr_prop,
   }
 }
 
-static void restore_concealed_chr_item(PropRecord *prop,
-                                       PropRecord *chr_prop) {
+static void restore_concealed_chr_item(PropRecord *prop, PropRecord *chr_prop) {
   ObjectRecord *obj;
   ChrRecord *chr;
 
@@ -899,7 +904,7 @@ static void restore_concealed_chr_item(PropRecord *prop,
   obj = prop->obj;
 
   if (prop->parent == NULL && (prop->flags & PROPFLAG_ENABLED)) {
-    chrpropDeregisterRooms(prop);
+    forget_prop_rooms(prop);
     chrpropDelist(prop);
   } else if (prop->parent != NULL) {
     chrpropDetach(prop);
@@ -947,7 +952,7 @@ static bool restore_embedded_object(PropRecord *prop, PropRecord *parent,
   }
 
   if (prop->parent == NULL && (prop->flags & PROPFLAG_ENABLED)) {
-    chrpropDeregisterRooms(prop);
+    forget_prop_rooms(prop);
     chrpropDelist(prop);
   } else if (prop->parent != NULL) {
     objDetach(prop);
@@ -1210,13 +1215,12 @@ static void save_object_deformation(StateStream *stream, ObjectRecord *obj) {
       obj->model->obj != NULL) {
     node = sub_GAME_7F04B478(obj);
   }
-  if (node != NULL &&
-      (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
+  if (node != NULL && (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
       sub_GAME_7F04B590(obj->model->obj, node)) {
-    rodata =
-        (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
-    rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
-        modelGetNodeRwData(obj->model, node);
+    rodata = (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+    rwdata =
+        (struct ModelRwData_DisplayList_CollisionRecord *)modelGetNodeRwData(
+            obj->model, node);
     if (rodata != NULL && rwdata != NULL && rodata->numVertices > 0 &&
         rwdata->Vertices != NULL && rwdata->Vertices != rodata->Vertices) {
       vertexCount = (u16)rodata->numVertices;
@@ -1242,13 +1246,12 @@ static void load_object_deformation(StateStream *stream, ObjectRecord *obj,
   if (obj != NULL && obj->model != NULL && obj->model->obj != NULL) {
     node = sub_GAME_7F04B478(obj);
   }
-  if (node != NULL &&
-      (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
+  if (node != NULL && (node->Opcode & 0xff) == MODELNODE_OPCODE_DLCOLLISION &&
       sub_GAME_7F04B590(obj->model->obj, node)) {
-    rodata =
-        (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
-    rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
-        modelGetNodeRwData(obj->model, node);
+    rodata = (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+    rwdata =
+        (struct ModelRwData_DisplayList_CollisionRecord *)modelGetNodeRwData(
+            obj->model, node);
   }
 
   if ((clearCurrent || vertexCount > 0) && rwdata != NULL && rodata != NULL &&
@@ -1261,8 +1264,7 @@ static void load_object_deformation(StateStream *stream, ObjectRecord *obj,
     return;
   }
 
-  if (rodata == NULL || rwdata == NULL ||
-      rodata->numVertices != vertexCount) {
+  if (rodata == NULL || rwdata == NULL || rodata->numVertices != vertexCount) {
     stream_seek(stream, stream->base_address + stream->total_processed +
                             vertexCount * sizeof(Vertex));
     practiceLogError(
@@ -1272,9 +1274,8 @@ static void load_object_deformation(StateStream *stream, ObjectRecord *obj,
     return;
   }
 
-  vertices =
-      sub_GAME_7F09BE4C(vertexCount, 0xB0B, obj->model->obj,
-                        objGetDestroyedLevel(obj));
+  vertices = sub_GAME_7F09BE4C(vertexCount, 0xB0B, obj->model->obj,
+                               objGetDestroyedLevel(obj));
   if (vertices == NULL) {
     stream_seek(stream, stream->base_address + stream->total_processed +
                             vertexCount * sizeof(Vertex));
@@ -1327,11 +1328,11 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
       practiceLogError("Embedded prop has incomplete attachment pointers");
       assert(FALSE);
     } else {
-      attachmentNodeIdx =
-          get_model_node_index(obj->model->attachedto->obj,
-                               obj->model->attachedto_objinst);
+      attachmentNodeIdx = get_model_node_index(obj->model->attachedto->obj,
+                                               obj->model->attachedto_objinst);
       if (attachmentNodeIdx < 0) {
-        practiceLogError("Embedded prop attachment node is not in parent model");
+        practiceLogError(
+            "Embedded prop attachment node is not in parent model");
         assert(FALSE);
       }
     }
@@ -1362,8 +1363,7 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
 static bool load_object_base(StateStream *stream, ObjectRecord *obj,
                              PropRecord *prop, s16 *attachmentNodeIdx) {
   PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
-  bool liveWasDestroyed =
-      prop != NULL && objGetDestroyedLevel(obj) > 0;
+  bool liveWasDestroyed = prop != NULL && objGetDestroyedLevel(obj) > 0;
   s16 projectileIdx;
   s16 embedmentIdx;
   u32 switchStates;
@@ -1430,8 +1430,7 @@ static bool load_object_base(StateStream *stream, ObjectRecord *obj,
 
   // Toggle-relation rebuilding can reset display-list runtime data, so install
   // the saved vertex buffer only after the model's switches are reapplied.
-  load_object_deformation(stream, prop != NULL ? obj : NULL,
-                          liveWasDestroyed);
+  load_object_deformation(stream, prop != NULL ? obj : NULL, liveWasDestroyed);
 
   return TRUE;
 }
@@ -1819,8 +1818,7 @@ static void save_gun_effects_state(StateStream *stream) {
 
 #if !defined(VERSION_EU)
   {
-    BulletSparkRecord *sparks =
-        (BulletSparkRecord *)dword_CODE_bss_8007A4E0;
+    BulletSparkRecord *sparks = (BulletSparkRecord *)dword_CODE_bss_8007A4E0;
 
     count = 0;
     for (i = 0; i < BULLET_SPARK_BUFFER_LEN; i++) {
@@ -1867,8 +1865,7 @@ static void load_gun_effects_state(StateStream *stream) {
 
 #if !defined(VERSION_EU)
   {
-    BulletSparkRecord *sparks =
-        (BulletSparkRecord *)dword_CODE_bss_8007A4E0;
+    BulletSparkRecord *sparks = (BulletSparkRecord *)dword_CODE_bss_8007A4E0;
 
     for (i = 0; i < BULLET_SPARK_BUFFER_LEN; i++) {
       sparks[i].effect.unk04 = 0;
@@ -2245,9 +2242,8 @@ bool save_props_state(StateStream *stream) {
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
     PropRecord *prop = get_prop_by_index(i);
 
-    if (prop == NULL ||
-        (!prop_is_active_list_member(prop) &&
-         !prop_is_saved_child_object(prop))) {
+    if (prop == NULL || (!prop_is_active_list_member(prop) &&
+                         !prop_is_saved_child_object(prop))) {
       continue;
     }
 
@@ -2569,8 +2565,7 @@ bool save_props_state(StateStream *stream) {
   save_gun_effects_state(stream);
   save_casings_state(stream);
 
-  emu_log("SAVE_STATE_DEFORMATION_BYTES=%u",
-          g_object_deformation_state_size);
+  emu_log("SAVE_STATE_DEFORMATION_BYTES=%u", g_object_deformation_state_size);
 
   /* Patch the props header with the real size and record count. */
   u32 totalPropsSize = stream->total_processed - dataStart;
@@ -2674,9 +2669,8 @@ static bool saved_link_names_child(const SavedPropLinks *savedLinks,
 static PropRecord *get_saved_child_link(const SavedPropLinks *savedLinks,
                                         s32 recordCount, u16 childIndex,
                                         u16 parentIndex) {
-  if ((s16)childIndex < 0 ||
-      !saved_link_names_child(savedLinks, recordCount, childIndex,
-                              parentIndex)) {
+  if ((s16)childIndex < 0 || !saved_link_names_child(savedLinks, recordCount,
+                                                     childIndex, parentIndex)) {
     return NULL;
   }
 
@@ -2731,11 +2725,9 @@ static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
     }
 
     prop->prev = get_saved_child_link(savedLinks, recordCount,
-                                      savedLinks[i].prev,
-                                      savedLinks[i].parent);
+                                      savedLinks[i].prev, savedLinks[i].parent);
     prop->next = get_saved_child_link(savedLinks, recordCount,
-                                      savedLinks[i].next,
-                                      savedLinks[i].parent);
+                                      savedLinks[i].next, savedLinks[i].parent);
   }
 }
 
@@ -2836,7 +2828,6 @@ bool load_props_state(StateStream *stream) {
     bool hasObjAllocation = savedPropType == PROP_TYPE_DOOR ||
                             savedPropType == PROP_TYPE_OBJ ||
                             savedPropType == PROP_TYPE_WEAPON;
-    bool createdChrProp = FALSE;
     bool createdObjProp = FALSE;
     bool shouldRegisterObjectRooms = FALSE;
 
@@ -2879,9 +2870,8 @@ bool load_props_state(StateStream *stream) {
       // that alias restores collision at this prop while leaving the model at
       // the owner's position, producing an invisible blocking guard.
       if (prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
-          (prop->flags & PROPFLAG_ENABLED) &&
-          prop->chr->prop == prop && prop->chr->model != NULL &&
-          prop->chr->model->chr == prop->chr &&
+          (prop->flags & PROPFLAG_ENABLED) && prop->chr->prop == prop &&
+          prop->chr->model != NULL && prop->chr->model->chr == prop->chr &&
           prop->chr->bodynum == savedChrAllocation.bodynum &&
           prop->chr->headnum == savedChrAllocation.headnum) {
         break;
@@ -2913,7 +2903,6 @@ bool load_props_state(StateStream *stream) {
         skip_prop_data(stream, savedPropType);
         return FALSE;
       }
-      createdChrProp = TRUE;
       break;
 
     case PROP_TYPE_OBJ:
@@ -2988,11 +2977,12 @@ bool load_props_state(StateStream *stream) {
     }
 
     if (savedPropType == PROP_TYPE_VIEWER ||
-        ((savedPropType == PROP_TYPE_OBJ || savedPropType == PROP_TYPE_WEAPON) &&
+        ((savedPropType == PROP_TYPE_OBJ ||
+          savedPropType == PROP_TYPE_WEAPON) &&
          prop->parent == NULL && prop_is_active_list_member(prop))) {
-      chrpropDeregisterRooms(prop);
-      shouldRegisterObjectRooms = savedPropType != PROP_TYPE_VIEWER &&
-                                  (s16)savedPropParentIdx < 0;
+      forget_prop_rooms(prop);
+      shouldRegisterObjectRooms =
+          savedPropType != PROP_TYPE_VIEWER && (s16)savedPropParentIdx < 0;
     }
 
     // Apply the common PropRecord fields. The active-list/attachment-graph
@@ -3005,7 +2995,7 @@ bool load_props_state(StateStream *stream) {
     // concealed state.
     if ((s16)savedPropParentIdx >= 0 && prop->parent == NULL &&
         prop_is_active_list_member(prop)) {
-      chrpropDeregisterRooms(prop);
+      forget_prop_rooms(prop);
       chrpropDelist(prop);
     }
     prop->type = savedPropType;
@@ -3032,10 +3022,6 @@ bool load_props_state(StateStream *stream) {
     prop->rooms[3] = savedPropRooms[3];
     prop->unk30 = savedPropUnk30;
 
-    if (savedPropType == PROP_TYPE_VIEWER) {
-      chrpropRegisterRooms(prop);
-    }
-
     switch ((PROP_TYPE)savedPropType) {
     case PROP_TYPE_DOOR: {
       DoorRecord *door = prop->door;
@@ -3047,8 +3033,7 @@ bool load_props_state(StateStream *stream) {
         return FALSE;
       }
 
-      if (!load_object_base(stream, obj, prop,
-                            &savedLinks[i].attachmentNode)) {
+      if (!load_object_base(stream, obj, prop, &savedLinks[i].attachmentNode)) {
         return FALSE;
       }
 
@@ -3118,22 +3103,14 @@ bool load_props_state(StateStream *stream) {
         sub_GAME_7F050DE8(obj->model);
       }
 
-      if (!load_object_base(stream, obj, prop,
-                            &savedLinks[i].attachmentNode)) {
+      if (!load_object_base(stream, obj, prop, &savedLinks[i].attachmentNode)) {
         return FALSE;
       }
 
       load_object_subtype(stream, obj);
 
-      // The serialized room list is authoritative. Recalculating it here can
-      // traverse the currently closed portal belonging to tinted glass and
-      // strand the pane in only the room on the far side of itself, making it
-      // impossible to render from the near side. Register the exact saved list
-      // after any live/recreated object's old registration was removed.
-      if ((createdObjProp || shouldRegisterObjectRooms) &&
-          (s16)savedPropParentIdx < 0) {
-        chrpropRegisterRooms(prop);
-      }
+      (void)createdObjProp;
+      (void)shouldRegisterObjectRooms;
 
       // Dynamic collision geometry is still rebuilt from the restored
       // transform; this is independent of room-list registration.
@@ -3184,7 +3161,7 @@ bool load_props_state(StateStream *stream) {
         prop->chr->headnum = savedChrAllocation.headnum;
         prop->chr->bodynum = savedChrAllocation.bodynum;
         load_chr_prop_spatial_state(prop, &savedPropPos, savedPropStanOffset,
-                                    savedPropRooms, createdChrProp);
+                                    savedPropRooms);
         pendingChrAttachments[pendingChrCount].prop_index = savedPropIndex;
         load_chr_record(stream, prop->chr,
                         &pendingChrAttachments[pendingChrCount].attachments);

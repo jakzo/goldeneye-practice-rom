@@ -317,14 +317,12 @@ static void load_current_player_state(StateStream *stream) {
       prop_rooms[3] = read_u8(stream);
 
       if (g_CurrentPlayer->prop != NULL) {
-        chrpropDeregisterRooms(g_CurrentPlayer->prop);
         g_CurrentPlayer->prop->pos = prop_pos;
         g_CurrentPlayer->prop->stan = get_tile_by_offset(prop_stan_offset);
         g_CurrentPlayer->prop->rooms[0] = prop_rooms[0];
         g_CurrentPlayer->prop->rooms[1] = prop_rooms[1];
         g_CurrentPlayer->prop->rooms[2] = prop_rooms[2];
         g_CurrentPlayer->prop->rooms[3] = prop_rooms[3];
-        chrpropRegisterRooms(g_CurrentPlayer->prop);
       } else {
         g_CurrentPlayer->prop = chrpropAllocate();
         if (g_CurrentPlayer->prop != NULL) {
@@ -338,12 +336,13 @@ static void load_current_player_state(StateStream *stream) {
           g_CurrentPlayer->prop->rooms[3] = prop_rooms[3];
           chrpropActivate(g_CurrentPlayer->prop);
           chrpropEnable(g_CurrentPlayer->prop);
-          chrpropRegisterRooms(g_CurrentPlayer->prop);
         }
       }
     } else {
       if (g_CurrentPlayer->prop != NULL) {
-        chrpropDeregisterRooms(g_CurrentPlayer->prop);
+        if (!(g_CurrentPlayer->prop->flags & 0x10)) {
+          g_CurrentPlayer->prop->rooms[0] = 0xff;
+        }
         chrpropDelist(g_CurrentPlayer->prop);
         chrpropDisable(g_CurrentPlayer->prop);
         chrpropFree(g_CurrentPlayer->prop);

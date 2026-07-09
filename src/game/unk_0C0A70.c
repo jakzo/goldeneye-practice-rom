@@ -73,7 +73,7 @@ void updateFrameCounters(s32 deltaFrames)
     currentFrameCounter = (s32) (currentFrameCounter + deltaFrames);
     speedgraphframes = deltaFrames;
 
-#ifdef DEV
+#ifdef PRACTICE_ROM
     // Per-frame test hook: called once the frame delta and RNG seeds are
     // finalized (before this frame's gameplay consumes any RNG).
     practice_tests_frame();

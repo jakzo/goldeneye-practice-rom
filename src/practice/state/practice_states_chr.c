@@ -36,7 +36,7 @@ extern Vertex *dword_CODE_bss_8007A0E0;
   (CHRSTART_FORCENOBLOOD | CHRFLAG_CAN_SHOOT_CHRS | CHRFLAG_NO_AUTOAIM |       \
    CHRFLAG_LOCK_Y_POS | CHRFLAG_NO_SHADOW | CHRFLAG_IGNORE_ANIM_TRANSLATION |  \
    CHRFLAG_IMPACT_ALWAYS | CHRFLAG_INCREASE_RUNNING_SPEED |                    \
-   CHRFLAG_COUNT_DEATH_AS_CIVILIAN | CHRFLAG_CULL_USING_HITBOX |              \
+   CHRFLAG_COUNT_DEATH_AS_CIVILIAN | CHRFLAG_CULL_USING_HITBOX |               \
    CHRFLAG_HIDDEN)
 
 typedef struct FiringAnimationTableRef {
@@ -1301,8 +1301,8 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
       write_u8(stream, weapon != NULL ? (u8)weapon->weaponnum : 0);
       write_u32(stream, weapon != NULL ? weapon->flags : 0);
       // Muzzle flash (GUNFIRE node) visibility is latched in the weapon model's
-      // RwData when the CHR fires and only cleared on stop-firing, so it must be
-      // saved alongside the held weapon rather than re-derived on load.
+      // RwData when the CHR fires and only cleared on stop-firing, so it must
+      // be saved alongside the held weapon rather than re-derived on load.
       write_u8(stream, (u8)(prop != NULL ? weaponIsGunfireVisible(prop) : 0));
     }
   }
@@ -1485,16 +1485,11 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
 }
 
 void load_chr_prop_spatial_state(PropRecord *prop, const coord3d *pos,
-                                 s32 stan_offset, const u8 rooms[4],
-                                 bool is_new_prop) {
-  if (!is_new_prop) {
-    chrpropDeregisterRooms(prop);
-  }
+                                 s32 stan_offset, const u8 rooms[4]) {
   prop->pos = *pos;
   prop->stan = get_tile_by_offset(stan_offset);
   prop->rooms[0] = rooms[0];
   prop->rooms[1] = rooms[1];
   prop->rooms[2] = rooms[2];
   prop->rooms[3] = rooms[3];
-  chrpropRegisterRooms(prop);
 }

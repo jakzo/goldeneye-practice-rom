@@ -274,14 +274,16 @@ static void apply_rom_config(void) {
     practice.boot_level = config->boot_level;
   }
 
-#ifdef DEV
-  practice_tests_set_case(config->test_case);
-  s32 test_boot_level = practice_tests_boot_level(config->test_case);
-  if (test_boot_level != LEVELID_NONE) {
-    practice.boot_level = test_boot_level;
+  if (config->test_case != 0) {
+    s32 test_boot_level;
+
+    practice_tests_set_case(config->test_case);
+    test_boot_level = practice_tests_boot_level(config->test_case);
+    if (test_boot_level != LEVELID_NONE) {
+      practice.boot_level = test_boot_level;
+    }
+    practice.disable_intro_cutscenes = TRUE;
   }
-  practice.disable_intro_cutscenes = TRUE;
-#endif
 }
 
 void practice_config_load(void) {

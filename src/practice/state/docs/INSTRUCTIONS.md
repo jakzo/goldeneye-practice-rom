@@ -175,6 +175,19 @@ Add any general advice helpful for future agents working on this feature here. B
   been restored by walking the active root prop list and registering each
   restored room list. Otherwise `roomGetProps`/LOS collision can read garbage
   prop indices and crash on the first post-load tick.
+  Do not deregister/register individual props while the save-state loader is
+  still replacing props: after the reset, the chunk tables are intentionally
+  discarded, and mid-load registration can rebuild them from transient
+  active-list or parent/child relationships. The load path should restore each
+  prop's local `rooms[]` payload only, then perform one final room-list rebuild
+  from the completed active root list.
+  Prod GCC can also lower sentinel-fill loops such as `s16_array[i] = -1` into
+  `memset(dst, 0xff, len)`. In this codebase `memset` is an alias of libultra's
+  `bzero` implementation and ignores the fill byte, so nonzero generated
+  `memset` calls zero the table instead. Use explicit `volatile s16 *` stores
+  (or another verified no-`memset` pattern) for nonzero sentinel fills in
+  GCC-built practice code, and confirm prod disassembly when adding similar
+  bulk initialization.
 - **Discard Post-Save CHR Equipment**: A guard can acquire a different weapon
   or hat after saving. When loading, an old attachment not named by the save
   must be freed, not detached and activated as a dropped item. Activating it
