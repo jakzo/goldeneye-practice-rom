@@ -20,8 +20,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 - Windows in Archives do not get restored after being smashed
 - After dying the game shows a replay of your death and turns the sfx volume down, but when loading state back to alive the volume stays lowered
-- Lights in the roof of the Bunker control room can be shot out, but they do not turn back on after restoring state
-  - The glass shards that come out after shooting are not affected by save state either
 - Saving object deformation vertices can cost 20kb+, can we save the seeds used to deform them instead?
 - Crashes when loading state sometimes?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
@@ -121,6 +119,27 @@ Add any general advice helpful for future agents working on this feature here. B
   absolute addresses. Player/NPC tracer beams are held in the restored
   hand/CHR records, but their rendered age must not advance while
   `g_ClockTimer == 0`.
+- **Shot Light Fixtures**: Shootable background lights are not props. The
+  `lightfixture.c` darkened-light ring stores room id and BG vertex index, and
+  the actual vertex colours are destructively shifted when the light is shot.
+  Serialize the ring cursor and live entries by exact ring index. On load,
+  left-shift resident vertices named by the live table to undo current
+  darkening, restore the saved table, then call `redarken_lights_in_room` only
+  for rooms whose BG vertex allocation is currently resident. Treat
+  `g_BgRoomInfo[room].model_bin_loaded` as the authoritative residency flag;
+  `ptr_point_index` should also be non-null before touching vertices. Leave
+  entries for unloaded rooms in the table; the normal BG load path calls
+  `redarken_lights_in_room` when those vertices become resident again. Do not
+  reload the BG room allocation while loading state: an in-flight render task
+  can still reference its display lists, and the BG point-table loader uses the
+  room allocation tail as scratch. Airborne glass shards from these lights are
+  emitted through `sub_GAME_7F0A2160` into the broken-window shard pool
+  (`ptr_shattered_window_pieces` and `g_NextShardNum`), not the flying-particle
+  pool. Serialize this as an optional tail after the pre-existing props tail
+  data, using the props section byte count to detect whether the shard payload
+  is present; when absent, clear the live shard pool rather than preserving
+  post-save debris. When present, serialize live shard entries at exact pool
+  indices.
 - **Muzzle Flash (GUNFIRE Node)**: A firing weapon's muzzle flash is the
   GUNFIRE-node `visible` flag (`ModelRwData_GunfireRecord`) on the weapon's
   `Model`, set/read by `weaponSetGunfireVisible`/`weaponIsGunfireVisible`. It is

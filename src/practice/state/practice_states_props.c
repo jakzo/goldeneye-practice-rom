@@ -10,6 +10,7 @@
 #include "explosions.h"
 #include "gun.h"
 #include "initanitable.h"
+#include "lightfixture.h"
 #include "loadobjectmodel.h"
 #include "lvl.h"
 #include "objecthandler.h"
@@ -44,6 +45,7 @@ extern void embedmentFree(Embedment *embedment);
 extern void projectileReset(Projectile *projectile);
 extern void chrpropDelist(PropRecord *prop);
 extern void chrpropDetach(PropRecord *prop);
+extern void redarken_lights_in_room(s32 room_index);
 extern s32 chrGetNumFree(void);
 extern void clear_aircraft_model_obj(Model *model);
 extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
@@ -60,6 +62,8 @@ extern struct sImageTableEntry *flareimage2;
 extern CartridgeModelFileRecord ejected_cartridge[];
 extern s32 dword_CODE_bss_80075DB0;
 extern u32 num_obj_position_data_entries;
+extern struct s_darkened_light darkened_light_table[];
+extern s32 cur_entry_darkened_light_table;
 #if !defined(VERSION_EU)
 extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 #endif
@@ -68,6 +72,7 @@ extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 #define BULLET_SPARK_BUFFER_LEN 50
 #define CASING_BUFFER_LEN 20
 #define CASING_MODEL_COUNT 4
+#define DARKENED_LIGHT_TABLE_MAX 0x200
 #define BG_PORTAL_MAX 200
 
 static ModelNode *get_model_node_by_index(ModelFileHeader *header,
@@ -1988,6 +1993,209 @@ static void load_flying_particles_state(StateStream *stream) {
 }
 
 /*
+ * Shattered window/light shards use the older broken-window pool in
+ * unk_0A1DA0.c, separate from explosion flying particles. `piece > 0` marks a
+ * live shard and doubles as its age.
+ */
+static void save_shattered_window_pieces_state(StateStream *stream) {
+  s32 i;
+  u16 count = 0;
+
+  write_u32(stream, g_NextShardNum);
+
+  if (ptr_shattered_window_pieces != NULL) {
+    for (i = 0; i < SHATTERED_WINDOW_PIECES_BUFFER_LEN; i++) {
+      if (ptr_shattered_window_pieces[i].piece > 0 &&
+          ptr_shattered_window_pieces[i].piece < 0x96) {
+        count++;
+      }
+    }
+  }
+
+  write_u16(stream, count);
+  if (ptr_shattered_window_pieces != NULL) {
+    for (i = 0; i < SHATTERED_WINDOW_PIECES_BUFFER_LEN; i++) {
+      if (ptr_shattered_window_pieces[i].piece > 0 &&
+          ptr_shattered_window_pieces[i].piece < 0x96) {
+        write_u16(stream, (u16)i);
+        write_bytes(stream, &ptr_shattered_window_pieces[i],
+                    sizeof(s_shattered_window_piece));
+      }
+    }
+  }
+}
+
+static void clear_shattered_window_pieces_state(void) {
+  s32 i;
+
+  if (ptr_shattered_window_pieces != NULL) {
+    for (i = 0; i < SHATTERED_WINDOW_PIECES_BUFFER_LEN; i++) {
+      ptr_shattered_window_pieces[i].piece = 0;
+    }
+  }
+  g_NextShardNum = 0;
+}
+
+static void load_shattered_window_pieces_state(StateStream *stream) {
+  s32 i;
+  s32 saved_next_shard_num;
+  u16 saved_count;
+
+  saved_next_shard_num = read_u32(stream);
+  if (saved_next_shard_num < 0 ||
+      saved_next_shard_num >= SHATTERED_WINDOW_PIECES_BUFFER_LEN) {
+    practiceLogError("Saved window-shard cursor is invalid (%d)",
+                     saved_next_shard_num);
+    assert(FALSE);
+    saved_next_shard_num = 0;
+  }
+
+  clear_shattered_window_pieces_state();
+  g_NextShardNum = saved_next_shard_num;
+
+  saved_count = read_u16(stream);
+  if (saved_count > SHATTERED_WINDOW_PIECES_BUFFER_LEN) {
+    practiceLogError("Saved window-shard count is invalid (%d)", saved_count);
+    assert(FALSE);
+  }
+
+  for (i = 0; i < saved_count; i++) {
+    s_shattered_window_piece piece;
+    u16 index = read_u16(stream);
+
+    read_bytes(stream, &piece, sizeof(s_shattered_window_piece));
+    if (ptr_shattered_window_pieces != NULL &&
+        saved_count <= SHATTERED_WINDOW_PIECES_BUFFER_LEN &&
+        index < SHATTERED_WINDOW_PIECES_BUFFER_LEN) {
+      ptr_shattered_window_pieces[index] = piece;
+    }
+  }
+}
+
+/*
+ * Shot light fixtures are tracked by background room vertex index, not by
+ * props. The live room vertex colours are darkened in place with `>>= 2`.
+ * Avoid reloading BG room memory here: a frame can still be using the room's
+ * display lists when state is loaded, and the BG loader uses the tail of the
+ * existing room allocation as scratch.
+ */
+static void save_darkened_lights_state(StateStream *stream) {
+  s32 i;
+  u16 count = 0;
+
+  write_u32(stream, cur_entry_darkened_light_table);
+
+  for (i = 0; i < DARKENED_LIGHT_TABLE_MAX; i++) {
+    if (darkened_light_table[i].room_index > 0 &&
+        darkened_light_table[i].room_index < g_MaxNumRooms) {
+      count++;
+    }
+  }
+
+  write_u16(stream, count);
+  for (i = 0; i < DARKENED_LIGHT_TABLE_MAX; i++) {
+    if (darkened_light_table[i].room_index > 0 &&
+        darkened_light_table[i].room_index < g_MaxNumRooms) {
+      write_u16(stream, (u16)i);
+      write_u16(stream, darkened_light_table[i].room_index);
+      write_u16(stream, darkened_light_table[i].vtx_index);
+    }
+  }
+}
+
+static bool bg_room_vertices_loaded(s32 room) {
+  return room > 0 && room < g_MaxNumRooms &&
+         g_BgRoomInfo[room].model_bin_loaded != 0 &&
+         g_BgRoomInfo[room].ptr_point_index != NULL;
+}
+
+static bool light_vertex_loaded(s32 room, u16 vtx_index) {
+  if (!bg_room_vertices_loaded(room)) {
+    return FALSE;
+  }
+
+  /* Bounds check the saved vertex index before redarken_lights_in_room scans. */
+  return ((u32)vtx_index * sizeof(Vtx)) <
+         (u32)g_BgRoomInfo[room].usize_point_index_binary;
+}
+
+static void undarken_light_vertex(s32 room, u16 vtx_index) {
+  Vtx *vertex;
+
+  if (!light_vertex_loaded(room, vtx_index)) {
+    return;
+  }
+
+  vertex = &g_BgRoomInfo[room].ptr_point_index[vtx_index];
+  vertex->v.cn[0] <<= 2;
+  vertex->v.cn[1] <<= 2;
+  vertex->v.cn[2] <<= 2;
+  vertex->v.cn[3] <<= 2;
+}
+
+static void load_darkened_lights_state(StateStream *stream) {
+  s32 i;
+  u16 count;
+  u8 rooms_to_reload[MAXROOMCOUNT];
+
+  bzero(rooms_to_reload, sizeof(rooms_to_reload));
+
+  for (i = 0; i < DARKENED_LIGHT_TABLE_MAX; i++) {
+    s32 room = darkened_light_table[i].room_index;
+    if (room > 0 && room < g_MaxNumRooms) {
+      undarken_light_vertex(room, darkened_light_table[i].vtx_index);
+      if (light_vertex_loaded(room, darkened_light_table[i].vtx_index)) {
+        rooms_to_reload[room] = TRUE;
+      }
+    }
+    darkened_light_table[i].room_index = 0;
+    darkened_light_table[i].vtx_index = 0;
+  }
+
+  cur_entry_darkened_light_table = read_u32(stream);
+  if (cur_entry_darkened_light_table < 0 ||
+      cur_entry_darkened_light_table >= DARKENED_LIGHT_TABLE_MAX) {
+    practiceLogError("Saved darkened-light cursor is invalid (%d)",
+                     cur_entry_darkened_light_table);
+    assert(FALSE);
+    cur_entry_darkened_light_table = 0;
+  }
+
+  count = read_u16(stream);
+  if (count > DARKENED_LIGHT_TABLE_MAX) {
+    practiceLogError("Saved darkened-light count is invalid (%d)", count);
+    assert(FALSE);
+    count = DARKENED_LIGHT_TABLE_MAX;
+  }
+
+  for (i = 0; i < count; i++) {
+    u16 index = read_u16(stream);
+    u16 room = read_u16(stream);
+    u16 vtx_index = read_u16(stream);
+
+    if (index >= DARKENED_LIGHT_TABLE_MAX || room == 0 ||
+        room >= g_MaxNumRooms) {
+      practiceLogError("Saved darkened light is invalid (%d, %d, %d)", index,
+                       room, vtx_index);
+      assert(FALSE);
+      continue;
+    }
+
+    darkened_light_table[index].room_index = room;
+    darkened_light_table[index].vtx_index = vtx_index;
+    if (light_vertex_loaded(room, vtx_index)) {
+      rooms_to_reload[room] = TRUE;
+    }
+  }
+
+  for (i = 1; i < g_MaxNumRooms && i < MAXROOMCOUNT; i++) {
+    if (rooms_to_reload[i] && bg_room_vertices_loaded(i)) {
+      redarken_lights_in_room(i);
+    }
+  }
+}
+
+/*
  * Short-lived gun effects are not props:
  *
  * - dword_CODE_bss_8007A170 contains impact flares/smoke.
@@ -2774,6 +2982,8 @@ bool save_props_state(StateStream *stream) {
   save_flying_particles_state(stream);
   save_gun_effects_state(stream);
   save_casings_state(stream);
+  save_darkened_lights_state(stream);
+  save_shattered_window_pieces_state(stream);
 
   emu_log("SAVE_STATE_DEFORMATION_BYTES=%u", g_object_deformation_state_size);
 
@@ -3524,6 +3734,14 @@ bool load_props_state(StateStream *stream) {
   load_flying_particles_state(stream);
   load_gun_effects_state(stream);
   load_casings_state(stream);
+  load_darkened_lights_state(stream);
+  if (stream->base_address + stream->total_processed + sizeof(u32) +
+          sizeof(u16) <=
+      dataStart + totalPropsSize) {
+    load_shattered_window_pieces_state(stream);
+  } else {
+    clear_shattered_window_pieces_state();
+  }
 
   return TRUE;
 }
