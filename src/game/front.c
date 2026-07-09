@@ -48,6 +48,7 @@
 #include "practice/practice_config.h"
 #include "practice/practice_splits.h"
 #include "practice/practice_debug.h"
+#include "practice/practice_lag.h"
 #endif
 
 
@@ -8122,16 +8123,48 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     {
     sprintf(stagename, "%02d:%02d", missiontime / 60, missiontime % 60);
     }
+#if PRACTICE_ROM
+    x = 110;
+#else
     x = 0x82;
+#endif
     y = 0xA7;
     DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
 
+#ifdef PRACTICE_ROM
+    {
+        f32 running_seconds = practice_lag_get_running_seconds();
+        f32 lag_seconds = practice_lag_get_time_added_seconds();
+
+        if (running_seconds >= 1.0f) {
+            u32 lag_color;
+
+            x = 180;
+            sprintf(stagename, "Lag: ");
+            DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars,
+                                ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0,
+                                0);
+
+            lag_color =
+                practice_lag_impact_color(running_seconds, lag_seconds);
+            sprintf(stagename, "%.1f%%", lag_seconds * 100.0f / running_seconds);
+            DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars,
+                                ptrFontZurichBold, lag_color, viGetX(),
+                                viGetY(), 0, 0);
+
+            sprintf(stagename, " (%.2fs of %.2fs)", lag_seconds, running_seconds);
+            DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars,
+                                ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0,
+                                0);
+        }
+    }
+#else
     if (g_NewCheatUnlocked) {
         stagename[0] = '\0';
         sprintf(stagename, "     [%s]", langGet(getStringID(LTITLE, TITLE_STR_275_NEWCHEATAVAILABLE))); //New Cheat Available
         DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars, ptrFontZurichBold, 0xA00000FF, viGetX(), viGetY(), 0, 0);
     }
-
+#endif
 
     if ((targettime > 0) && (selected_difficulty != DIFFICULTY_007)) {
         text = langGet(getStringID(LTITLE, TITLE_STR_274_TARGET)); //Target:
@@ -8140,14 +8173,21 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
         DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
         stagename[0] = '\0';
         sprintf(stagename, "%02d:%02d", targettime / 60, targettime % 60);
+#if PRACTICE_ROM
+        x = 110;
+#else
         x = 0x82;
+#endif
         y = y2 + 0xA9;
         DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
         if (besttime >= 0) {
             if (besttime < 0x3FF) {
+#if PRACTICE_ROM
+                x = 180;
+#endif
                 stagename[0] = '\0';
                 if (besttime >= 0) {
-                    sprintf(stagename, "     (%s  %02d:%02d)", langGet(getStringID(LTITLE, TITLE_STR_273_BESTTIME)), besttime / 60, besttime % 60); //Best Time:
+                    sprintf(stagename, "(%s  %02d:%02d)", langGet(getStringID(LTITLE, TITLE_STR_273_BESTTIME)), besttime / 60, besttime % 60); //Best Time:
                 }
                 else {
                     sprintf(stagename, "");
@@ -8165,7 +8205,11 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
                 DL = frontPrintText(DL, &x, &y, text, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
                 stagename[0] = '\0';
                 sprintf(stagename, "%02d:%02d", besttime / 60, besttime % 60);
+#if PRACTICE_ROM
+                x = 110;
+#else
                 x = 0x82;
+#endif
                 y = y2 + 0xA9;
                 DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars, ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0, 0);
             }

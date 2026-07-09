@@ -1,18 +1,20 @@
-- Finish state loading
+- State loading
+    - Finish all the missing bits and bugs
 - Lag monitor
-    - Global setting
-    - Show instantaneous predicted speed loss and frames dropped
     - Small graph of speed loss
-- Lag impact summary
-    - On statistics page show how much lag impacted the time (next to splits?)
-    - During the run collect frames dropped while running
-    - Add it all together to predict how much faster the same distance could have been traveled without lag
 - Deterministic replay system
 - Align lag
     - Measure the amount of lag the original ROM gets compared to the practice ROM
     - Implement efficiency improvements to bring the practice ROM's lag roughly in line with the original
+- Dam gate guard indicator
+    - Show their speed/progress to the gate
 - TLB improvements
-- Add more splits
-- Finish grenade cam
+- Splits
+    - Hotkey to enter splits editor
+    - Shows split regions in the world
+    - Split regions can be added, edited and removed
+    - Splits can be saved/loaded from SD card
+    - Store and show split PBs and comparisons
+- Grenade cam
     - Bug: explosion and smoke textures get messed up
 - Figure out frame delta determinism after load

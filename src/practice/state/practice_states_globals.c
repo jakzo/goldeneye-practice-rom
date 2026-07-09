@@ -9,6 +9,7 @@
 #include "player.h"
 #include "player_2.h"
 #include "practice_dialog.h"
+#include "practice_lag.h"
 #include "practice_states_music.h"
 #include "practice_states_utils.h"
 #include "practice_timescale.h"
@@ -415,6 +416,9 @@ void save_global_state(StateStream *stream) {
 
   // Music
   save_music_state(stream);
+
+  // Practice lag impact accumulator
+  practice_lag_save(stream);
 }
 
 void load_global_state_pre_props(StateStream *stream) {
@@ -512,6 +516,9 @@ void load_global_state_pre_props(StateStream *stream) {
 
   // Music
   load_music_state(stream);
+
+  // Practice lag impact accumulator
+  practice_lag_load(stream);
 
   // TODO: We should save the RNG state needed for restoring each prop
   // individually but for now just use the final RNG state when restoring props

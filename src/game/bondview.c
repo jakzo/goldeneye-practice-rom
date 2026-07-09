@@ -49,6 +49,7 @@
 #include "practice/practice_dialog.h"
 #include "practice/practice_splits.h"
 #include "practice/practice_ui.h"
+#include "practice/practice_lag.h"
 #include "practice/state/practice_states_utils.h"
 
 #ifdef VERSION_EU
@@ -11756,6 +11757,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     }
 
 #if PRACTICE_ROM
+        practice_lag_tick();
     }
     splits_tick();
 #endif

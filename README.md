@@ -22,13 +22,26 @@ This ROM provides tools for practicing speedruns of Goldeneye 007 on the Nintend
 - **Time scale control**
     - During gameplay press `L + D-Left` to decrease game speed by 10%
     - During gameplay press `L + D-Right` to increase game speed by 10%
+    - Note that running the game slower will result in less lag compared to normal or faster speed so times are not perfectly comparable
 - **Speedometer**
-    - Displays Bond's current horizontal movement speed (moving up and down does not affect the displayed speed)
+    - Displays Bond's current horizontal movement speed
+    - Moving vertically (higher and lower) does not affect the displayed speed
 - **Lag estimate**
-    - Displays the amount of lag and estimated effect
+    - Displays the amount of lag and estimated movement speed slowdown
     - The format looks like `+0.6 (2)` where:
         - `(2)` means there were 2 dropped frames before the current one was rendered
         - `+0.6` means that if you were strafe-running at max speed for 100 meters (slightly less than the length of the start of the runway to the plane in Runway) you would have taken 0.6 seconds longer than if there were 0 dropped frames
+- **Lag impact summary**
+    - Estimates the amount of time lost due to lag
+    - While the mission timer is running during a level and Bond is diagonal-strafing, lag is tracked for these frames and the slowdown of Bond's speed is estimated
+    - On the end-of-mission statistics screen the impact is shown next to the completion time as e.g. `Lag: 1.2% (3.45s of 67.89s)` where:
+        - `67.89s` is the total time spent diagonal-strafing
+        - `3.45s` is the estimated extra time spent diagonal-strafing from slower movement due to lag
+        - `1.2%` is the percentage of extra lag time to total time
+    - Movement speed slowdown is based on experimentally measured data of 100m runs using a variety of lag amounts
+    - Forward-only running without strafe and paused time are not counted
+    - Note that all time spent diagonal-strafing is counted, even when lag and movement speed do not affect the final time (e.g. during the Control protect sequence)
+    - Some lag is unavoidable, this data is most useful as a comparison between runs of the same level and route
 - **Skip level intro cutscenes**
     - Starting a level goes straight into it, rather than playing the intro cutscene
 - **Skips legal and logo screens on game startup**

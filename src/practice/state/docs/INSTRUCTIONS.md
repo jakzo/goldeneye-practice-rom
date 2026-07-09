@@ -18,10 +18,9 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining
 
-- Windows in Archives do not get restored after being smashed
+- When saving during the intro camera swirl then loading again, the Bond player model is loaded in the position the camera was saved at, causing you to start in a different position after loading
 - After dying the game shows a replay of your death and turns the sfx volume down, but when loading state back to alive the volume stays lowered
 - Saving object deformation vertices can cost 20kb+, can we save the seeds used to deform them instead?
-- Crashes when loading state sometimes?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
 ## Key Learnings

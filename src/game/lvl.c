@@ -38,6 +38,7 @@
 #include "practice/practice_ui.h"
 #include "practice/practice_splits.h"
 #include "practice/practice_replay.h"
+#include "practice/practice_lag.h"
 #include "bg.h"
 #include "objective.h"
 #include "mp_watch.h"
@@ -515,6 +516,7 @@ void lvlStageLoad(s32 stage)
     if (g_CurrentStageToLoad != LEVELID_TITLE) {
         practice_replay_on_stage_load();
         splits_init();
+        practice_lag_reset();
     }
 #endif
 }

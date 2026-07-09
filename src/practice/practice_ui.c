@@ -8,6 +8,7 @@
 #include "game/unk_0C0A70.h"
 #include "player.h"
 #include "practice_config.h"
+#include "practice_lag.h"
 #include <PR/os.h>
 #include <bondconstants.h>
 #include <bondtypes.h>
@@ -112,7 +113,6 @@ extern void *memcpy(void *dst, const void *src, size_t count);
 #define LINE_SPACING 0
 #define GAME_UNITS_PER_METER 100.0f
 #define GAME_TICKS_PER_SECOND 60.0f
-#define LAG_ESTIMATE_MAX_DISPLAY_FRAMES 99
 
 typedef enum {
   LOG_LEVEL_DEBUG,
@@ -413,28 +413,6 @@ static f32 player_speed_metres_per_second(void) {
          (g_GlobalTimerDelta * GAME_UNITS_PER_METER);
 }
 
-static f32 strafe_100m_lag_time_added(s32 dropped_frames) {
-  f32 d;
-  f32 added_seconds;
-
-  if (dropped_frames <= 0) {
-    return 0.0f;
-  }
-
-  d = (f32)dropped_frames;
-
-  /*
-   * Fourth-order least-squares fit of the TEST_MOVE_SPEED strafe medians in
-   * docs/test_strafe_speed_results.html, expressed as added 100m time vs
-   * dropped frames and forced through 0.
-   */
-  added_seconds =
-      d * (0.247800872f +
-           d * (0.017377249f + d * (-0.001018621f + d * 0.000013940f)));
-
-  return added_seconds < 0.0f ? 0.0f : added_seconds;
-}
-
 Gfx *practice_ui_render(Gfx *gdl) {
   s32 i;
   s32 current_y;
@@ -525,7 +503,8 @@ Gfx *practice_ui_render(Gfx *gdl) {
         dropped_frames = 0;
       }
 
-      sprintf(lag_buf, "+%.1f (%d)", strafe_100m_lag_time_added(dropped_frames),
+      sprintf(lag_buf, "+%.1f (%d)",
+              practice_lag_strafe_100m_time_added(dropped_frames),
               dropped_frames > 99 ? 99 : dropped_frames);
       gdl = renderText(gdl, &lag_x, &hud_y, lag_buf, ptrFontBankGothicChars,
                        ptrFontBankGothic, 0xFFFFFFFF, viGetX(), viGetY());
