@@ -37,8 +37,8 @@ struct PracticeConfig practice = {
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 #define CONFIG_OFFSET(member) __builtin_offsetof(struct PracticeConfig, member)
 #define SETTINGS_X 55
-#define OPTIONS_X 224
-#define OPTIONS_COLUMN_WIDTH 72
+#define OPTIONS_X 208
+#define OPTIONS_COLUMN_WIDTH 60
 #define SETTINGS_LINE_HEIGHT 15
 #define SETTINGS_VIEW_TOP 135
 #define SETTINGS_BOTTOM_MARGIN 20
@@ -132,16 +132,18 @@ static const struct PracticeOption s_left_right[] = {
     {"Left", TRUE},
     {"Right", FALSE},
 };
-static const struct PracticeOption s_disabled_enabled[] = {
-    {"Disabled", FALSE},
-    {"Enabled", TRUE},
+static const struct PracticeOption s_off_on[] = {
+    {"Off", FALSE},
+    {"On", TRUE},
 };
-static const struct PracticeOption s_enabled_disabled[] = {
-    {"Enabled", TRUE},
-    {"Disabled", FALSE},
+static const struct PracticeOption s_on_off[] = {
+    {"On", TRUE},
+    {"Off", FALSE},
 };
 
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
+
+static s32 s_boot_level_option = LEVELID_TITLE;
 
 static const char *level_name(s32 stage_id) {
   s32 i;
@@ -165,23 +167,32 @@ static s32 boot_level_options(s32 stage_id, s32 option_index,
                               const char **option_name, s32 *option_value) {
   switch (option_index) {
   case 0:
-    *option_name = level_name(stage_id);
-    *option_value = stage_id;
-    return TRUE;
+    *option_value = LEVELID_TITLE;
+    break;
+
   case 1:
-    *option_value =
-        practice.boot_level == stage_id ? LEVELID_TITLE : practice.boot_level;
-    *option_name = level_name(*option_value);
-    return TRUE;
+    *option_value = stage_id;
+    break;
+
+  case 2:
+    if (s_boot_level_option == stage_id || s_boot_level_option == LEVELID_TITLE)
+      return FALSE;
+    *option_value = s_boot_level_option;
+    break;
+
+  default:
+    return FALSE;
   }
-  return FALSE;
+
+  *option_name = level_name(*option_value);
+  return TRUE;
 }
 
 static s32 replay_mode_options(s32 stage_id, s32 option_index,
                                const char **option_name, s32 *option_value) {
   switch (option_index) {
   case 0:
-    *option_name = "Disabled";
+    *option_name = "Off";
     *option_value = PRACTICE_REPLAY_DISABLED;
     return TRUE;
   case 1:
@@ -192,7 +203,7 @@ static s32 replay_mode_options(s32 stage_id, s32 option_index,
     if (!practice_replay_can_play(stage_id)) {
       return FALSE;
     }
-    *option_name = "Playback";
+    *option_name = "Play";
     *option_value = PRACTICE_REPLAY_PLAYBACK;
     return TRUE;
   }
@@ -200,38 +211,33 @@ static s32 replay_mode_options(s32 stage_id, s32 option_index,
 }
 
 static const struct PracticeSetting s_level_settings[] = {
-    OPTIONS_SETTING("Gate guard status", gate_guard_status, s_enabled_disabled,
+    OPTIONS_SETTING("Gate guard status", gate_guard_status, s_on_off,
                     dam_apply),
-    OPTIONS_SETTING("Gate intro cutscene", dam_gate_intro_enabled,
-                    s_disabled_enabled, dam_apply),
+    OPTIONS_SETTING("Gate intro cutscene", dam_gate_intro_enabled, s_off_on,
+                    dam_apply),
     DYNAMIC_OPTIONS_SETTING("Boot into level", boot_level, boot_level_options),
-    OPTIONS_SETTING("Splits", splits_enabled, s_enabled_disabled, has_splits),
+    OPTIONS_SETTING("Splits", splits_enabled, s_on_off, has_splits),
 };
 
 static const struct PracticeSetting s_global_settings[] = {
-    DYNAMIC_OPTIONS_SETTING("Replay next level", replay_mode,
-                            replay_mode_options),
+    DYNAMIC_OPTIONS_SETTING("Replay mode", replay_mode, replay_mode_options),
 #if DEV
-    OPTIONS_SETTING("Record replay seeds", record_replay_seeds,
-                    s_disabled_enabled, NULL),
+    OPTIONS_SETTING("Record replay seeds", record_replay_seeds, s_off_on, NULL),
 #endif
-    OPTIONS_SETTING("Grenade cam", grenade_cam, s_disabled_enabled, NULL),
-    OPTIONS_SETTING("Log on split", log_splits, s_disabled_enabled, NULL),
-    SLIDER_SETTING("Log message duration", log_message_duration, 0.1f, 20.0f,
+    OPTIONS_SETTING("Grenade cam", grenade_cam, s_off_on, NULL),
+    OPTIONS_SETTING("Log on split", log_splits, s_off_on, NULL),
+    SLIDER_SETTING("Log text duration", log_message_duration, 0.1f, 20.0f,
                    0.1f),
-    OPTIONS_SETTING("Skip intro cutscenes", disable_intro_cutscenes,
-                    s_disabled_enabled, NULL),
-    OPTIONS_SETTING("On-screen timer", show_mission_timer, s_enabled_disabled,
+    OPTIONS_SETTING("Skip intro cutscenes", disable_intro_cutscenes, s_off_on,
                     NULL),
-    OPTIONS_SETTING("Timer hundredths", show_hundredths_on_timer,
-                    s_enabled_disabled, NULL),
-    OPTIONS_SETTING("Lag estimate", lag_estimate_enabled, s_enabled_disabled,
+    OPTIONS_SETTING("On-screen timer", show_mission_timer, s_on_off, NULL),
+    OPTIONS_SETTING("Timer hundredths", show_hundredths_on_timer, s_on_off,
                     NULL),
-    OPTIONS_SETTING("Speedometer", speedometer_enabled, s_disabled_enabled,
+    OPTIONS_SETTING("Lag estimate", lag_estimate_enabled, s_on_off, NULL),
+    OPTIONS_SETTING("Speedometer", speedometer_enabled, s_off_on, NULL),
+    OPTIONS_SETTING("Skip logos on boot", skip_logos_on_startup, s_on_off,
                     NULL),
-    OPTIONS_SETTING("Skip logos on startup", skip_logos_on_startup,
-                    s_enabled_disabled, NULL),
-    OPTIONS_SETTING("Hotkey trigger", left_trigger_hotkeys, s_left_right, NULL),
+    OPTIONS_SETTING("Hotkey button", left_trigger_hotkeys, s_left_right, NULL),
 };
 
 #undef OPTIONS_SETTING
@@ -542,6 +548,7 @@ void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
     }
     s_focused_visible_setting = 0;
     s_scroll_offset = 0;
+    s_boot_level_option = practice.boot_level;
     s_last_stage = stage_id;
     sync_focused_option(stage_id);
   }
