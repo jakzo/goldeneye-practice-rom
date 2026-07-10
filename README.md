@@ -1,6 +1,6 @@
-# Goldeneye N64 practice rom
+![Goldeneye Practice ROM logo](./images/practice_rom_logo_transparent.svg)
 
-This ROM provides tools for practicing speedruns of Goldeneye 007 on the Nintendo 64.
+> Custom rom of Goldeneye 007 for Nintendo 64 with various tools for practicing speedruns.
 
 ## How to install
 
