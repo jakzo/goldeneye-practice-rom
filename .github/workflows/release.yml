@@ -117,6 +117,7 @@ jobs:
           xvfb-run --auto-servernum \
             --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
             ./scripts/run_practice_tests.py \
+              --jobs 1 \
               --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
 
       - name: Upload failed test artifacts
