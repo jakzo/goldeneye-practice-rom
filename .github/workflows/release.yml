@@ -111,31 +111,29 @@ jobs:
           cmake --install /tmp/ares-build
 
   build:
-    needs: metadata
-    runs-on: ubuntu-latest
+    needs:
+      - metadata
+      - ares
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         build:
-          - name: Release
-            slug: release
+          - mode: release
             dev: 0
-          - name: Debug
-            slug: debug
+          - mode: dev
             dev: 1
         region:
-          - name: US
-            version: US
+          - version: US
             code: u
             slug: us
             secret: BASE_ROM_US_DOWNLOAD_LINK
-          - name: PAL
-            version: EU
+          - version: EU
             code: e
             slug: pal
             secret: BASE_ROM_EU_DOWNLOAD_LINK
-          - name: JP
-            version: JP
+          - version: JP
             code: j
             slug: jp
             secret: BASE_ROM_JP_DOWNLOAD_LINK
@@ -147,7 +145,19 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install --yes binutils-mips-linux-gnu gcc-mips-linux-gnu make xdelta3
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            binutils-mips-linux-gnu \
+            ffmpeg \
+            gcc-mips-linux-gnu \
+            libcanberra-gtk3-module \
+            libcapstone-dev \
+            libgl-dev \
+            libgtk-3-dev \
+            make \
+            mesa-vulkan-drivers \
+            xauth \
+            xdelta3 \
+            xvfb
           wget -q https://github.com/n64decomp/qemu-irix/releases/download/v2.11-deb/qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
           sudo dpkg -i qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
 
@@ -189,7 +199,7 @@ jobs:
             ./scripts/extract_diff.j.sh
           fi
 
-      - name: Build practice ROM (${{ matrix.build.name }}, ${{ matrix.region.name }})
+      - name: Build practice ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
         run: >-
           make -j$(nproc)
           IDO_RECOMP=NO
@@ -200,7 +210,7 @@ jobs:
         env:
           BASE_ROM: baserom.${{ matrix.region.code }}.z64
           BUILT_ROM: build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.z64
-          PATCH_FILE: ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.slug }}.xdelta
+          PATCH_FILE: ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
         run: |
           xdelta3 -e -n -S none -A -s "$BASE_ROM" "$BUILT_ROM" "$PATCH_FILE"
           npx --yes rom-patcher@3.1.0-b patch "$BASE_ROM" "$PATCH_FILE"
@@ -212,66 +222,9 @@ jobs:
       - name: Upload patch artifact
         uses: actions/upload-artifact@v6
         with:
-          name: goldeneye-practice-rom-patch-${{ matrix.build.slug }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
-          path: ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.slug }}.xdelta
+          name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
           if-no-files-found: error
-
-      - name: Upload test ROM artifact
-        uses: actions/upload-artifact@v6
-        with:
-          name: goldeneye-practice-rom-test-rom-${{ matrix.build.slug }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
-          path: build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.z64
-          if-no-files-found: error
-
-  test:
-    needs:
-      - ares
-      - build
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        build:
-          - name: Release
-            mode: release
-            slug: release
-          - name: Debug
-            mode: dev
-            slug: debug
-        region:
-          - name: US
-            version: US
-            slug: us
-          - name: PAL
-            version: EU
-            slug: pal
-          - name: JP
-            version: JP
-            slug: jp
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install test dependencies
-        run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            ffmpeg \
-            libcanberra-gtk3-module \
-            libcapstone-dev \
-            libgl-dev \
-            libgtk-3-dev \
-            mesa-vulkan-drivers \
-            xauth \
-            xvfb
-
-      - name: Download built ROM
-        uses: actions/download-artifact@v6
-        with:
-          name: goldeneye-practice-rom-test-rom-${{ matrix.build.slug }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
-          path: build/${{ matrix.region.code }}
 
       - name: Restore ares cache
         uses: actions/cache/restore@v6
@@ -280,7 +233,7 @@ jobs:
           key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
           fail-on-cache-miss: true
 
-      - name: Run practice tests (${{ matrix.build.name }}, ${{ matrix.region.name }})
+      - name: Run practice tests (${{ matrix.build.mode }}, ${{ matrix.region.version }})
         env:
           ARES: ${{ env.ARES_PREFIX }}/bin/ares
           ARES_ARGS: >-
@@ -294,7 +247,7 @@ jobs:
           PRACTICE_TEST_VIDEO_SIZE: 640x480
           SUMMARY_FILE: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
         run: |
-          printf '# Practice ROM tests — %s / %s\n\n' '${{ matrix.build.name }}' '${{ matrix.region.name }}' >> "$GITHUB_STEP_SUMMARY"
+          printf '# Practice ROM tests — %s / %s\n\n' '${{ matrix.build.mode }}' '${{ matrix.region.version }}' >> "$GITHUB_STEP_SUMMARY"
           set +e
           xvfb-run --auto-servernum \
             --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
@@ -329,14 +282,12 @@ jobs:
   release:
     needs:
       - metadata
-      - test
       - build
     if: >-
       always() &&
       github.event_name != 'pull_request' &&
       needs.metadata.result == 'success' &&
-      needs.build.result == 'success' &&
-      (needs.metadata.outputs.prerelease == 'true' || needs.test.result == 'success')
+      (needs.metadata.outputs.prerelease == 'true' || needs.build.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
