@@ -14,6 +14,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,6 +29,28 @@ ROOT = Path(__file__).resolve().parent.parent
 ROM = ROOT / "build/u/ge007.u.z64"
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
+PRINT_LOCK = threading.Lock()
+COLOR_RESET = "\033[0m"
+TEST_COLOR_CODES = (
+    39,
+    214,
+    82,
+    207,
+    220,
+    75,
+    203,
+    170,
+    45,
+    113,
+    141,
+    208,
+    51,
+    197,
+    118,
+    111,
+)
+TEST_COLORS = {}
+COLOR_OUTPUT = False
 
 
 @dataclass
@@ -60,7 +83,62 @@ def parse_args():
         default="dev",
         help="build mode for the test ROM (default: dev)",
     )
+    parser.add_argument(
+        "-j",
+        "--jobs",
+        type=positive_int,
+        default=(
+            os.environ.get("PRACTICE_TEST_JOBS")
+            or default_test_job_count()
+        ),
+        help="number of tests to run in parallel (default: half the available CPUs)",
+    )
+    parser.add_argument(
+        "--color",
+        choices=("auto", "always", "never"),
+        default="auto",
+        help="color test prefixes (default: auto)",
+    )
     return parser.parse_args()
+
+
+def positive_int(value):
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be an integer") from error
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
+def available_cpu_count():
+    try:
+        count = len(os.sched_getaffinity(0))
+        return count or 1
+    except (AttributeError, OSError):
+        return os.cpu_count() or 1
+
+
+def default_test_job_count():
+    return max(1, available_cpu_count() // 2)
+
+
+def configure_test_colors(test_cases, color_mode):
+    global COLOR_OUTPUT, TEST_COLORS
+
+    if color_mode == "always":
+        COLOR_OUTPUT = True
+    elif color_mode == "never" or "NO_COLOR" in os.environ:
+        COLOR_OUTPUT = False
+    else:
+        term = os.environ.get("TERM", "")
+        COLOR_OUTPUT = sys.stdout.isatty() or (term and term != "dumb")
+
+    TEST_COLORS = {
+        test_case: TEST_COLOR_CODES[index % len(TEST_COLOR_CODES)]
+        for index, test_case in enumerate(test_cases)
+    }
 
 
 def read_test_cases():
@@ -102,21 +180,21 @@ def emulator_command():
     extra_args = shlex.split(os.environ.get("ARES_ARGS", ""))
     configured_emulator = os.environ.get("ARES")
     if configured_emulator:
-        return [configured_emulator, *extra_args, str(ROM)]
+        return [configured_emulator, *extra_args]
 
     emulator = shutil.which("ares")
     if emulator:
-        return [emulator, *extra_args, str(ROM)]
+        return [emulator, *extra_args]
 
     macos_emulator = Path("/Applications/ares.app/Contents/MacOS/ares")
     if macos_emulator.is_file():
-        return [str(macos_emulator), *extra_args, str(ROM)]
+        return [str(macos_emulator), *extra_args]
 
     return None
 
 
 def build_tests(build_mode):
-    jobs = os.cpu_count() or 1
+    jobs = available_cpu_count()
     command = ["make", f"-j{jobs}"]
     if build_mode == "dev":
         command.append("DEV=1")
@@ -141,17 +219,31 @@ def build_tests(build_mode):
         return False
 
 
-def select_test(test_case):
+def print_test_line(test_case, line, *, file=sys.stdout):
+    prefix = f"[{test_case}]"
+    if COLOR_OUTPUT:
+        color = TEST_COLORS[test_case]
+        prefix = f"\033[38;5;{color}m{prefix}{COLOR_RESET}"
+    with PRINT_LOCK:
+        print(f"{prefix} {line}", file=file, flush=True)
+
+
+def select_test(test_case, rom):
     result = subprocess.run(
         [
             sys.executable,
             str(PATCH_ROM_SCRIPT),
-            str(ROM),
+            str(rom),
             "--test-case",
             test_case,
         ],
         cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
     )
+    for line in result.stdout.splitlines():
+        print_test_line(test_case, line)
     return result.returncode == 0
 
 
@@ -174,10 +266,14 @@ def stop_emulator(process):
         process.wait()
 
 
-def run_test(command):
+def run_test(test_case, command, rom, runtime_dir, stop_event):
+    environment = os.environ.copy()
+    environment["XDG_CONFIG_HOME"] = str(runtime_dir / "config")
+    environment["XDG_DATA_HOME"] = str(runtime_dir / "data")
     process = subprocess.Popen(
-        command,
+        [*command, str(rom)],
         cwd=ROOT,
+        env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -193,6 +289,9 @@ def run_test(command):
 
     try:
         while True:
+            if stop_event.is_set():
+                return False, "interrupted", "".join(output)
+
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return (
@@ -202,13 +301,9 @@ def run_test(command):
                 )
 
             try:
-                line = output_queue.get(timeout=remaining)
+                line = output_queue.get(timeout=min(remaining, 0.25))
             except queue.Empty:
-                return (
-                    False,
-                    f"timed out after {TEST_TIMEOUT_SECONDS}s",
-                    "".join(output),
-                )
+                continue
 
             if line is None:
                 return (
@@ -218,7 +313,7 @@ def run_test(command):
                 )
 
             output.append(line)
-            print(line, end="", flush=True)
+            print_test_line(test_case, line.rstrip("\r\n"))
             if line.startswith(WARNING_PREFIX) or line.startswith(ERROR_PREFIX):
                 return False, line.strip(), "".join(output)
             if TEST_FAILED in line:
@@ -296,6 +391,38 @@ def stop_video_capture(process):
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+
+
+def run_test_case(test_case, command, temp_dir, stop_event):
+    test_dir = temp_dir / test_case
+    test_dir.mkdir()
+    rom = test_dir / ROM.name
+    shutil.copyfile(ROM, rom)
+
+    print_test_line(test_case, "=== patching ===")
+    if not select_test(test_case, rom):
+        return TestResult(test_case, False, "ROM patch failed", 0.0)
+
+    if stop_event.is_set():
+        return TestResult(test_case, False, "interrupted", 0.0)
+
+    print_test_line(test_case, "=== running ===")
+    video_process, video_path = start_video_capture(test_case)
+    started_at = time.monotonic()
+    try:
+        passed, detail, output = run_test(
+            test_case, command, rom, test_dir, stop_event
+        )
+    except OSError as error:
+        passed = False
+        detail = f"could not start emulator: {error}"
+        output = ""
+    finally:
+        stop_video_capture(video_process)
+    duration = time.monotonic() - started_at
+    if passed and video_path:
+        video_path.unlink(missing_ok=True)
+    return TestResult(test_case, passed, detail, duration, output)
 
 
 def print_summary(results):
@@ -397,6 +524,8 @@ def main():
         print(f"error: {error}", file=sys.stderr)
         return 1
 
+    configure_test_colors(test_cases, args.color)
+
     if args.test:
         if args.test not in test_cases:
             print(
@@ -419,36 +548,45 @@ def main():
     if not build_tests(args.build_mode):
         return 1
 
-    results = []
+    results_by_name = {}
+    stop_event = threading.Event()
     try:
-        for test_case in test_cases:
-            print(f"\n=== {test_case}: patching ===", flush=True)
-            if not select_test(test_case):
-                results.append(
-                    TestResult(test_case, False, "ROM patch failed", 0.0)
-                )
-                continue
-
-            print(f"=== {test_case}: running ===", flush=True)
-            video_process, video_path = start_video_capture(test_case)
-            started_at = time.monotonic()
-            try:
-                passed, detail, output = run_test(command)
-            except OSError as error:
-                passed = False
-                detail = f"could not start emulator: {error}"
-                output = ""
-            finally:
-                stop_video_capture(video_process)
-            duration = time.monotonic() - started_at
-            if passed and video_path:
-                video_path.unlink(missing_ok=True)
-            results.append(
-                TestResult(test_case, passed, detail, duration, output)
-            )
+        worker_count = min(args.jobs, len(test_cases))
+        print(f"=== running {len(test_cases)} tests with {worker_count} jobs ===")
+        with tempfile.TemporaryDirectory(prefix="practice-tests-") as temp:
+            temp_dir = Path(temp)
+            with ThreadPoolExecutor(max_workers=worker_count) as executor:
+                try:
+                    futures = {
+                        executor.submit(
+                            run_test_case,
+                            test_case,
+                            command,
+                            temp_dir,
+                            stop_event,
+                        ): test_case
+                        for test_case in test_cases
+                    }
+                    for future in as_completed(futures):
+                        test_case = futures[future]
+                        try:
+                            results_by_name[test_case] = future.result()
+                        except Exception as error:
+                            results_by_name[test_case] = TestResult(
+                                test_case,
+                                False,
+                                f"runner error: {error}",
+                                0.0,
+                            )
+                except KeyboardInterrupt:
+                    stop_event.set()
+                    raise
     except KeyboardInterrupt:
+        stop_event.set()
         print("\nTest run interrupted.", file=sys.stderr)
         return 130
+
+    results = [results_by_name[test_case] for test_case in test_cases]
 
     print_summary(results)
     if args.junit_xml:
