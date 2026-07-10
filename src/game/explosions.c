@@ -20,6 +20,7 @@
 #include "matrixmath.h"
 #include "music.h"
 #include "player.h"
+#include "practice/practice_grenade_cam.h"
 #include "random.h"
 #include "snd.h"
 #include "stan.h"
@@ -985,13 +986,25 @@ Gfx *explosionRenderPart(struct ExplosionPart *arg0, Gfx *gdl, struct coord3d *c
     sp48 = sp98->f[1] + (sp60 * f2);
     sp44 = sp98->f[2] + (sp5C * f2);
 
+#ifdef PRACTICE_ROM
+    if (practice_grenade_cam_is_rendering() &&
+        dynGetFreeVtx() < (s32)(4 * sizeof(Vtx) + 0x1000)) {
+        return gdl;
+    }
+#endif
+
     vertices = dynAllocate7F0BD6C4(4);
 
     vertices[0] = spA0;
     vertices[1] = spA0;
     vertices[2] = spA0;
     vertices[3] = spA0;
+#ifdef PRACTICE_ROM
+    // Four vertices are allocated above. The original fifth write overruns the
+    // allocation and can corrupt the following PIP's vertices or matrices.
+#else
     vertices[4] = spA0;
+#endif
 
     sp8C.f[0] = sp9C->m[0][0] * sp54;
     sp8C.f[1] = sp9C->m[0][1] * sp54;
@@ -1086,6 +1099,13 @@ Gfx *explosionSmokeRenderPart(struct Smoke *smoke, struct SmokePart *smoke_part,
     {
         sp77 = smoke_part->alpha;
     }
+
+#ifdef PRACTICE_ROM
+    if (practice_grenade_cam_is_rendering() &&
+        dynGetFreeVtx() < (s32)(4 * sizeof(Vtx) + 0x1000)) {
+        return gdl;
+    }
+#endif
 
     vertices = dynAllocate7F0BD6C4(4);
 
@@ -1735,6 +1755,12 @@ Gfx *explosionRenderFlyingParticles(Gfx *gdl)
                 && (sp80.m[3][2] < 20000.0f)
                 && (sp80.m[3][2] > -20000.0f))
             {
+#ifdef PRACTICE_ROM
+                if (practice_grenade_cam_is_rendering() &&
+                    dynGetFreeVtx() < (s32)(sizeof(Mtx) + 0x1000)) {
+                    break;
+                }
+#endif
                 temp_v0_2 = dynAllocateMatrix();
                 matrix_4x4_f32_to_s32(&sp80, (Mtxf *)temp_v0_2);
 

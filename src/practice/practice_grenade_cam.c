@@ -19,19 +19,21 @@
 #include <os_extension.h>
 #include <ultra64.h>
 
-// TODO: Cannot render more than 2 without game crashing
-// TODO: Explosion and smoke textures get messed up after rendering pip
-#define MAX_PIP_SLOTS 2
+#define MAX_PIP_SLOTS 3
 #define PIP_SIZE 75
 #define PIP_SPACING 4
+#define PIP_DYN_VTX_RESERVE 0x1000
 #define FREEZE_DURATION_SEC 5.0f
 #define CAMERA_HEIGHT 300.0f
-#define MIN_CAMERA_HEIGHT 225.0f
-#define MAX_CAMERA_HEIGHT 450.0f
-#define MAX_CAMERA_DIST 800.0f
+#define MIN_CAMERA_HEIGHT 300.0f
+#define MAX_CAMERA_HEIGHT 700.0f
+#define MAX_CAMERA_DIST 400.0f
 #define MAX_CAMERA_DIST_SQR (MAX_CAMERA_DIST * MAX_CAMERA_DIST)
+#define PIP_CROSSHAIR_RADIUS 3
+
+#if 0
 #define PIP_ITEM_SCALE 5.0f
-#define PIP_MARKER_RADIUS 8
+#endif
 
 struct pip_slot {
   struct ObjectRecord *item_obj;
@@ -94,6 +96,18 @@ static bool is_supported_thrown_item(struct ObjectRecord *obj) {
   return FALSE;
 }
 
+static bool has_thrown_item_finished(struct ObjectRecord *obj) {
+  if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED)
+    return TRUE;
+
+  // Mines, knives and other sticky items release their projectile after they
+  // attach to level geometry. Grenades also release it when they come to rest,
+  // but their camera should remain until the fuse finishes.
+  return obj->obj != PROP_CHRGRENADE &&
+         !(obj->runtime_bitflags & RUNTIMEBITFLAG_DEPOSIT);
+}
+
+#if 0
 static void enlarge_item_render_model(struct ObjectRecord *obj) {
   Model *model;
   Mtxf *root;
@@ -125,6 +139,7 @@ static void enlarge_item_render_model(struct ObjectRecord *obj) {
     }
   }
 }
+#endif
 
 static void prepare_pip_props(void) {
   s32 saved_clock_timer = g_ClockTimer;
@@ -138,14 +153,12 @@ static void prepare_pip_props(void) {
   // prop sound attenuation). Give the synthetic view a valid player pointer
   // while it is reported, otherwise those paths dereference the empty P2 slot.
   g_playerPointers[PLAYER_2] = g_CurrentPlayer;
-  g_IsRenderingGrenadeCam = TRUE;
   g_ClockTimer = 0;
 
   determing_type_of_object_and_detection();
   chraiUpdateOnscreenPropCount();
 
   g_ClockTimer = saved_clock_timer;
-  g_IsRenderingGrenadeCam = FALSE;
   g_playerPointers[PLAYER_2] = saved_player_two;
 }
 
@@ -189,6 +202,7 @@ void practice_grenade_cam_tick(void) {
       still_active =
           slot->item_obj != NULL && slot->item_obj->prop != NULL &&
           is_supported_thrown_item(slot->item_obj) &&
+          !has_thrown_item_finished(slot->item_obj) &&
           !(slot->item_obj->runtime_bitflags & RUNTIMEBITFLAG_REMOVE);
 
       if (still_active) {
@@ -224,10 +238,10 @@ void practice_grenade_cam_tick(void) {
   // 2. Scan for new player-thrown items
   for (i = 0; i < PROJECTILES_ARR_MAX; i++) {
     p = &g_Projectiles[i];
-    is_player_thrown_item = !(p->flags & PROJECTILEFLAG_FREE) &&
-                            p->obj != NULL && p->obj->prop != NULL &&
-                            is_supported_thrown_item(p->obj) &&
-                            p->ownerprop == player_prop;
+    is_player_thrown_item =
+        !(p->flags & PROJECTILEFLAG_FREE) && p->obj != NULL &&
+        p->obj->prop != NULL && is_supported_thrown_item(p->obj) &&
+        !has_thrown_item_finished(p->obj) && p->ownerprop == player_prop;
     if (!is_player_thrown_item)
       continue;
 
@@ -268,6 +282,20 @@ void practice_grenade_cam_tick(void) {
   }
 }
 
+void practice_grenade_cam_refresh(void) {
+  s32 s;
+
+  for (s = 0; s < MAX_PIP_SLOTS; s++) {
+    g_PipSlots[s].active = FALSE;
+    g_PipSlots[s].item_obj = NULL;
+    g_PipSlots[s].freeze_ticks = 0;
+  }
+
+  // The projectile and prop pools have already been restored at this point,
+  // so rebuild the transient camera slots from the loaded world immediately.
+  practice_grenade_cam_tick();
+}
+
 Gfx *practice_grenade_cam_render(Gfx *gdl) {
   s32 i;
   s32 s;
@@ -284,12 +312,14 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
   struct PropRecord *saved_item_props[MAX_PIP_SLOTS];
   u8 saved_item_flags[MAX_PIP_SLOTS];
   bool saved_item_flags_valid[MAX_PIP_SLOTS];
-  rgba_u8 saved_item_shade;
-  bool saved_item_shade_valid;
   struct ObjectRecord *render_item;
   struct PropRecord *render_item_prop;
   u32 saved_render_item_flags2;
   bool render_item_valid;
+#if 0
+  rgba_u8 saved_item_shade;
+  bool saved_item_shade_valid;
+#endif
 
   // Saved player view/matrix state
   s16 saved_viewx;
@@ -444,6 +474,12 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
     if (!slot->active)
       continue;
 
+    // Re-rendering the scene consumes the same finite per-frame vertex pool as
+    // the main view. Never start another pass if it would use the engine's
+    // safety margin; effect renderers also stop allocating at this boundary.
+    if (dynGetFreeVtx() < PIP_DYN_VTX_RESERVE)
+      break;
+
     left = spacing + s * (PIP_SIZE + spacing);
 
     // 1. Clear Z-buffer inside scissor bounds
@@ -561,6 +597,7 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
       render_item->flags2 |= PROPFLAG2_04000000;
     }
 
+    g_IsRenderingGrenadeCam = TRUE;
     prepare_pip_props();
 
     if (render_item_valid) {
@@ -575,6 +612,7 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
         render_item_valid && render_item->prop == render_item_prop &&
         (render_item_prop->flags & PROPFLAG_ONSCREEN) &&
         render_item->model != NULL && render_item->model->render_pos != NULL;
+#if 0
     if (render_item_valid) {
       enlarge_item_render_model(render_item);
     }
@@ -587,6 +625,7 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
       render_item->shadecol.b = 0;
       render_item->shadecol.a = 0x80;
     }
+#endif
 
     gdl = bgLevelRender_practice(gdl);
     gdl = sub_GAME_7F049B58(gdl);
@@ -597,10 +636,13 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
 #endif
     gdl = sub_GAME_7F0A2C44(gdl);
     gdl = explosionRenderFlyingParticles(gdl);
+    g_IsRenderingGrenadeCam = FALSE;
 
+#if 0
     if (saved_item_shade_valid) {
       render_item->shadecol = saved_item_shade;
     }
+#endif
 
     for (i = 0; i < MAX_PIP_SLOTS; i++) {
       if (saved_item_flags_valid[i] && g_PipSlots[i].item_obj != NULL &&
@@ -609,8 +651,8 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
       }
     }
 
-    // 5. Draw an open red sight around the enlarged item, then a white slot
-    // border. Keeping the centre clear avoids covering small models.
+    // 5. Mark the tracked item's screen position with a small red crosshair,
+    // then draw a white slot border.
     gDPPipeSync(gdl++);
     gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
     gDPSetCycleType(gdl++, G_CYC_FILL);
@@ -618,20 +660,12 @@ Gfx *practice_grenade_cam_render(Gfx *gdl) {
     gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, left + PIP_SIZE,
                   top + PIP_SIZE);
 
-    // marker_x = left + PIP_SIZE / 2;
-    // marker_y = top + PIP_SIZE / 2;
-    // gDPFillRectangle(gdl++, marker_x - PIP_MARKER_RADIUS,
-    //                  marker_y - PIP_MARKER_RADIUS, marker_x +
-    //                  PIP_MARKER_RADIUS, marker_y - PIP_MARKER_RADIUS);
-    // gDPFillRectangle(gdl++, marker_x - PIP_MARKER_RADIUS,
-    //                  marker_y + PIP_MARKER_RADIUS, marker_x +
-    //                  PIP_MARKER_RADIUS, marker_y + PIP_MARKER_RADIUS);
-    // gDPFillRectangle(gdl++, marker_x - PIP_MARKER_RADIUS,
-    //                  marker_y - PIP_MARKER_RADIUS, marker_x -
-    //                  PIP_MARKER_RADIUS, marker_y + PIP_MARKER_RADIUS);
-    // gDPFillRectangle(gdl++, marker_x + PIP_MARKER_RADIUS,
-    //                  marker_y - PIP_MARKER_RADIUS, marker_x +
-    //                  PIP_MARKER_RADIUS, marker_y + PIP_MARKER_RADIUS);
+    marker_x = left + PIP_SIZE / 2;
+    marker_y = top + PIP_SIZE / 2;
+    gDPFillRectangle(gdl++, marker_x - PIP_CROSSHAIR_RADIUS, marker_y,
+                     marker_x + PIP_CROSSHAIR_RADIUS, marker_y);
+    gDPFillRectangle(gdl++, marker_x, marker_y - PIP_CROSSHAIR_RADIUS, marker_x,
+                     marker_y + PIP_CROSSHAIR_RADIUS);
 
     gDPSetFillColor(gdl++, 0xFFFFFFFF);
     gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, screen_w, viGetY());
