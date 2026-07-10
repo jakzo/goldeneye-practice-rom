@@ -46,15 +46,11 @@ typedef struct ReplayDmaWriter {
 } ReplayDmaWriter;
 
 typedef struct ReplayDmaReader {
+  /* Keep state beyond both writer DMA buffers while sharing the stream union. */
   u8 buffers[2][REPLAY_DMA_BUFFER_SIZE];
-  OSMesgQueue queue;
-  OSMesg message;
-  OSIoMesg io;
   u32 current_page_offset;
   u32 total_size;
   u32 position;
-  s32 current_buffer;
-  s32 next_state; /* 0 = unavailable, 1 = DMA pending, 2 = ready */
   s32 failed;
 } ReplayDmaReader;
 
@@ -235,59 +231,29 @@ static void writer_finish(ReplayDmaWriter *writer) {
   writer_wait(writer);
 }
 
-static void reader_start_next(ReplayDmaReader *reader) {
-  u32 next_offset = reader->current_page_offset + REPLAY_DMA_BUFFER_SIZE;
-  s32 next_buffer = reader->current_buffer ^ 1;
-
-  reader->next_state = 0;
-  if (next_offset >= SAVE_STATE_SRAM_OFFSET + reader->total_size)
-    return;
-
-  if (sram_start_dma(OS_READ, next_offset, reader->buffers[next_buffer],
-                     REPLAY_DMA_BUFFER_SIZE, &reader->io,
-                     &reader->queue) == 0) {
-    reader->next_state = 1;
-  } else if (sram_read(next_offset, reader->buffers[next_buffer],
-                       REPLAY_DMA_BUFFER_SIZE) == 0) {
-    reader->next_state = 2;
-  } else {
-    reader->failed = TRUE;
-  }
-}
-
 static void reader_init(ReplayDmaReader *reader, u32 total_size) {
   bzero(reader, sizeof(*reader));
-  osCreateMesgQueue(&reader->queue, &reader->message, 1);
   reader->current_page_offset = SAVE_STATE_SRAM_OFFSET;
   reader->total_size = total_size;
   reader->position = sizeof(ReplayHeader);
   if (sram_read(reader->current_page_offset, reader->buffers[0],
                 REPLAY_DMA_BUFFER_SIZE) != 0) {
     reader->failed = TRUE;
-    return;
   }
-  reader_start_next(reader);
 }
 
 static void reader_advance_page(ReplayDmaReader *reader) {
-  if (reader->next_state == 1)
-    osRecvMesg(&reader->queue, NULL, OS_MESG_BLOCK);
-  else if (reader->next_state == 0) {
+  u32 next_offset = reader->current_page_offset + REPLAY_DMA_BUFFER_SIZE;
+
+  if (next_offset >= SAVE_STATE_SRAM_OFFSET + reader->total_size ||
+      sram_read(next_offset, reader->buffers[0],
+                REPLAY_DMA_BUFFER_SIZE) != 0) {
     reader->failed = TRUE;
     return;
   }
 
-  reader->current_buffer ^= 1;
-  reader->current_page_offset += REPLAY_DMA_BUFFER_SIZE;
+  reader->current_page_offset = next_offset;
   reader->position = 0;
-  reader_start_next(reader);
-}
-
-static void reader_finish(ReplayDmaReader *reader) {
-  if (reader->next_state == 1) {
-    osRecvMesg(&reader->queue, NULL, OS_MESG_BLOCK);
-    reader->next_state = 2;
-  }
 }
 
 static void reader_read(ReplayDmaReader *reader, void *dst, u32 size) {
@@ -304,8 +270,7 @@ static void reader_read(ReplayDmaReader *reader, void *dst, u32 size) {
   while (size > 0 && !reader->failed) {
     u32 available = REPLAY_DMA_BUFFER_SIZE - reader->position;
     u32 chunk = size < available ? size : available;
-    memcpy(bytes, &reader->buffers[reader->current_buffer][reader->position],
-           chunk);
+    memcpy(bytes, &reader->buffers[0][reader->position], chunk);
     reader->position += chunk;
     bytes += chunk;
     size -= chunk;
@@ -578,7 +543,6 @@ void practice_replay_stop_playback(void) {
 
   if (!g_ReplayIsPlaying)
     return;
-  reader_finish(&g_ReplayDma.reader);
   g_ReplayIsPlaying = FALSE;
   g_PlaybackFrameLoaded = FALSE;
   joySetPlaybackFunc(NULL, -1);
