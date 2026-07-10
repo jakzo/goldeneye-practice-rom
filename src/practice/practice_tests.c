@@ -391,7 +391,7 @@ void practice_tests_tick() {
         emu_log("TEST_FAILED");
         break;
       }
-    } else if (after_frames(60)) {
+    } else if (after_frames(90)) {
       prop = get_prop_by_index(saved_plane_index);
       air = prop != NULL ? (AircraftRecord *)prop->obj : NULL;
       if (air == NULL || air->model == NULL) {

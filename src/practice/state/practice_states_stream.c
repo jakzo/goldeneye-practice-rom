@@ -41,6 +41,11 @@ static void sram_stream_write_bytes_impl(StateStream *stream, const void *src,
       sram_stream_flush_impl(stream);
       sram->current_page_addr += SRAM_PAGE_SIZE;
       sram->page_offset = 0;
+
+      // Load next page into memory in case we are doing a partial update
+      if (bytes_written < size && size - bytes_written < SRAM_PAGE_SIZE) {
+        sram_read(sram->current_page_addr, sram->page, SRAM_PAGE_SIZE);
+      }
     }
   }
 }
