@@ -23,10 +23,9 @@ TEST_COMPLETE = "TEST_COMPLETE"
 TEST_FAILED = "TEST_FAILED"
 WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
-TEST_TIMEOUT_SECONDS = 90
+DEFAULT_TEST_TIMEOUT_SECONDS = 90
 
 ROOT = Path(__file__).resolve().parent.parent
-ROM = ROOT / "build/u/ge007.u.z64"
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 PRINT_LOCK = threading.Lock()
@@ -82,6 +81,19 @@ def parse_args():
         choices=("dev", "release"),
         default="dev",
         help="build mode for the test ROM (default: dev)",
+    )
+    parser.add_argument(
+        "--version",
+        choices=("US", "EU", "JP"),
+        default="US",
+        help="ROM region version to build and test (default: US)",
+    )
+    parser.add_argument(
+        "--timeout",
+        type=positive_int,
+        default=DEFAULT_TEST_TIMEOUT_SECONDS,
+        metavar="SECONDS",
+        help=f"timeout for each test (default: {DEFAULT_TEST_TIMEOUT_SECONDS}s)",
     )
     parser.add_argument(
         "-j",
@@ -193,9 +205,9 @@ def emulator_command():
     return None
 
 
-def build_tests(build_mode):
+def build_tests(build_mode, version):
     jobs = available_cpu_count()
-    command = ["make", f"-j{jobs}"]
+    command = ["make", f"-j{jobs}", f"VERSION={version}"]
     if build_mode == "dev":
         command.append("DEV=1")
     with tempfile.TemporaryFile(mode="w+") as build_log:
@@ -266,7 +278,7 @@ def stop_emulator(process):
         process.wait()
 
 
-def run_test(test_case, command, rom, runtime_dir, stop_event):
+def run_test(test_case, command, rom, runtime_dir, stop_event, timeout):
     environment = os.environ.copy()
     environment["XDG_CONFIG_HOME"] = str(runtime_dir / "config")
     environment["XDG_DATA_HOME"] = str(runtime_dir / "data")
@@ -284,7 +296,7 @@ def run_test(test_case, command, rom, runtime_dir, stop_event):
         target=stream_output, args=(process, output_queue), daemon=True
     )
     output_thread.start()
-    deadline = time.monotonic() + TEST_TIMEOUT_SECONDS
+    deadline = time.monotonic() + timeout
     output = []
 
     try:
@@ -296,7 +308,7 @@ def run_test(test_case, command, rom, runtime_dir, stop_event):
             if remaining <= 0:
                 return (
                     False,
-                    f"timed out after {TEST_TIMEOUT_SECONDS}s",
+                    f"timed out after {timeout}s",
                     "".join(output),
                 )
 
@@ -393,11 +405,11 @@ def stop_video_capture(process):
             process.wait()
 
 
-def run_test_case(test_case, command, temp_dir, stop_event):
+def run_test_case(test_case, command, rom_path, temp_dir, stop_event, timeout):
     test_dir = temp_dir / test_case
     test_dir.mkdir()
-    rom = test_dir / ROM.name
-    shutil.copyfile(ROM, rom)
+    rom = test_dir / rom_path.name
+    shutil.copyfile(rom_path, rom)
 
     print_test_line(test_case, "=== patching ===")
     if not select_test(test_case, rom):
@@ -411,7 +423,7 @@ def run_test_case(test_case, command, temp_dir, stop_event):
     started_at = time.monotonic()
     try:
         passed, detail, output = run_test(
-            test_case, command, rom, test_dir, stop_event
+            test_case, command, rom, test_dir, stop_event, timeout
         )
     except OSError as error:
         passed = False
@@ -545,8 +557,11 @@ def main():
         return 1
 
     print("=== building test ROM ===", flush=True)
-    if not build_tests(args.build_mode):
+    if not build_tests(args.build_mode, args.version):
         return 1
+
+    country_code = {"US": "u", "EU": "e", "JP": "j"}[args.version]
+    rom_path = ROOT / f"build/{country_code}/ge007.{country_code}.z64"
 
     results_by_name = {}
     stop_event = threading.Event()
@@ -562,8 +577,10 @@ def main():
                             run_test_case,
                             test_case,
                             command,
+                            rom_path,
                             temp_dir,
                             stop_event,
+                            args.timeout,
                         ): test_case
                         for test_case in test_cases
                     }
