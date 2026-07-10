@@ -1,4 +1,4 @@
-#include "game/lvl.h"
+#include "boss.h"
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
@@ -64,9 +64,7 @@ bool practice_check_hotkeys(void) {
 
   if (jgbptf & START_BUTTON) {
     unpause();
-    // Crashes, I think it tries to allocate memory while the existing level has
-    // already allocated it all?
-    lvlStageLoad(g_CurrentStageToLoad);
+    bossSetLoadedStage(g_CurrentStageToLoad);
     practiceLogInfo("Level restarted");
     return TRUE;
   }

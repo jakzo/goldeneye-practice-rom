@@ -10,8 +10,10 @@
 #include "gun.h"
 #include "initanitable.h"
 #include "joy.h"
+#include "lvl.h"
 #include "objecthandler.h"
 #include "player.h"
+#include "practice_hotkeys.h"
 #include "practice_replay.h"
 #include "practice_timescale.h"
 #include "state/practice_states.h"
@@ -53,6 +55,7 @@ extern bool g_DebugLogsEnabled;
 #define STATE_CONTROL 14
 #define STATE_RUNWAY_PLANE 15
 #define REPLAY 16
+#define LEVEL_RESTART_HOTKEY 17
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -71,6 +74,8 @@ static s32 g_ReplayTestPhase;
 static s32 g_ReplayTestPlaybackSeen;
 static s32 g_ReplayTestPlaybackCount;
 static s32 g_ReplayTestInitialInvert;
+static s32 g_LevelRestartTestPhase;
+static s32 g_LevelRestartTimer;
 
 void practice_tests_set_case(s32 test_case) {
   g_practice_test_case = test_case;
@@ -83,6 +88,8 @@ void practice_tests_set_case(s32 test_case) {
   g_ReplayTestPlaybackSeen = FALSE;
   g_ReplayTestPlaybackCount = 0;
   g_ReplayTestInitialInvert = FALSE;
+  g_LevelRestartTestPhase = 0;
+  g_LevelRestartTimer = 0;
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
@@ -104,6 +111,7 @@ s32 practice_tests_boot_level(s32 test_case) {
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
   case REPLAY:
+  case LEVEL_RESTART_HOTKEY:
     return LEVELID_BUNKER1;
   case STATE_DAM:
     return LEVELID_DAM;
@@ -211,6 +219,32 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case LEVEL_RESTART_HOTKEY: {
+    if (g_LevelRestartTestPhase == 0 && after_frames(30)) {
+      bool handled;
+
+      emu_log("TRIGGER_LEVEL_RESTART_HOTKEY");
+      g_LevelRestartTimer = g_GlobalTimer;
+      g_LevelRestartTestPhase = 1;
+      g_SimulatedButtons = L_TRIG;
+      g_SimulatedButtonsPressed = START_BUTTON;
+      handled = practice_check_hotkeys();
+      g_SimulatedButtons = 0;
+      g_SimulatedButtonsPressed = 0;
+
+      if (!handled) {
+        emu_log("TEST_FAILED hotkey was not handled");
+      }
+    } else if (g_LevelRestartTestPhase == 1 &&
+               g_GlobalTimer < g_LevelRestartTimer) {
+      emu_log("LEVEL_RESTARTED timer=%d->%d", g_LevelRestartTimer,
+              g_GlobalTimer);
+      emu_log("TEST_COMPLETE");
+      g_LevelRestartTestPhase = 2;
+    }
+    break;
+  }
+
   case REPLAY: {
     if (g_ReplayTestPhase == 0) {
       switch (g_save_test_timer) {
