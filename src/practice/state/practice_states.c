@@ -1,6 +1,7 @@
 #include "practice_states.h"
-#include "../practice_sram.h"
+#include "../practice_replay.h"
 #include "../practice_sfx.h"
+#include "../practice_sram.h"
 #include "player.h"
 #include "practice_ui.h"
 #include <snd.h>
@@ -25,6 +26,10 @@ void save_game_state(void) {
 
   if (g_CurrentPlayer == NULL)
     return;
+
+  practice_replay_stop_recording();
+  practice_replay_stop_playback();
+  practice_replay_invalidate_saved();
 
   sram_stream_init_write(&stream, SAVE_STATE_SRAM_OFFSET);
 

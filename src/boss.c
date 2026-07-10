@@ -40,6 +40,7 @@
 #include "game/unk_0C0A70.h"
 #include "PR/R4300.h"
 #include "practice/practice_config.h"
+#include "practice/practice_replay.h"
 #include "practice/practice_unlock.h"
 #include "practice/state/practice_states.h"
 
@@ -173,6 +174,7 @@ void bossInitMainthreadData(void)
     joyInit();
 #ifdef PRACTICE_ROM
     init_save_state_system();
+    practice_replay_init();
     fileValidateSaves();
     practice_unlock_default_profile();
     practice_config_load();

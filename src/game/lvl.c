@@ -309,6 +309,9 @@ void lvlStageLoad(s32 stage)
     s32 i;
     struct player_data *player_data;
 
+#ifdef PRACTICE_ROM
+    practice_replay_before_stage_load(stage);
+#endif
     g_CurrentStageToLoad = stage;
 
     // this if block pushes where g_CurrentStageToLoad gets loaded to the

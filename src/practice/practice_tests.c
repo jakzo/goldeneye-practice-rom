@@ -1,6 +1,7 @@
 #include "practice_tests.h"
 #include "bg.h"
 #include "bondview.h"
+#include "boss.h"
 #include "chr.h"
 #include "chrai.h"
 #include "chrlv.h"
@@ -11,9 +12,11 @@
 #include "joy.h"
 #include "objecthandler.h"
 #include "player.h"
+#include "practice_replay.h"
 #include "practice_timescale.h"
 #include "state/practice_states.h"
 #include "state/practice_states_utils.h"
+#include "watch.h"
 #include <bondgame.h>
 #include <string.h>
 #include <ultra64.h>
@@ -49,6 +52,7 @@ extern bool g_DebugLogsEnabled;
 #define STATE_DESTROYED_PROP 13
 #define STATE_CONTROL 14
 #define STATE_RUNWAY_PLANE 15
+#define REPLAY 16
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -63,6 +67,10 @@ static s32 g_TestMoveCaseIndex = -1;
 static f32 g_TestMoveStartX;
 static f32 g_TestMoveStartZ;
 static s32 g_mission_timer_start;
+static s32 g_ReplayTestPhase;
+static s32 g_ReplayTestPlaybackSeen;
+static s32 g_ReplayTestPlaybackCount;
+static s32 g_ReplayTestInitialInvert;
 
 void practice_tests_set_case(s32 test_case) {
   g_practice_test_case = test_case;
@@ -71,6 +79,14 @@ void practice_tests_set_case(s32 test_case) {
   g_TestMoveCaseIndex = -1;
   g_TestMoveStartX = 0.0f;
   g_TestMoveStartZ = 0.0f;
+  g_ReplayTestPhase = 0;
+  g_ReplayTestPlaybackSeen = FALSE;
+  g_ReplayTestPlaybackCount = 0;
+  g_ReplayTestInitialInvert = FALSE;
+
+  if (test_case == REPLAY) {
+    practice_replay_request_seeded_recording();
+  }
 
   g_DebugLogsEnabled = test_case != 0;
 }
@@ -87,6 +103,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case CRASH:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
+  case REPLAY:
     return LEVELID_BUNKER1;
   case STATE_DAM:
     return LEVELID_DAM;
@@ -194,6 +211,90 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case REPLAY: {
+    if (g_ReplayTestPhase == 0) {
+      switch (g_save_test_timer) {
+      case 20:
+        emu_log("REPLAY_WALK");
+        g_ReplayTestInitialInvert = get_cur_player_look_vertical_inverted();
+        g_SimulatedButtons |= U_CBUTTONS;
+        break;
+      case 39:
+        set_cur_player_look_vertical_inverted(!g_ReplayTestInitialInvert);
+        g_ForcedDeltaFrames = 0;
+        break;
+      case 40:
+        g_SimulatedButtons &= ~U_CBUTTONS;
+        break;
+      case 60:
+        emu_log("REPLAY_OPEN_DOOR");
+        g_SimulatedButtons |= B_BUTTON;
+        break;
+      case 61:
+        g_SimulatedButtons &= ~B_BUTTON;
+        break;
+      case 81:
+      case 102:
+      case 123:
+        emu_log("REPLAY_SHOOT");
+        g_SimulatedButtons |= Z_TRIG;
+        break;
+      case 82:
+      case 103:
+      case 124:
+        g_SimulatedButtons &= ~Z_TRIG;
+        break;
+      case 139:
+        set_cur_player_look_vertical_inverted(g_ReplayTestInitialInvert);
+        g_ForcedDeltaFrames = 0;
+        break;
+      case 184:
+        emu_log("REPLAY_RESTART");
+        g_SimulatedButtons = 0;
+        g_SimulatedStickX = 0;
+        g_SimulatedStickY = 0;
+        g_SimulatedStickEnabled = FALSE;
+        practice_replay_stop_recording();
+        set_cur_player_look_vertical_inverted(!g_ReplayTestInitialInvert);
+        practice_replay_request_playback();
+        g_ReplayTestPhase = 1;
+        bossSetLoadedStage(LEVELID_BUNKER1);
+        break;
+      }
+    } else if (g_ReplayTestPhase == 1) {
+      if (g_ReplayIsPlaying) {
+        g_ReplayTestPlaybackSeen = TRUE;
+      } else if (g_ReplayTestPlaybackSeen) {
+        g_ReplayTestPlaybackCount++;
+        if (practice_replay_had_divergence()) {
+          emu_log("REPLAY_DIVERGED playback=%d", g_ReplayTestPlaybackCount);
+          emu_log("TEST_FAILED");
+        } else if (practice_replay_get_timestamp() !=
+                   practice_replay_get_duration()) {
+          emu_log("REPLAY_TIMESTAMP_MISMATCH playback=%d timestamp=%d "
+                  "duration=%d",
+                  g_ReplayTestPlaybackCount, practice_replay_get_timestamp(),
+                  practice_replay_get_duration());
+          emu_log("TEST_FAILED");
+        } else if (get_cur_player_look_vertical_inverted() !=
+                   g_ReplayTestInitialInvert) {
+          emu_log("REPLAY_OPTIONS_NOT_RESTORED playback=%d",
+                  g_ReplayTestPlaybackCount);
+          emu_log("TEST_FAILED");
+        } else if (g_ReplayTestPlaybackCount < 3) {
+          emu_log("REPLAY_RESTART playback=%d", g_ReplayTestPlaybackCount + 1);
+          g_ReplayTestPlaybackSeen = FALSE;
+          practice_replay_request_playback();
+          bossSetLoadedStage(LEVELID_BUNKER1);
+        } else {
+          emu_log("TEST_COMPLETE");
+          g_ReplayTestPhase = 2;
+        }
+      }
+    }
+    break;
+  }
+
   case STATE_RUNWAY_PLANE: {
     static s16 saved_plane_index;
     static s16 saved_key_index;

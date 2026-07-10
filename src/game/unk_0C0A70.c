@@ -2,6 +2,7 @@
 #include "unk_0C0A70.h"
 #include "practice/practice_timescale.h"
 #include "practice/practice_tests.h"
+#include "practice/practice_replay.h"
 
 // data
 s32 lastFrameCounter = -1;
@@ -65,8 +66,10 @@ void updateFrameCounters(s32 deltaFrames)
         deltaFrames = g_ForcedDeltaFrames;
         g_ForcedDeltaFrames = -1;
     }
+    deltaFrames = practice_replay_override_delta(deltaFrames);
     g_TimeScaleDeltaFrames = deltaFrames;
     restore_rng_if_frame_dropped();
+    practice_replay_on_frame_start();
 #endif
 
     lastFrameCounter = currentFrameCounter;
@@ -128,7 +131,6 @@ void eu_sub_7f0c00a4(void)
   
 }
 #endif
-
 
 
 

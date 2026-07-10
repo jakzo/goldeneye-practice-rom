@@ -69,6 +69,12 @@ These features have some minor bugs or limitations but should be usable:
         - If you can reliably reproduce the crash, let me know so I can fix it (@jakzo on Discord)
     - "Why don't things play out the exact same way when I load state then leave the game alone?"
         - The game doesn't run with the **exact** same performance each time after restoring state and this causes the random number generator to become out of sync which means anything using randomness in the game (everything from visuals to collisions) will diverge
+- **Replays**
+    - On a level's briefing screen, set `Replay next level` to `Record` to record the next attempt
+    - After a recording exists for that level, set it to `Playback` to replay the saved inputs, frame timing, control option changes, and initial random seeds
+    - Press any button other than the configured practice hotkey trigger to cancel playback and resume normal control
+    - Replays and save states use the same SRAM space, so saving either one overwrites the other and only one replay can be saved at a time
+    - 2.x control styles are not currently supported
 - **Grenade camera**
     - When throwing most projectiles, shows a picture-in-picture view that follows it so you can see where it landed
 

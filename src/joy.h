@@ -42,6 +42,9 @@ void joySetContDataIndex(s32 index);
 #ifdef PRACTICE_ROM
 extern u16 g_SimulatedButtons;
 extern u16 g_SimulatedButtonsPressed;
+extern s8 g_SimulatedStickX;
+extern s8 g_SimulatedStickY;
+extern s32 g_SimulatedStickEnabled;
 void joyUpdateSimulatedButtons(void);
 #endif
 

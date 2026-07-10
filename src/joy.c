@@ -783,6 +783,12 @@ s8 joyGetStickX(s8 contpadnum)
         return 0;
     }
 
+#ifdef PRACTICE_ROM
+    if (contpadnum == 0 && g_SimulatedStickEnabled)
+    {
+        return g_SimulatedStickX;
+    }
+#endif
     return g_ContDataPtr->samples[g_ContDataPtr->curlast].pads[contpadnum].stick_x;
 }
 //duplicate?
@@ -805,6 +811,12 @@ s8 joyGetStickY(s8 contpadnum)
         return 0;
     }
 
+#ifdef PRACTICE_ROM
+    if (contpadnum == 0 && g_SimulatedStickEnabled)
+    {
+        return g_SimulatedStickY;
+    }
+#endif
     return g_ContDataPtr->samples[g_ContDataPtr->curlast].pads[contpadnum].stick_y;
 }
 
@@ -822,6 +834,9 @@ s8 joy7000C284(s8 contpadnum)
 #ifdef PRACTICE_ROM
 u16 g_SimulatedButtons = 0;
 u16 g_SimulatedButtonsPressed = 0;
+s8 g_SimulatedStickX = 0;
+s8 g_SimulatedStickY = 0;
+s32 g_SimulatedStickEnabled = FALSE;
 static u16 g_PrevSimulatedButtons = 0;
 
 void joyUpdateSimulatedButtons(void) {

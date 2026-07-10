@@ -1,6 +1,7 @@
 #include "practice/practice_config.h"
 #include "emu_log.h"
 #include "front.h"
+#include "practice_replay.h"
 #include "practice_splits.h"
 #include "practice_sram.h"
 #include "practice_tests.h"
@@ -15,20 +16,22 @@
 // Config storage is append-only. Add new fields to the end of PracticeConfig.
 // Never delete or reorder fields; rename unused fields to deprecated_*.
 struct PracticeConfig practice = {
-    TRUE,          // skip_logos_on_startup
-    TRUE,          // left_trigger_hotkeys
-    LEVELID_TITLE, // boot_level
-    FALSE,         // disable_intro_cutscenes
-    5.0f,          // log_message_duration
-    TRUE,          // show_hundredths_on_timer
-    TRUE,          // show_mission_timer
-    TRUE,          // grenade_cam
-    TRUE,          // splits_enabled
-    TRUE,          // gate_guard_status
-    FALSE,         // dam_gate_intro_enabled
-    FALSE,         // log_splits
-    FALSE,         // speedometer_enabled
-    TRUE,          // lag_estimate_enabled
+    TRUE,                     // skip_logos_on_startup
+    TRUE,                     // left_trigger_hotkeys
+    LEVELID_TITLE,            // boot_level
+    FALSE,                    // disable_intro_cutscenes
+    5.0f,                     // log_message_duration
+    TRUE,                     // show_hundredths_on_timer
+    TRUE,                     // show_mission_timer
+    TRUE,                     // grenade_cam
+    TRUE,                     // splits_enabled
+    TRUE,                     // gate_guard_status
+    FALSE,                    // dam_gate_intro_enabled
+    FALSE,                    // log_splits
+    FALSE,                    // speedometer_enabled
+    TRUE,                     // lag_estimate_enabled
+    PRACTICE_REPLAY_DISABLED, // replay_mode
+    FALSE,                    // record_replay_seeds
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -48,7 +51,7 @@ struct PracticeConfig practice = {
 #define SETTINGS_SCROLLBAR_MIN_THUMB_HEIGHT 6
 #define SETTINGS_SCROLLBAR_HALF_WIDTH (SETTINGS_SCROLLBAR_WIDTH / 2)
 #define SETTINGS_SCROLLBAR_COLOR 0x00000055
-#define MAX_OPTION_COLUMNS 2
+#define MAX_OPTION_COLUMNS 3
 #define SLIDER_REPEAT_DELAY 15
 #define SLIDER_REPEAT_RATE 1
 #define CONFIG_MAGIC 0x47434647 /* "GCFG" */
@@ -174,6 +177,28 @@ static s32 boot_level_options(s32 stage_id, s32 option_index,
   return FALSE;
 }
 
+static s32 replay_mode_options(s32 stage_id, s32 option_index,
+                               const char **option_name, s32 *option_value) {
+  switch (option_index) {
+  case 0:
+    *option_name = "Disabled";
+    *option_value = PRACTICE_REPLAY_DISABLED;
+    return TRUE;
+  case 1:
+    *option_name = "Record";
+    *option_value = PRACTICE_REPLAY_RECORD;
+    return TRUE;
+  case 2:
+    if (!practice_replay_can_play(stage_id)) {
+      return FALSE;
+    }
+    *option_name = "Playback";
+    *option_value = PRACTICE_REPLAY_PLAYBACK;
+    return TRUE;
+  }
+  return FALSE;
+}
+
 static const struct PracticeSetting s_level_settings[] = {
     OPTIONS_SETTING("Gate guard status", gate_guard_status, s_enabled_disabled,
                     dam_apply),
@@ -184,6 +209,12 @@ static const struct PracticeSetting s_level_settings[] = {
 };
 
 static const struct PracticeSetting s_global_settings[] = {
+    DYNAMIC_OPTIONS_SETTING("Replay next level", replay_mode,
+                            replay_mode_options),
+#if DEV
+    OPTIONS_SETTING("Record replay seeds", record_replay_seeds,
+                    s_disabled_enabled, NULL),
+#endif
     OPTIONS_SETTING("Grenade cam", grenade_cam, s_disabled_enabled, NULL),
     OPTIONS_SETTING("Log on split", log_splits, s_disabled_enabled, NULL),
     SLIDER_SETTING("Log message duration", log_message_duration, 0.1f, 20.0f,
@@ -237,7 +268,7 @@ static u32 config_checksum(const void *data, u32 size) {
   return checksum;
 }
 
-static void save_config(void) {
+void practice_config_save() {
   struct StoredPracticeConfig stored;
 
   stored.magic = CONFIG_MAGIC;
@@ -496,7 +527,7 @@ void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
 
   if (!is_objectives_page) {
     if (s_config_dirty) {
-      save_config();
+      practice_config_save();
     }
     s_slider_hold_frames = 0;
     s_slider_hold_button = 0;
@@ -504,6 +535,11 @@ void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
   }
 
   if (stage_id != s_last_stage) {
+    if (practice.replay_mode == PRACTICE_REPLAY_PLAYBACK &&
+        !practice_replay_can_play(stage_id)) {
+      practice.replay_mode = PRACTICE_REPLAY_DISABLED;
+      s_config_dirty = TRUE;
+    }
     s_focused_visible_setting = 0;
     s_scroll_offset = 0;
     s_last_stage = stage_id;
@@ -547,7 +583,7 @@ void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
         visible_setting(s_focused_visible_setting, stage_id);
     change_setting(direction, stage_id);
     if (setting->type != PRACTICE_SETTING_FLOAT_SLIDER && s_config_dirty) {
-      save_config();
+      practice_config_save();
     }
     s_slider_hold_button = direction_button;
     s_slider_hold_frames = 0;
@@ -566,7 +602,7 @@ void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
     }
   } else {
     if (s_config_dirty) {
-      save_config();
+      practice_config_save();
     }
     s_slider_hold_frames = 0;
     s_slider_hold_button = 0;

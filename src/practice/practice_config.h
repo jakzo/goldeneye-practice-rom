@@ -42,11 +42,14 @@ struct PracticeConfig {
   s32 log_splits;
   s32 speedometer_enabled;
   s32 lag_estimate_enabled;
+  s32 replay_mode;
+  s32 record_replay_seeds;
 };
 
 extern struct PracticeConfig practice;
 
 void practice_config_load(void);
+void practice_config_save(void);
 void practice_config_menu_reset(void);
 void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page);
 s32 practice_config_menu_scroll_offset(void);
