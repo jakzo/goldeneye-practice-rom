@@ -1,5 +1,42 @@
 ### Unreleased
 
+# 0.6.0
+
+## Replays
+
+- Added deterministic input recording and playback, including frame timing, control-option changes and initial random seeds
+- Added replay controls to the level briefing settings; playback can be cancelled by pressing a normal controller button
+- Fixed replay desynchronization, replay cancellation and restoration of controller state after playback
+- Replays share SRAM storage with save states, so recording or saving one overwrites the other; 2.x control styles are not yet supported
+
+## Lag analysis
+
+- Added an optional in-level lag estimate showing dropped frames and their estimated effect on movement speed
+- Added a mission-end summary estimating how much time was lost to lag while diagonal-strafing
+- Added frame-counting and drift-analysis tools used to calibrate the lag estimates against measured runs
+
+## Save states
+
+- Save states now restore mines, tinted glass, bullet casings, embedded objects, deformed object vertices, shot lights and their glass shards, and Runway's plane animation
+- Fixed crashes caused by stale room-to-prop registrations after loading, including loads from level-ending cutscenes
+- Fixed state loading in production builds
+
+## Grenade camera
+
+- Increased the number of simultaneous projectile views from two to three
+- Improved projectile tracking and camera framing, with a crosshair to make small items easier to locate
+- Fixed explosion and smoke corruption, rendering-pool exhaustion, cameras lingering on stuck items, and stale camera state after loading a save state
+
+## Interface and controls
+
+- Improved the briefing settings layout and shortened option labels to prevent overlap
+- Fixed the level-restart hotkey
+
+## Stability and development
+
+- Added a crash handler that reports diagnostic information when practice tests fail
+- Parallelized emulator tests and improved replay, save-state and lag regression coverage
+
 # 0.5.0
 
 ## Practice tools and settings
