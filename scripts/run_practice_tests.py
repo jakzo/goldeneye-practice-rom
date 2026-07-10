@@ -83,6 +83,11 @@ def parse_args():
         help="build mode for the test ROM (default: dev)",
     )
     parser.add_argument(
+        "--skip-build",
+        action="store_true",
+        help="use an existing test ROM instead of building it",
+    )
+    parser.add_argument(
         "--version",
         choices=("US", "EU", "JP"),
         default="US",
@@ -556,12 +561,16 @@ def main():
         )
         return 1
 
-    print("=== building test ROM ===", flush=True)
-    if not build_tests(args.build_mode, args.version):
-        return 1
-
     country_code = {"US": "u", "EU": "e", "JP": "j"}[args.version]
     rom_path = ROOT / f"build/{country_code}/ge007.{country_code}.z64"
+    if args.skip_build:
+        if not rom_path.is_file():
+            print(f"error: test ROM does not exist: {rom_path}", file=sys.stderr)
+            return 1
+    else:
+        print("=== building test ROM ===", flush=True)
+        if not build_tests(args.build_mode, args.version):
+            return 1
 
     results_by_name = {}
     stop_event = threading.Event()

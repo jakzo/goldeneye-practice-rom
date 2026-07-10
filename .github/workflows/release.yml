@@ -27,7 +27,6 @@ jobs:
       prerelease: ${{ steps.release.outputs.prerelease }}
       make_latest: ${{ steps.release.outputs.make_latest }}
       file_prefix: ${{ steps.release.outputs.file_prefix }}
-      build_matrix: ${{ steps.release.outputs.build_matrix }}
       body: ${{ steps.release.outputs.body }}
 
     steps:
@@ -43,7 +42,6 @@ jobs:
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "make_latest=false" >> "$GITHUB_OUTPUT"
             echo "file_prefix=goldeneye_practice_rom_build_${{ github.run_number }}" >> "$GITHUB_OUTPUT"
-            echo 'build_matrix=[{"name":"Release","slug":"release","dev":0},{"name":"Debug","slug":"debug","dev":1}]' >> "$GITHUB_OUTPUT"
           else
             first_entry=$(awk '/^# /{if(found) exit; found=1} found{print}' CHANGELOG.md)
             version=$(echo "$first_entry" | head -n1 | sed 's/^# //')
@@ -53,11 +51,6 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             echo "make_latest=true" >> "$GITHUB_OUTPUT"
             echo "file_prefix=goldeneye_practice_rom_v$version" >> "$GITHUB_OUTPUT"
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              echo 'build_matrix=[{"name":"Release","slug":"release","dev":0},{"name":"Debug","slug":"debug","dev":1}]' >> "$GITHUB_OUTPUT"
-            else
-              echo 'build_matrix=[{"name":"Release","slug":"release","dev":0}]' >> "$GITHUB_OUTPUT"
-            fi
             echo "body<<EOF" >> "$GITHUB_OUTPUT"
             echo "$body" >> "$GITHUB_OUTPUT"
             echo "" >> "$GITHUB_OUTPUT"
@@ -118,127 +111,9 @@ jobs:
           cmake --build /tmp/ares-build --parallel 2
           cmake --install /tmp/ares-build
 
-  test:
-    needs: ares
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        build:
-          - name: Release
-            mode: release
-          - name: Debug
-            mode: dev
-        region:
-          - name: US
-            version: US
-            code: u
-            slug: us
-            secret: BASE_ROM_US_DOWNLOAD_LINK
-          - name: PAL
-            version: EU
-            code: e
-            slug: pal
-            secret: BASE_ROM_EU_DOWNLOAD_LINK
-          - name: JP
-            version: JP
-            code: j
-            slug: jp
-            secret: BASE_ROM_JP_DOWNLOAD_LINK
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download base ROMs
-        env:
-          BASE_ROM_US_URL: ${{ secrets.BASE_ROM_US_DOWNLOAD_LINK }}
-          TARGET_BASE_ROM_URL: ${{ secrets[matrix.region.secret] }}
-          TARGET_BASE_ROM: baserom.${{ matrix.region.code }}.z64
-        run: |
-          if [ -z "$BASE_ROM_US_URL" ]; then
-            echo "::error::BASE_ROM_US_DOWNLOAD_LINK is required."
-            exit 1
-          fi
-          if [ -z "$TARGET_BASE_ROM_URL" ]; then
-            echo "::error::${{ matrix.region.secret }} is required."
-            exit 1
-          fi
-          curl --fail --location --retry 3 --output baserom.u.z64 "$BASE_ROM_US_URL"
-          if [ "$TARGET_BASE_ROM" != "baserom.u.z64" ]; then
-            curl --fail --location --retry 3 --output "$TARGET_BASE_ROM" "$TARGET_BASE_ROM_URL"
-          fi
-          test "$(stat --format=%s baserom.u.z64)" -ge 1000000
-          test "$(stat --format=%s "$TARGET_BASE_ROM")" -ge 1000000
-          sha256sum baserom.u.z64 "$TARGET_BASE_ROM"
-
-      - name: Extract assets
-        env:
-          REGION_CODE: ${{ matrix.region.code }}
-        run: |
-          ./scripts/extract_baserom.u.sh
-          if [ "$REGION_CODE" = "e" ]; then
-            ./scripts/extract_diff.e.sh
-          elif [ "$REGION_CODE" = "j" ]; then
-            ./scripts/extract_diff.j.sh
-          fi
-
-      - name: Install build dependencies
-        run: |
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            binutils-mips-linux-gnu \
-            build-essential \
-            g++-mips-linux-gnu \
-            gcc-mips-linux-gnu \
-            ffmpeg \
-            libcanberra-gtk3-module \
-            libcapstone-dev \
-            libgl-dev \
-            libgtk-3-dev \
-            mesa-vulkan-drivers \
-            xauth \
-            xvfb
-
-      - name: Restore ares cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ${{ env.ARES_PREFIX }}
-          key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
-          fail-on-cache-miss: true
-
-      - name: Run practice tests (${{ matrix.build.name }}, ${{ matrix.region.name }})
-        env:
-          ARES: ${{ env.ARES_PREFIX }}/bin/ares
-          ARES_ARGS: >-
-            --fullscreen
-            --no-file-prompt
-            --setting Audio/Driver=None
-            --setting Input/Driver=None
-          XDG_CONFIG_HOME: /tmp/ares-config
-          XDG_DATA_HOME: /tmp/ares-data
-          PRACTICE_TEST_VIDEO_DIR: ${{ runner.temp }}/practice-test-artifacts/videos
-          PRACTICE_TEST_VIDEO_SIZE: 640x480
-          SUMMARY_FILE: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
-        run: |
-          printf '# Practice ROM tests — %s / %s\n\n' '${{ matrix.build.name }}' '${{ matrix.region.name }}' >> "$GITHUB_STEP_SUMMARY"
-          set +e
-          xvfb-run --auto-servernum \
-            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
-            ./scripts/run_practice_tests.py \
-              --build-mode "${{ matrix.build.mode }}" \
-              --version "${{ matrix.region.version }}" \
-              --timeout 120 \
-              --jobs 1 \
-              --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
-          test_status=$?
-          cp "$GITHUB_STEP_SUMMARY" "$SUMMARY_FILE"
-          exit "$test_status"
-
       - name: Upload test result summary
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
@@ -246,7 +121,7 @@ jobs:
 
       - name: Upload failed test artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: practice-test-failures-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/practice-test-artifacts
@@ -259,7 +134,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        build: ${{ fromJSON(needs.metadata.outputs.build_matrix) }}
+        build:
+          - name: Release
+            slug: release
+            dev: 0
+          - name: Debug
+            slug: debug
+            dev: 1
         region:
           - name: US
             version: US
@@ -347,11 +228,104 @@ jobs:
           ls -lh "$PATCH_FILE"
 
       - name: Upload patch artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: goldeneye-practice-rom-patch-${{ matrix.build.slug }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
           path: ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.slug }}.xdelta
           if-no-files-found: error
+
+      - name: Upload test ROM artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: goldeneye-practice-rom-test-rom-${{ matrix.build.slug }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.z64
+          if-no-files-found: error
+
+  test:
+    needs:
+      - ares
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - name: Release
+            mode: release
+            slug: release
+          - name: Debug
+            mode: dev
+            slug: debug
+        region:
+          - name: US
+            version: US
+            slug: us
+          - name: PAL
+            version: EU
+            slug: pal
+          - name: JP
+            version: JP
+            slug: jp
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            ffmpeg \
+            libcanberra-gtk3-module \
+            libcapstone-dev \
+            libgl-dev \
+            libgtk-3-dev \
+            mesa-vulkan-drivers \
+            xauth \
+            xvfb
+
+      - name: Download built ROM
+        uses: actions/download-artifact@v6
+        with:
+          name: goldeneye-practice-rom-test-rom-${{ matrix.build.slug }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: build/${{ matrix.region.code }}
+
+      - name: Restore ares cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.ARES_PREFIX }}
+          key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
+          fail-on-cache-miss: true
+
+      - name: Run practice tests (${{ matrix.build.name }}, ${{ matrix.region.name }})
+        env:
+          ARES: ${{ env.ARES_PREFIX }}/bin/ares
+          ARES_ARGS: >-
+            --fullscreen
+            --no-file-prompt
+            --setting Audio/Driver=None
+            --setting Input/Driver=None
+          XDG_CONFIG_HOME: /tmp/ares-config
+          XDG_DATA_HOME: /tmp/ares-data
+          PRACTICE_TEST_VIDEO_DIR: ${{ runner.temp }}/practice-test-artifacts/videos
+          PRACTICE_TEST_VIDEO_SIZE: 640x480
+          SUMMARY_FILE: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
+        run: |
+          printf '# Practice ROM tests — %s / %s\n\n' '${{ matrix.build.name }}' '${{ matrix.region.name }}' >> "$GITHUB_STEP_SUMMARY"
+          set +e
+          xvfb-run --auto-servernum \
+            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
+            ./scripts/run_practice_tests.py \
+              --skip-build \
+              --build-mode "${{ matrix.build.mode }}" \
+              --version "${{ matrix.region.version }}" \
+              --timeout 120 \
+              --jobs 1 \
+              --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
+          test_status=$?
+          cp "$GITHUB_STEP_SUMMARY" "$SUMMARY_FILE"
+          exit "$test_status"
 
   release:
     needs:
@@ -369,16 +343,25 @@ jobs:
       contents: write
 
     steps:
-      - name: Download patches
-        uses: actions/download-artifact@v4
+      - name: Download prerelease patches
+        if: needs.metadata.outputs.prerelease == 'true'
+        uses: actions/download-artifact@v8
         with:
           pattern: goldeneye-practice-rom-patch-*-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release
           merge-multiple: true
 
+      - name: Download stable release patches
+        if: needs.metadata.outputs.prerelease != 'true'
+        uses: actions/download-artifact@v8
+        with:
+          pattern: goldeneye-practice-rom-patch-release-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release
+          merge-multiple: true
+
       - name: Download test result summaries
         if: needs.metadata.outputs.prerelease == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: practice-test-summary-*-${{ github.run_attempt }}
           path: ${{ runner.temp }}/summaries
