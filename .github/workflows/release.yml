@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Determine release metadata
         id: release
@@ -64,7 +64,7 @@ jobs:
     steps:
       - name: Cache ares
         id: cache-ares
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.ARES_PREFIX }}
           key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
@@ -111,23 +111,6 @@ jobs:
           cmake --build /tmp/ares-build --parallel 2
           cmake --install /tmp/ares-build
 
-      - name: Upload test result summary
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
-          if-no-files-found: warn
-
-      - name: Upload failed test artifacts
-        if: failure()
-        uses: actions/upload-artifact@v6
-        with:
-          name: practice-test-failures-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/practice-test-artifacts
-          if-no-files-found: warn
-          compression-level: 0
-
   build:
     needs: metadata
     runs-on: ubuntu-latest
@@ -160,7 +143,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install dependencies
         run: |
@@ -270,7 +253,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install test dependencies
         run: |
@@ -292,7 +275,7 @@ jobs:
           path: build/${{ matrix.region.code }}
 
       - name: Restore ares cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.ARES_PREFIX }}
           key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
@@ -326,6 +309,23 @@ jobs:
           test_status=$?
           cp "$GITHUB_STEP_SUMMARY" "$SUMMARY_FILE"
           exit "$test_status"
+
+      - name: Upload test result summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
+          if-no-files-found: warn
+
+      - name: Upload failed test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: practice-test-failures-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/practice-test-artifacts
+          if-no-files-found: warn
+          compression-level: 0
 
   release:
     needs:
