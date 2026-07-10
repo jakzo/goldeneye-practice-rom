@@ -8,9 +8,126 @@ on:
       - "*.md"
       - ".github/**"
       - ".gitignore"
+  pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  ARES_VERSION: v148
+  ARES_PREFIX: ${{ github.workspace }}/.cache/ares-v148
+
 jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check base ROM secret
+        env:
+          BASE_ROM_URL: ${{ secrets.BASE_ROM_US_DOWNLOAD_LINK }}
+        run: |
+          if [ -z "$BASE_ROM_URL" ]; then
+            echo "::error::BASE_ROM_US_DOWNLOAD_LINK is required to build the test ROM."
+            exit 1
+          fi
+
+      - name: Download US base ROM
+        env:
+          BASE_ROM_URL: ${{ secrets.BASE_ROM_US_DOWNLOAD_LINK }}
+        run: |
+          curl --fail --location --retry 3 \
+            --output baserom.u.z64 "$BASE_ROM_URL"
+          test "$(stat --format=%s baserom.u.z64)" -ge 1000000
+
+      - name: Extract US assets
+        run: ./scripts/extract_baserom.u.sh
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            binutils-mips-linux-gnu \
+            build-essential \
+            cmake \
+            g++-mips-linux-gnu \
+            gcc-mips-linux-gnu \
+            ffmpeg \
+            libcanberra-gtk3-module \
+            libcapstone-dev \
+            libgl-dev \
+            libgtk-3-dev \
+            mesa-vulkan-drivers \
+            ninja-build \
+            pkg-config \
+            xauth \
+            xvfb
+
+      - name: Cache ares
+        id: cache-ares
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ARES_PREFIX }}
+          key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
+
+      - name: Build ares
+        if: steps.cache-ares.outputs.cache-hit != 'true'
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/ares-emulator/ares/archive/refs/tags/${ARES_VERSION}.tar.gz" \
+            | tar --extract --gzip --directory /tmp
+          cmake \
+            -S "/tmp/ares-${ARES_VERSION#v}" \
+            -B /tmp/ares-build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$ARES_PREFIX" \
+            -DARES_CORES=n64 \
+            -DARES_BUILD_LOCAL=OFF \
+            -DARES_BUNDLE_SHADERS=OFF \
+            -DARES_ENABLE_LIBRASHADER=OFF \
+            -DENABLE_IPO=OFF \
+            -DARES_ENABLE_ALSA=OFF \
+            -DARES_ENABLE_AO=OFF \
+            -DARES_ENABLE_OPENAL=OFF \
+            -DARES_ENABLE_OSS=OFF \
+            -DARES_ENABLE_PULSEAUDIO=OFF \
+            -DARES_ENABLE_SDL=OFF \
+            -DARES_ENABLE_UDEV=OFF
+          cmake --build /tmp/ares-build --parallel 2
+          cmake --install /tmp/ares-build
+
+      - name: Run practice tests
+        env:
+          ARES: ${{ env.ARES_PREFIX }}/bin/ares
+          ARES_ARGS: >-
+            --fullscreen
+            --no-file-prompt
+            --setting Audio/Driver=None
+            --setting Input/Driver=None
+          XDG_CONFIG_HOME: /tmp/ares-config
+          XDG_DATA_HOME: /tmp/ares-data
+          PRACTICE_TEST_VIDEO_DIR: ${{ runner.temp }}/practice-test-artifacts/videos
+          PRACTICE_TEST_VIDEO_SIZE: 640x480
+        run: |
+          xvfb-run --auto-servernum \
+            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
+            ./scripts/run_practice_tests.py \
+              --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
+
+      - name: Upload failed test artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: practice-test-failures-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/practice-test-artifacts
+          if-no-files-found: warn
+          compression-level: 0
+
   build-patch:
     runs-on: ubuntu-latest
     permissions:
@@ -99,7 +216,16 @@ jobs:
           sha256sum build/u/ge007.u.z64 "baserom.u (patched).z64"
           cmp build/u/ge007.u.z64 "baserom.u (patched).z64"
 
+      - name: Upload patch artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: goldeneye-practice-rom-pr-${{ github.event.pull_request.number }}
+          path: ${{ steps.tag.outputs.filename }}
+          if-no-files-found: error
+
       - name: Publish release
+        if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
