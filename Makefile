@@ -9,6 +9,7 @@ FINAL := YES
 VERSION := US
 IDO_RECOMP := YES
 VERBOSE := 2
+PROFILE_REPLAY := 0
 # If COMPARE is 1, check the output sha1sum when building 'all', and if fail to match
 # then compare ELF sections to known md5 checksums.
 COMPARE := 1
@@ -201,6 +202,12 @@ else
 endif
 
 CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64
+
+ifeq ($(PROFILE_REPLAY), 1)
+ CFLAGS += -DPROFILE_REPLAY
+ LDFILEOPTS += -DPROFILE_REPLAY
+ ASMDEFS += --defsym PROFILE_REPLAY=1
+endif
 
 LD := $(TOOLCHAIN)ld
 LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld

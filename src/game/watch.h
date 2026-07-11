@@ -137,6 +137,12 @@ u32 cur_player_get_aim_control(void);
 u32 cur_player_get_screen_setting(void);
 u16 call_sndGetSfxSlotFirstNaturalVolume(void);
 u32 get_cur_player_look_vertical_inverted(void);
+void set_cur_player_look_vertical_inverted(u32 value);
+void cur_player_set_aim_control(u32 value);
+void cur_player_set_sight_onscreen_control(u32 value);
+void cur_player_set_lookahead(u32 value);
+void cur_player_set_ammo_onscreen_setting(u32 value);
+void cur_player_set_screen_setting(u32 value);
 u16 get_mTrack2Vol(void);
 void set_mTrack2Vol(u16 param_1);
 void sub_GAME_7F0A91A0(u16 arg0);
@@ -151,5 +157,4 @@ Gfx *sub_GAME_7F0ACA28(Gfx *gdl, Mtx *arg1, s32 watch_transitioning);
 void sub_GAME_7F0A69A8(void);
 
 #endif
-
 

@@ -1,5 +1,8 @@
 #include <ultra64.h>
 #include "unk_0C0A70.h"
+#ifdef PROFILE_REPLAY
+#include "replay_profile.h"
+#endif
 
 // data
 s32 lastFrameCounter = -1;
@@ -45,12 +48,18 @@ void store_osgetcount(void)
  */
 void updateFrameCounters(s32 deltaFrames)
 {
+#ifdef PROFILE_REPLAY
+    deltaFrames = replay_profile_override_delta(deltaFrames);
+#endif
     copy_of_osgetcount_value_0 = (s32) copy_of_osgetcount_value_1;
     copy_of_osgetcount_value_1 = osGetCount();
 
     lastFrameCounter = currentFrameCounter;
     currentFrameCounter = (s32) (currentFrameCounter + deltaFrames);
     speedgraphframes = deltaFrames;
+#ifdef PROFILE_REPLAY
+    replay_profile_frame_start(deltaFrames);
+#endif
 
     #ifdef BUGFIX_R1
     jpD_800484CC = (f32) deltaFrames;
@@ -101,7 +110,6 @@ void eu_sub_7f0c00a4(void)
   
 }
 #endif
-
 
 
 

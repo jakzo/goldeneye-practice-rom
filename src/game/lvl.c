@@ -53,6 +53,9 @@
 #include "bondview_r.h"
 #include "initBondDATAdefaults.h"
 #include "viewport.h"
+#ifdef PROFILE_REPLAY
+#include "replay_profile.h"
+#endif
 #include "stan.h"
 #include "gun.h"
 #include "unk_091080.h"
@@ -303,6 +306,9 @@ void lvlStageLoad(s32 stage)
     s32 i;
     struct player_data *player_data;
 
+#ifdef PROFILE_REPLAY
+    replay_profile_before_stage_load(stage);
+#endif
     g_CurrentStageToLoad = stage;
 
     // this if block pushes where g_CurrentStageToLoad gets loaded to the
@@ -498,6 +504,9 @@ void lvlStageLoad(s32 stage)
         }
 
         set_cur_player(0);
+#ifdef PROFILE_REPLAY
+        replay_profile_on_stage_load();
+#endif
     }
 
     set_contents_of_80036078(0);
@@ -938,6 +947,9 @@ glabel lvlPortalDebug7F0BDF10
 
 Gfx* lvlRender(Gfx* DL)
 {
+#ifdef PROFILE_REPLAY
+    replay_profile_begin(REPLAY_PROFILE_RENDER_SETUP);
+#endif
     gSPSegment(DL++, SPSEGMENT_PHYSICAL, NULL);
     gSPSegment(DL++, SPSEGMENT_UNKNOWN, osVirtualToPhysical(ptr_font_DL));
 
@@ -989,6 +1001,10 @@ Gfx* lvlRender(Gfx* DL)
 
             DL = viSetupScreensForNumPlayers(DL);
             DL = skyRender(DL);
+#ifdef PROFILE_REPLAY
+            replay_profile_end(REPLAY_PROFILE_RENDER_SETUP);
+            replay_profile_begin(REPLAY_PROFILE_RENDER_VISIBILITY);
+#endif
             bgRoomVisibilityRelated();
             determing_type_of_object_and_detection();
             chraiUpdateOnscreenPropCount();
@@ -1002,7 +1018,15 @@ Gfx* lvlRender(Gfx* DL)
             }
 
             sub_GAME_7F03D0D4();
+#ifdef PROFILE_REPLAY
+            replay_profile_end(REPLAY_PROFILE_RENDER_VISIBILITY);
+            replay_profile_begin(REPLAY_PROFILE_RENDER_BG);
+#endif
             DL = bgLevelRender(DL);
+#ifdef PROFILE_REPLAY
+            replay_profile_end(REPLAY_PROFILE_RENDER_BG);
+            replay_profile_begin(REPLAY_PROFILE_RENDER_ACTORS);
+#endif
 
             if (get_debug_portal_flag())
             {
@@ -1066,6 +1090,10 @@ Gfx* lvlRender(Gfx* DL)
 #endif
             DL = sub_GAME_7F0A2C44(DL);
             DL = explosionRenderFlyingParticles(DL);
+#ifdef PROFILE_REPLAY
+            replay_profile_end(REPLAY_PROFILE_RENDER_ACTORS);
+            replay_profile_begin(REPLAY_PROFILE_RENDER_HUD);
+#endif
 
             if (
 
@@ -1093,6 +1121,9 @@ Gfx* lvlRender(Gfx* DL)
             }
 
             DL = mp_watch_menu_display(DL);
+#ifdef PROFILE_REPLAY
+            replay_profile_end(REPLAY_PROFILE_RENDER_HUD);
+#endif
         }
     }
 
@@ -4607,5 +4638,3 @@ f32 lvlGetPowerOnTimeSec(void)
 {
     return g_PowerOnTimeSec;
 }
-
-

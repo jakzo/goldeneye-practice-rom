@@ -41,6 +41,9 @@
 #include "unk_0A1DA0.h"
 #include "explosions.h"
 #include "os_extension.h"
+#ifdef PROFILE_REPLAY
+#include "replay_profile.h"
+#endif
 #include "unk_0B3200.h"
 
 #ifdef VERSION_EU
@@ -11610,6 +11613,9 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     f32 faspect;
 #endif
 
+#ifdef PROFILE_REPLAY
+    replay_profile_begin(REPLAY_PROFILE_PHYSICS_SETUP);
+#endif
     set_cur_player_fovy(FOV_Y_F);
 
     // This call doesn't do anything, the call viSetFovY(g_CurrentPlayer->fovy); in lvlRender
@@ -11706,6 +11712,11 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     if (1);
 #endif
 
+#ifdef PROFILE_REPLAY
+    replay_profile_end(REPLAY_PROFILE_PHYSICS_SETUP);
+    replay_profile_begin(REPLAY_PROFILE_PHYSICS_CORE);
+#endif
+
     if ((g_CameraMode == CAMERAMODE_NONE) || ((g_CameraMode == CAMERAMODE_FP) && (is_timer_active != 0)) || (g_CameraMode == CAMERAMODE_FADE_TO_TITLE))
     {
         if (get_cur_playernum() == 0)
@@ -11719,6 +11730,9 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     {
         bondviewFrozenMoveBond(stick_x, stick_y, buttons, (u16) g_CurrentPlayer->buttons_pressed);
     }
+#ifdef PROFILE_REPLAY
+    replay_profile_end(REPLAY_PROFILE_PHYSICS_CORE);
+#endif
 
 #if defined(BUGFIX_R1)
     watch_time_0 += jpD_800484D0;
@@ -20444,7 +20458,6 @@ void SurroundWithExplosions(int delay)
     g_SurroundBondWithExplosionsTicks = delay + g_GlobalTimer;
     g_PlayerTickExplodeCreatePosition = 0;
 }
-
 
 
 

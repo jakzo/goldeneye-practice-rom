@@ -85,6 +85,13 @@ s32 g_tlbCurrentEntryCount = 0;
  */
 u32 g_tlbSegmentIndex = 0;
 
+#ifdef PROFILE_REPLAY
+static u32 g_tlbProfileLoads;
+static u32 g_tlbProfileTotalCycles;
+static u32 g_tlbProfileDmaCycles;
+static u32 g_tlbProfileIcacheCycles;
+#endif
+
 /** 
  * @brief Table for managing TLB entries.
  */
@@ -249,6 +256,10 @@ void tlbmanageTranslateLoadRomFromTlbAddress(u32 address)
     u8 *tlbEntryPointer;
     u32 savedEntryHi[1]; //speculative
     u32 savedEntryLo[1]; //speculative
+#ifdef PROFILE_REPLAY
+    u32 profileStart = osGetCount();
+    u32 profileRegionStart;
+#endif
 
     // Save current CPU status (speculative)
     //savedStatusRegister[0] = osSetIntMask(OS_IM_NONE);
@@ -277,11 +288,21 @@ void tlbmanageTranslateLoadRomFromTlbAddress(u32 address)
     tlbEntryPointer = &(*g_tlbmanageTlbAllocatedBlock)[GET_TLB_MASK_INDEX(tlbSegmentIndex)];
 
     // Copy the ROM data into the TLB memory block
+#ifdef PROFILE_REPLAY
+    profileRegionStart = osGetCount();
+#endif
     romCopy(tlbEntryPointer, (void*)(((u32)&_gameSegmentRomStart) + (u32)maskedAddress), TLB_BLOCK_SIZE);
+#ifdef PROFILE_REPLAY
+    g_tlbProfileDmaCycles += osGetCount() - profileRegionStart;
+    profileRegionStart = osGetCount();
+#endif
 
     // Invalidate the instruction cache and data cache
     osInvalICache((void *)0x40000000, 0x40000000);
     osInvalICache((void *)0x80000000, 0x10000000);
+#ifdef PROFILE_REPLAY
+    g_tlbProfileIcacheCycles += osGetCount() - profileRegionStart;
+#endif
 
     // Convert masked address to TLB index
     tlbIndex = GET_TLB_INDEX_FROM_MASK(maskedAddress);
@@ -291,6 +312,10 @@ void tlbmanageTranslateLoadRomFromTlbAddress(u32 address)
     g_tlbManagementTable[tlbIndex].contextValue = ((osVirtualToPhysical(tlbEntryPointer) >> 0xC) << 6) | 0x1F;
     g_tlbMappingTable[tlbSegmentIndex].entry0 = 0;
     g_tlbMappingTable[tlbSegmentIndex].entry1 = tlbIndex;
+#ifdef PROFILE_REPLAY
+    g_tlbProfileLoads++;
+    g_tlbProfileTotalCycles += osGetCount() - profileStart;
+#endif
 
     // Restore original page mask and EntryHi/Lo values (speculative)
     //setTLBPageMask(tlbSegmentIndex, originalPageMask[0]);
@@ -300,6 +325,17 @@ void tlbmanageTranslateLoadRomFromTlbAddress(u32 address)
     // Restore the previous CPU status (speculative)
     //osSetIntMask(savedStatusRegister[0]);
 }
+
+#ifdef PROFILE_REPLAY
+void tlbmanageGetProfileTotals(u32 *loads, u32 *total_cycles,
+                               u32 *dma_cycles, u32 *icache_cycles)
+{
+    *loads = g_tlbProfileLoads;
+    *total_cycles = g_tlbProfileTotalCycles;
+    *dma_cycles = g_tlbProfileDmaCycles;
+    *icache_cycles = g_tlbProfileIcacheCycles;
+}
+#endif
 
 /**
  * @brief Returns a pointer to the TLB memory block.

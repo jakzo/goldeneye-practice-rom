@@ -21,6 +21,9 @@
       build/OUTCODE/src/getra.o (.rodata);
       build/OUTCODE/src/ramrom.o (.rodata);
       build/OUTCODE/src/boss.o (.rodata);
+#ifdef PROFILE_REPLAY
+      build/OUTCODE/src/replay_profile.o (.rodata);
+#endif
       build/OUTCODE/src/music.o (.rodata);
       build/OUTCODE/src/snd.o (.rodata);
       build/OUTCODE/src/memp.o (.rodata);

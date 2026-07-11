@@ -39,6 +39,9 @@
 #include "game/player.h"
 #include "game/unk_0C0A70.h"
 #include "PR/R4300.h"
+#ifdef PROFILE_REPLAY
+#include "replay_profile.h"
+#endif
 
 /**
  * @file boss.c
@@ -165,6 +168,9 @@ void bossInitMainthreadData(void)
     rspInit();
     dynInit();
     joyInit();
+#ifdef PROFILE_REPLAY
+    replay_profile_init();
+#endif
     osCreateMesgQueue(&bossmq, &bossmsg, 1);
 
     for (i = 0; i != MAXCONTROLLERS; i++)
@@ -314,6 +320,9 @@ void bossMainloop(void)
 
     done = 0;
     reset_mem_bank_5();
+#ifdef PROFILE_REPLAY
+    g_StageNum = LEVELID_RUNWAY;
+#endif
 
     if (tokenFind(1, "-level_") != NULL)
     {
@@ -478,6 +487,9 @@ void bossMainloop(void)
                             permit_stderr(0);
 
                             gdl = firstGdl = dynGetMasterDisplayList();
+#ifdef PROFILE_REPLAY
+                            replay_profile_begin(REPLAY_PROFILE_TICK);
+#endif
 
 #ifdef DEBUGMENU
                             //ported from pd beta, official way to open debug menu
@@ -516,11 +528,23 @@ void bossMainloop(void)
                                     localPlayer = g_CurrentPlayer;
                                     viSetViewPosition(localPlayer->viewleft, localPlayer->viewtop);
 
+#ifdef PROFILE_REPLAY
+                                    replay_profile_begin(REPLAY_PROFILE_PHYSICS);
+#endif
                                     lvlViewMoveTick();
+#ifdef PROFILE_REPLAY
+                                    replay_profile_end(REPLAY_PROFILE_PHYSICS);
+#endif
                                 }
                             }
 
+#ifdef PROFILE_REPLAY
+                            replay_profile_begin(REPLAY_PROFILE_RENDER);
+#endif
                             gdl = lvlRender(gdl);
+#ifdef PROFILE_REPLAY
+                            replay_profile_end(REPLAY_PROFILE_RENDER);
+#endif
 
                             // Lets Visualise the Coverage Value used for Scilohete Anti-Ailising (edges)
                             // (done on the VI), also produces a cool looking linemode - providing AA is working.
@@ -536,6 +560,10 @@ void bossMainloop(void)
                             }
 
                             gdl = debmenuDraw(gdl);
+#ifdef PROFILE_REPLAY
+                            replay_profile_end(REPLAY_PROFILE_TICK);
+                            replay_profile_frame_end();
+#endif
 
                             if (get_memusage_display_flag())
                             {
