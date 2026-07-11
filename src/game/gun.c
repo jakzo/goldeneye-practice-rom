@@ -7579,7 +7579,7 @@ glabel handles_firing_or_throwing_weapon_in_hand
 .L7F060AD4:
 /* 0934C4 7F060AD4 2401001F */  li    $at, 31
 /* 0934C8 7F060AD8 14810016 */  bne   $a0, $at, .L7F060B34
-/* 0934CC 7F060ADC 3C028007 */   lui   $v0, 0x8007
+/* 0934CC 7F060ADC 3C028007 */   lui   $v0, %hi(g_CurrentPlayer)
 /* 0934D0 7F060AE0 3C028007 */  lui   $v0, %hi(g_CurrentPlayer) # $v0, 0x8007
 /* 0934D4 7F060AE4 8C428BC0 */  lw    $v0, %lo(g_CurrentPlayer)($v0)
 /* 0934D8 7F060AE8 3C01C2C8 */  li    $at, 0xC2C80000 # -100.000000
@@ -7602,7 +7602,7 @@ glabel handles_firing_or_throwing_weapon_in_hand
 /* 09351C 7F060B2C 10000014 */  b     .L7F060B80
 /* 093520 7F060B30 E7AA019C */   swc1  $f10, 0x19c($sp)
 .L7F060B34:
-/* 093524 7F060B34 8C428BC0 */  lw    $v0, -0x7440($v0)
+/* 093524 7F060B34 8C428BC0 */  lw    $v0, %lo(g_CurrentPlayer)($v0)
 /* 093528 7F060B38 3C01C2C8 */  li    $at, 0xC2C80000 # -100.000000
 /* 09352C 7F060B3C 44810000 */  mtc1  $at, $f0
 /* 093530 7F060B40 3C0140A0 */  li    $at, 0x40A00000 # 5.000000

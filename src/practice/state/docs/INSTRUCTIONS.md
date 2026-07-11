@@ -29,6 +29,22 @@ Add any general advice helpful for future agents working on this feature here. B
 
 - **Implement one feature at a time then manually test**: Since crashes and hangs are so common and can be unexpectedly caused by even seemingly innocuous changes, implement a small number of safe properties in the save/load code. After this, update this file and report back to the user what was added, what was learned and what they should now do in the game to test that the newly added properties are loaded correctly.
 - **Stale Pointers**: Any struct member ending in `*` (e.g., `ALSoundState *`, `ObjectRecord *`, `PropRecord *`) is an absolute memory address. If the game engine deallocates or reallocates the target object, loading a saved state that retains the old pointer will cause a crash. All such pointers must either be relocated (mapped back to correct indices) or it will not affect gameplay nullified (set to `NULL`).
+- **EU Player Layout Differs After the Hand Headers**: `struct player` embeds
+  two `ModelFileHeader` values before `hands`. The EU header omits the
+  non-EU `isLoaded` field, so `hands` and every later player field start eight
+  bytes earlier in EU (`0x0868` instead of `0x0870`). Any raw player snapshot
+  ranges after this point must use EU-adjusted offsets; applying US offsets to
+  an EU save corrupts restored hand state and can crash when the first-person
+  weapon model next updates. Prefer named members such as
+  `g_CurrentPlayer->hands` over hardcoded addresses where possible.
+- **Relocate Symbols in Practice-Build Assembly**: Practice code changes the
+  final BSS layout, so original absolute addresses embedded in unmatched
+  assembly are not necessarily valid. Express both halves of an address as
+  `%hi(symbol)` and `%lo(symbol)` even when the original immediate values are
+  known. The EU firing path previously used literal halves of
+  `g_CurrentPlayer`; practice builds then dereferenced the original address and
+  crashed on their first weapon update. Symbolic operands still produce the
+  original bytes when building against the original layout.
 - **Sound System Crashing**: Sound structures (`ALSoundState`) are allocated dynamically. Nullifying properties like `audioHandle`, `openSoundState`, and `closeSoundState` upon loading prevents the sound engine from trying to modify a defunct sound node.
 - **Alarm State**: `alarm_timer` is both the active flag and the elapsed alarm
   duration, so it must be restored exactly rather than reduced to a Boolean.

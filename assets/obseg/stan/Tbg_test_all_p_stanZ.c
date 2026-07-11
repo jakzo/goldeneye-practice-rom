@@ -10,7 +10,7 @@ StandFileHeader Tbg_test_all_p_stanZ = {
 };
 
 StandTile tile_0 = {
-    0x000100, 0x01,
+    0x000100, 0x00,
     0x0,
     0xf, 0xf, 0xf,
     3,

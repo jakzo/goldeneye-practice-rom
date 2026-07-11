@@ -31,8 +31,13 @@ static const struct {
   u32 srcoff;
   u32 size;
 } player_blocks[5] = {
+#if defined(VERSION_EU)
+    {0x0000, 0x0808}, {0x0868, 0x0854}, {0x10E8, 0x00B8},
+    {0x11B0, 0x06C0}, {0x29B0, 0x00B8},
+#else
     {0x0000, 0x0808}, {0x0870, 0x0854}, {0x10F0, 0x00B8},
     {0x11B8, 0x06C0}, {0x29B8, 0x00B8},
+#endif
 };
 
 #ifdef DEV
@@ -394,8 +399,7 @@ static void load_current_player_state(StateStream *stream) {
 
   /* 5. Restore hand weapon model loading and logical animation triggers. */
   {
-    /* block2 lives at player+0x0870; the hands array is at the start. */
-    struct hand *saved_hands = (struct hand *)((u8 *)g_CurrentPlayer + 0x0870);
+    struct hand *saved_hands = g_CurrentPlayer->hands;
     s32 hand;
     for (hand = 0; hand < 2; hand++) {
       ITEM_IDS saved_weapon = saved_hands[hand].weaponnum;
