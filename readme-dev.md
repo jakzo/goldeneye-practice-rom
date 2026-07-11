@@ -13,6 +13,9 @@ just setup
 just sc64
 ```
 
+Run `just profile-runway` to capture the deterministic Runway replay's CPU
+timings. See the [profiling methodology and baseline](src/practice/docs/PROFILING.md).
+
 ## Development
 
 The original README for the decompilation is at [readme-original.md](readme-original.md) and contains instructions for building, etc.

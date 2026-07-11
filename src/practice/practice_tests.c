@@ -14,6 +14,7 @@
 #include "objecthandler.h"
 #include "player.h"
 #include "practice_hotkeys.h"
+#include "practice_profile.h"
 #include "practice_replay.h"
 #include "practice_timescale.h"
 #include "state/practice_states.h"
@@ -95,6 +96,7 @@ void practice_tests_set_case(s32 test_case) {
   g_ReplayTestHotkeyFrame = 0;
   g_LevelRestartTestPhase = 0;
   g_LevelRestartTimer = 0;
+  practice_profile_set_enabled(test_case == REPLAY_RUNWAY_1X);
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();

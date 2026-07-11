@@ -93,6 +93,11 @@ a substitute for the ROM DMA lock.
   This requires no page RAM and avoids evicting a useful page while unused
   slots still exist.
 
+  Experiment note (2026-07-11): free-slot-first followed by plain round-robin
+  increased Runway loads from 11.91 to 25.95 per frame and tick time from
+  2.400M to 3.845M cycles. Do not use plain round-robin as the occupied-cache
+  policy; retain random replacement until a recency-aware policy is measured.
+
 - [ ] Profile ROM loads per virtual 8 KiB page. Increment a counter indexed by
   `GET_TLB_INDEX_FROM_MASK(maskedAddress)` and print a sorted summary in a
   debug build. `TlbManageTableEntry.RESERVED` is currently eight unused bytes
@@ -106,6 +111,12 @@ a substitute for the ROM DMA lock.
 - [ ] Exclude test and diagnostic implementations from normal practice builds
   using `DEV`/`TEST_CASE`, rather than merely disabling their call sites.
 
+- [ ] Evaluate GCC `-Os` for normal practice code. A Runway experiment reduced
+  `practice.o` text from 130,940 bytes (`-O2`) to 99,460 bytes, page loads from
+  6.61 to 4.85 per frame, and tick time from 1.784M to 1.603M cycles. Fix or
+  avoid the profiler reset-loop optimization issue observed in the diagnostic
+  `-Os` build before adopting it generally.
+
 - [ ] Consider pinning a small number of proven-hot pages in existing physical
   slots. Start with 4-8 pages and measure. Pinning consumes no additional page
   memory, but reduces cache capacity for other pages.
@@ -115,6 +126,12 @@ a substitute for the ROM DMA lock.
   the current cache already reserves 720 KiB. The practice-only
   `MANAGEMENT_TABLE_COUNT` of 256 expands address tracking, not physical page
   capacity.
+
+- [ ] Investigate a safe targeted I-cache invalidation routine. Invalidating
+  only the reused 8 KiB KSEG0 slot with `osInvalICache` crashed immediately;
+  the alias does not cover instructions cached through the `0x7f...` mapping.
+  A future experiment must use verified index-based invalidation or otherwise
+  handle both aliases correctly.
 
 ### Additional PI/SRAM hardening
 

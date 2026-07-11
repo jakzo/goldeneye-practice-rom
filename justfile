@@ -59,6 +59,11 @@ test TEST_CASE:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test "{{ TEST_CASE }}"
 
+# Profile the deterministic 1x Runway replay and save per-frame CPU timings.
+profile-runway OUTPUT="src/practice/docs/profile_runway_practice.csv":
+    if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
+    docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test REPLAY_RUNWAY_1X --profile-csv "{{ OUTPUT }}"
+
 test-all JOBS="":
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" -e PRACTICE_TEST_JOBS="{{ JOBS }}" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --build-mode release

@@ -3,6 +3,7 @@
 #include "practice/practice_timescale.h"
 #include "practice/practice_tests.h"
 #include "practice/practice_replay.h"
+#include "practice/practice_profile.h"
 
 // data
 s32 lastFrameCounter = -1;
@@ -89,6 +90,7 @@ void updateFrameCounters(s32 deltaFrames)
     speedgraphframes = deltaFrames;
 
 #ifdef PRACTICE_ROM
+    practice_profile_frame_start(deltaFrames);
     // Per-frame test hook: called once the frame delta and RNG seeds are
     // finalized (before this frame's gameplay consumes any RNG).
     practice_tests_frame();

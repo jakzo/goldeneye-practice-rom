@@ -90,6 +90,12 @@ def parse_args():
         help="write test results as JUnit XML",
     )
     parser.add_argument(
+        "--profile-csv",
+        metavar="PATH",
+        type=Path,
+        help="write PROFILE_CSV rows from a single test to this CSV file",
+    )
+    parser.add_argument(
         "--build-mode",
         choices=("dev", "release"),
         default="dev",
@@ -223,11 +229,13 @@ def emulator_command():
     return None
 
 
-def build_tests(build_mode, version):
+def build_tests(build_mode, version, profile_enabled=False):
     jobs = available_cpu_count()
     command = ["make", f"-j{jobs}", f"VERSION={version}"]
     if build_mode == "dev":
         command.append("DEV=1")
+    if profile_enabled:
+        command.append("PROFILE_PRACTICE=1")
     with tempfile.TemporaryFile(mode="w+") as build_log:
         try:
             result = subprocess.run(
@@ -527,6 +535,16 @@ def write_junit_xml(results, output_path):
     tree.write(output_path, encoding="utf-8", xml_declaration=True)
 
 
+def write_profile_csv(result, output_path):
+    prefix = "PROFILE_CSV,"
+    rows = [line[len(prefix):] for line in result.output.splitlines()
+            if line.startswith(prefix)]
+    if not rows:
+        raise ValueError("test output contained no profiling rows")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+
 def write_github_summary(results):
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
@@ -592,6 +610,10 @@ def main():
             return 2
         test_cases = [args.test]
 
+    if args.profile_csv and len(test_cases) != 1:
+        print("error: --profile-csv requires --test", file=sys.stderr)
+        return 2
+
     excluded_tests = set(args.exclude)
     test_cases = [test for test in test_cases if test not in excluded_tests]
     if not test_cases:
@@ -616,7 +638,9 @@ def main():
             return 1
     else:
         print("=== building test ROM ===", flush=True)
-        if not build_tests(args.build_mode, args.version):
+        if not build_tests(
+            args.build_mode, args.version, args.profile_csv is not None
+        ):
             return 1
 
     results_by_name = {}
@@ -665,6 +689,13 @@ def main():
     if args.junit_xml:
         write_junit_xml(results, args.junit_xml)
         print(f"JUnit XML written to {args.junit_xml}")
+    if args.profile_csv:
+        try:
+            write_profile_csv(results[0], args.profile_csv)
+        except (OSError, ValueError) as error:
+            print(f"error: could not write profile CSV: {error}", file=sys.stderr)
+            return 1
+        print(f"Profile CSV written to {args.profile_csv}")
     write_github_summary(results)
     print_github_annotations(results)
     return 0 if all(result.passed for result in results) else 1
