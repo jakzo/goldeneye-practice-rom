@@ -48,25 +48,37 @@ void store_osgetcount(void)
  */
 void updateFrameCounters(s32 deltaFrames)
 {
+#ifdef PRACTICE_ROM
+    s32 replay_was_playing = g_ReplayIsPlaying;
+#endif
+
     copy_of_osgetcount_value_0 = (s32) copy_of_osgetcount_value_1;
     copy_of_osgetcount_value_1 = osGetCount();
 
 #ifdef PRACTICE_ROM
-    if (g_IsTimeScaleChanged) {
-        f32 exact_delta = (f32)deltaFrames * g_TimeScaleFinal;
-        g_FractionalClockTimerAcc += exact_delta;
-        deltaFrames = (s32)g_FractionalClockTimerAcc;
-        g_FractionalClockTimerAcc -= (f32)deltaFrames;
+    if (replay_was_playing) {
+        // Replays use time scale to pace recorded frames, but each advancing
+        // frame must retain its recorded delta for deterministic playback.
+        deltaFrames = practice_replay_override_delta(deltaFrames);
+        if (!g_IsTimePaused && g_ForcedDeltaFrames >= 0 && deltaFrames > 0) {
+            g_ForcedDeltaFrames = -1;
+        }
+    } else {
+        if (g_IsTimeScaleChanged) {
+            f32 exact_delta = (f32)deltaFrames * g_TimeScaleFinal;
+            g_FractionalClockTimerAcc += exact_delta;
+            deltaFrames = (s32)g_FractionalClockTimerAcc;
+            g_FractionalClockTimerAcc -= (f32)deltaFrames;
+        }
+        // On the first frame that actually advances after unpausing/loading,
+        // use the frame delta captured when the pause began instead of the
+        // wall-clock delta (which would otherwise dump all the paused time
+        // into one large catch-up frame).
+        if (!g_IsTimePaused && g_ForcedDeltaFrames >= 0 && deltaFrames > 0) {
+            deltaFrames = g_ForcedDeltaFrames;
+            g_ForcedDeltaFrames = -1;
+        }
     }
-    // On the first frame that actually advances after unpausing/loading, use
-    // the frame delta captured when the pause began instead of the wall-clock
-    // delta (which would otherwise dump all the paused time into one large
-    // catch-up frame)
-    if (!g_IsTimePaused && g_ForcedDeltaFrames >= 0 && deltaFrames > 0) {
-        deltaFrames = g_ForcedDeltaFrames;
-        g_ForcedDeltaFrames = -1;
-    }
-    deltaFrames = practice_replay_override_delta(deltaFrames);
     g_TimeScaleDeltaFrames = deltaFrames;
     restore_rng_if_frame_dropped();
     practice_replay_on_frame_start();
@@ -131,6 +143,5 @@ void eu_sub_7f0c00a4(void)
   
 }
 #endif
-
 
 

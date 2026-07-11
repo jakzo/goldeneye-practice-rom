@@ -9,7 +9,9 @@
 #include "player.h"
 #include "practice_config.h"
 #include "practice_lag.h"
+#include "practice_replay.h"
 #include <PR/os.h>
+#include <PR/R4300.h>
 #include <bondconstants.h>
 #include <bondtypes.h>
 #include <fr.h>
@@ -41,6 +43,7 @@ static UnknownRange g_UnknownRanges[] = {
 
 static u8 g_PrevPlayerState[sizeof(struct player)];
 static u8 g_PlayerStateInitialized = 0;
+static s32 g_LagIndicatorDeltaFrames = 1;
 
 static void practice_monitor_unknown_fields(void) {
   u8 *curr;
@@ -135,10 +138,106 @@ static LogMessage g_LogQueue[MAX_LOG_MESSAGES];
 static s32 g_LogQueueStart = 0;
 static s32 g_LogQueueCount = 0;
 
+extern s32 g_viColorOutputMode;
+extern s32 z_buffer;
+extern s32 z_buffer_width;
+extern s32 z_buffer_height;
+
+static u8 *g_PausedBaseFramebuffer = NULL;
+static s32 g_PausedFrameActive = FALSE;
+static s32 g_PausedFrameResumePending = FALSE;
+static s32 g_PausedFrameHasBackup = FALSE;
+static s32 g_PausedFallbackFrameRendered = FALSE;
+
 // Cached timing constants to prevent redundant tick calculations
 static OSTime g_LogLifetimeCycles = 0;
 static OSTime g_LogSlideCycles = 0;
 static f32 g_LogSlideRate = 0.0f;
+
+// Compose paused UI into the color framebuffer the VI is not scanning. In
+// single-player the full-size Z buffer holds an immutable copy of the completed
+// frame, allowing both normal color buffers to alternate without accumulating
+// UI or ever presenting the differently aligned Z-buffer allocation itself.
+u8 *practice_ui_prepare_paused_frame(void) {
+  u8 *current = osViGetCurrentFramebuffer();
+  u8 *next = osViGetNextFramebuffer();
+  u8 *source;
+  u8 *target;
+  size_t frame_size = (size_t)viGetX() * (size_t)viGetY() * sizeof(u16);
+
+  if (current == NULL || current != next ||
+      g_viColorOutputMode == COLORMODE_32BIT)
+    return NULL;
+
+  if (!g_PausedFrameActive) {
+    if (current != viGetFrameBuf1()) {
+      osViSwapBuffer(viGetFrameBuf1());
+      return NULL;
+    }
+
+    g_PausedBaseFramebuffer = current;
+    g_PausedFrameHasBackup =
+        z_buffer != 0 && z_buffer_width >= viGetX() &&
+        z_buffer_height >= viGetY();
+    g_PausedFallbackFrameRendered = FALSE;
+    g_PausedFrameActive = TRUE;
+
+    if (g_PausedFrameHasBackup) {
+      memcpy((void *)K0_TO_K1(z_buffer), (void *)K0_TO_K1(current),
+             frame_size);
+    }
+  }
+
+  if (current == viGetFrameBuf1()) {
+    target = viGetFrameBuf2();
+  } else if (current == viGetFrameBuf2()) {
+    target = viGetFrameBuf1();
+  } else {
+    return NULL;
+  }
+
+  if (g_PausedFrameHasBackup) {
+    source = (u8 *)z_buffer;
+  } else {
+    // A split-screen Z buffer is not tall enough to present a full frame.
+    // Render one stable paused UI frame instead of writing into the buffer
+    // currently being scanned.
+    if (g_PausedFallbackFrameRendered)
+      return NULL;
+    source = g_PausedBaseFramebuffer;
+  }
+
+  if (source == NULL || target == NULL || target == current)
+    return NULL;
+
+  memcpy((void *)K0_TO_K1(target), (void *)K0_TO_K1(source), frame_size);
+  g_PausedFallbackFrameRendered = TRUE;
+  return target;
+}
+
+void practice_ui_resume_paused_frame(void) {
+  if (!g_PausedFrameActive || g_PausedBaseFramebuffer == NULL)
+    return;
+
+  osViSwapBuffer(g_PausedBaseFramebuffer);
+  g_PausedFrameResumePending = TRUE;
+}
+
+s32 practice_ui_wait_for_paused_frame_resume(void) {
+  if (!g_PausedFrameResumePending)
+    return TRUE;
+
+  if (osViGetCurrentFramebuffer() != g_PausedBaseFramebuffer ||
+      osViGetNextFramebuffer() != g_PausedBaseFramebuffer)
+    return FALSE;
+
+  g_PausedBaseFramebuffer = NULL;
+  g_PausedFrameActive = FALSE;
+  g_PausedFrameResumePending = FALSE;
+  g_PausedFrameHasBackup = FALSE;
+  g_PausedFallbackFrameRendered = FALSE;
+  return TRUE;
+}
 
 static void ensure_timing_initialized(void) {
   if (g_LogLifetimeCycles != 0)
@@ -421,6 +520,13 @@ Gfx *practice_ui_render(Gfx *gdl) {
 
   // practice_monitor_unknown_fields();
 
+  if (speedgraphframes > 0 && !g_PausedFrameResumePending) {
+    g_PausedBaseFramebuffer = NULL;
+    g_PausedFrameActive = FALSE;
+    g_PausedFrameHasBackup = FALSE;
+    g_PausedFallbackFrameRendered = FALSE;
+  }
+
   gdl = microcode_constructor(gdl);
 
   // Reset the scissor box to cover the entire screen so we are not clipped by
@@ -497,7 +603,12 @@ Gfx *practice_ui_render(Gfx *gdl) {
     if (practice.lag_estimate_enabled) {
       char lag_buf[16];
       s32 lag_x = hud_x;
-      s32 dropped_frames = speedgraphframes - 1;
+      s32 dropped_frames;
+
+      if (!g_ReplayIsPlaying || speedgraphframes > 0) {
+        g_LagIndicatorDeltaFrames = speedgraphframes;
+      }
+      dropped_frames = g_LagIndicatorDeltaFrames - 1;
 
       if (dropped_frames < 0) {
         dropped_frames = 0;

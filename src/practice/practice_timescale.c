@@ -4,6 +4,7 @@
 #include <ultra64.h>
 
 extern u64 g_randomSeed;
+extern u64 g_chrObjRandomSeed;
 extern s32 speedgraphframes;
 extern void store_osgetcount(void);
 
@@ -15,6 +16,7 @@ s32 g_IsTimePaused = FALSE;
 
 s32 g_TimeScaleDeltaFrames = 1;
 u64 g_FrozenFrameRngSeed = 0;
+u64 g_FrozenFrameChrObjRngSeed = 0;
 s32 g_PrevFrameTimeScaleDropped = FALSE;
 s32 g_ForcedDeltaFrames = -1;
 
@@ -60,8 +62,20 @@ void unpause() {
 void restore_rng_if_frame_dropped(void) {
   if (g_PrevFrameTimeScaleDropped) {
     g_randomSeed = g_FrozenFrameRngSeed;
+    g_chrObjRandomSeed = g_FrozenFrameChrObjRngSeed;
   } else {
     g_FrozenFrameRngSeed = g_randomSeed;
+    g_FrozenFrameChrObjRngSeed = g_chrObjRandomSeed;
   }
   g_PrevFrameTimeScaleDropped = (g_TimeScaleDeltaFrames == 0);
+}
+
+// Rendering can consume RNG even though a zero-delta frame must not affect
+// gameplay. Restore both live seeds after the frame has finished building its
+// display list; recorded replay seeds remain diagnostic-only.
+void restore_rng_after_paused_render(void) {
+  if (g_TimeScaleDeltaFrames == 0) {
+    g_randomSeed = g_FrozenFrameRngSeed;
+    g_chrObjRandomSeed = g_FrozenFrameChrObjRngSeed;
+  }
 }

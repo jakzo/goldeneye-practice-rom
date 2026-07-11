@@ -3,6 +3,7 @@
 #include "player_2.h"
 #include "practice_config.h"
 #include "practice_debug.h"
+#include "practice_replay.h"
 #include "practice_splits.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
@@ -18,11 +19,25 @@ extern s32 g_BgCurrentRoom; // player's current room (defined in bg.c)
 
 extern int sprintf(char *dst, const char *fmt, ...);
 
+u16 hotkey_trigger(void) {
+  return practice.left_trigger_hotkeys ? L_TRIG : R_TRIG;
+}
+
 bool practice_check_hotkeys(void) {
   u16 jgbptf;
+  u16 jgb;
+  u16 trigger = hotkey_trigger();
+  bool finish_replay_frame = FALSE;
 
-  u16 jgb = joyGetButtons(get_cur_playernum(), ANY_BUTTON);
-  u16 trigger = practice.left_trigger_hotkeys ? L_TRIG : R_TRIG;
+  // Switch to real controller temporarily for hotkeys during replay
+  if (g_ReplayIsPlaying)
+    joySetContDataIndex(0);
+
+  jgb = joyGetButtons(get_cur_playernum(), ANY_BUTTON);
+  jgbptf = joyGetButtonsPressedThisFrame(get_cur_playernum(), ANY_BUTTON);
+
+  if (g_ReplayIsPlaying)
+    joySetContDataIndex(1);
 
   if (!(jgb & trigger)) {
     if (g_IsTimePaused)
@@ -30,10 +45,14 @@ bool practice_check_hotkeys(void) {
     return FALSE;
   }
 
-  jgbptf = joyGetButtonsPressedThisFrame(get_cur_playernum(), ANY_BUTTON);
-
-  if ((jgbptf & trigger) && !g_IsTimePaused)
+  if ((jgbptf & trigger) && !g_IsTimePaused) {
     pause();
+    // Timing and replay input are selected before hotkeys are checked. If the
+    // trigger arrived on an advancing replay frame, let that selected frame's
+    // gameplay finish before the held pause starts on the following frame.
+    finish_replay_frame =
+        g_ReplayIsPlaying && !practice_replay_is_paused_frame();
+  }
 
   if (jgbptf & D_JPAD) {
     save_game_state();
@@ -83,5 +102,5 @@ bool practice_check_hotkeys(void) {
   }
 #endif
 
-  return TRUE;
+  return !finish_replay_frame;
 }

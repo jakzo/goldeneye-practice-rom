@@ -72,7 +72,7 @@ These features have some minor bugs or limitations but should be usable:
 - **Replays**
     - On a level's briefing screen, set `Replay next level` to `Record` to record the next attempt
     - After a recording exists for that level, set it to `Playback` to replay the saved inputs, frame timing, control option changes, and initial random seeds
-    - Press any button other than the configured practice hotkey trigger to cancel playback and resume normal control
+    - Practice hotkeys remain available during playback; other button presses cancel playback and resume normal control
     - Replays and save states use the same SRAM space, so saving either one overwrites the other and only one replay can be saved at a time
     - 2.x control styles are not currently supported
 - **Grenade camera**

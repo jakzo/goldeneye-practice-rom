@@ -319,7 +319,9 @@ static void apply_rom_config(void) {
     if (test_boot_level != LEVELID_NONE) {
       practice.boot_level = test_boot_level;
     }
-    practice.disable_intro_cutscenes = TRUE;
+    if (practice_tests_should_disable_intro(config->test_case)) {
+      practice.disable_intro_cutscenes = TRUE;
+    }
   }
 }
 

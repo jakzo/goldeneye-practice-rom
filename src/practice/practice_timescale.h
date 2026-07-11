@@ -15,5 +15,6 @@ void set_time_scale(f32 scale);
 void pause();
 void unpause();
 void restore_rng_if_frame_dropped(void);
+void restore_rng_after_paused_render(void);
 
 #endif /* PRACTICE_TIMESCALE_H */

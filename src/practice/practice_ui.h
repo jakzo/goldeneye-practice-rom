@@ -7,6 +7,9 @@ void practiceLogDebug(const char *fmt, ...);
 void practiceLogInfo(const char *fmt, ...);
 void practiceLogWarn(const char *fmt, ...);
 void practiceLogError(const char *fmt, ...);
+u8 *practice_ui_prepare_paused_frame(void);
+void practice_ui_resume_paused_frame(void);
+s32 practice_ui_wait_for_paused_frame_resume(void);
 
 // Renders a text pill in the top-right of the screen, stacked below any pills
 // already rendered this frame. Colors are 0xRRGGBBAA words; the alpha byte of

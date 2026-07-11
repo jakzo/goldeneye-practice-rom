@@ -4,6 +4,7 @@
 #include "game/lvl.h"
 #include "practice_config.h"
 #include "practice_sram.h"
+#include "practice_timescale.h"
 #include "practice_ui.h"
 #include "state/practice_states.h"
 #include "watch.h"
@@ -16,6 +17,7 @@
 #define REPLAY_INPUT_FRAME_SIZE_WITHOUT_SEEDS 5
 #define REPLAY_OPTIONS_FRAME_SIZE 3
 #define REPLAY_ENTRY_OPTIONS 0
+#define REPLAY_MAX_FRAME_DIFFERENCE 8.0f
 
 extern s32 g_CurrentStageToLoad;
 extern u64 g_randomSeed;
@@ -46,7 +48,8 @@ typedef struct ReplayDmaWriter {
 } ReplayDmaWriter;
 
 typedef struct ReplayDmaReader {
-  /* Keep state beyond both writer DMA buffers while sharing the stream union. */
+  /* Keep state beyond both writer DMA buffers while sharing the stream union.
+   */
   u8 buffers[2][REPLAY_DMA_BUFFER_SIZE];
   u32 current_page_offset;
   u32 total_size;
@@ -74,6 +77,8 @@ static s32 g_ReplayDivergenceLogged;
 static s32 g_RequestRecording;
 static s32 g_RequestFrameSeeds;
 static s32 g_RequestPlayback;
+static f32 g_PlaybackElapsedVideoFrames;
+static s32 g_PlaybackAdvanceFrame;
 
 bool g_ReplayIsRecording = FALSE;
 bool g_ReplayIsPlaying = FALSE;
@@ -135,28 +140,10 @@ static s32 replay_header_is_valid(const ReplayHeader *header) {
 }
 
 static u16 current_settings_flags(void) {
-  u16 flags = 0;
+  save_data save;
 
-  if (get_cur_player_look_vertical_inverted())
-    flags |= OPTION_INVERTLOOK;
-  if (cur_player_get_autoaim())
-    flags |= OPTION_AUTOAIM;
-  if (cur_player_get_aim_control())
-    flags |= OPTION_AIMCONTROL;
-  if (cur_player_get_sight_onscreen_control())
-    flags |= OPTION_SIGHTONSCREEN;
-  if (cur_player_get_lookahead())
-    flags |= OPTION_LOOKAHEAD;
-  if (cur_player_get_ammo_onscreen_setting())
-    flags |= OPTION_DISPLAYAMMO;
-  if (cur_player_get_screen_setting() == SCREEN_SIZE_WIDESCREEN)
-    flags |= OPTION_SCREENWIDE;
-  else if (cur_player_get_screen_setting() == SCREEN_SIZE_CINEMA)
-    flags |= OPTION_SCREENCINEMA;
-  if (get_screen_ratio() != SCREEN_RATIO_NORMAL)
-    flags |= OPTION_SCREENRATIO;
-  flags |= ((u16)(cur_player_get_control_type() << 8)) & OPTION_CONTROLTYPE;
-  return flags;
+  fileSaveSettingsForFolder(&save);
+  return save.options;
 }
 
 static void apply_settings_flags(u16 flags) {
@@ -246,8 +233,7 @@ static void reader_advance_page(ReplayDmaReader *reader) {
   u32 next_offset = reader->current_page_offset + REPLAY_DMA_BUFFER_SIZE;
 
   if (next_offset >= SAVE_STATE_SRAM_OFFSET + reader->total_size ||
-      sram_read(next_offset, reader->buffers[0],
-                REPLAY_DMA_BUFFER_SIZE) != 0) {
+      sram_read(next_offset, reader->buffers[0], REPLAY_DMA_BUFFER_SIZE) != 0) {
     reader->failed = TRUE;
     return;
   }
@@ -382,6 +368,8 @@ static void start_playback(void) {
   g_PlaybackFrameLoaded = FALSE;
   g_ReplayDiverged = FALSE;
   g_ReplayDivergenceLogged = FALSE;
+  g_PlaybackElapsedVideoFrames = 0.0f;
+  g_PlaybackAdvanceFrame = FALSE;
   g_ReplayIsPlaying = TRUE;
 }
 
@@ -545,6 +533,7 @@ void practice_replay_stop_playback(void) {
     return;
   g_ReplayIsPlaying = FALSE;
   g_PlaybackFrameLoaded = FALSE;
+  g_PlaybackAdvanceFrame = FALSE;
   joySetPlaybackFunc(NULL, -1);
   joySetContDataIndex(0);
   format_timestamp(g_ReplayTimestamp, timestamp);
@@ -573,6 +562,26 @@ s32 practice_replay_override_delta(s32 delta_frames) {
   if (!g_ReplayIsPlaying)
     return delta_frames;
 
+  g_PlaybackAdvanceFrame = FALSE;
+
+  g_PlaybackElapsedVideoFrames += (f32)delta_frames * g_TimeScaleFinal;
+
+  // Playback cannot skip recorded input frames to catch up. Bound how far its
+  // elapsed clock can get ahead so a temporary slowdown does not leave an
+  // ever-growing backlog.
+  if (g_PlaybackElapsedVideoFrames - (f32)g_ReplayTimestamp >
+      REPLAY_MAX_FRAME_DIFFERENCE) {
+    g_PlaybackElapsedVideoFrames =
+        (f32)g_ReplayTimestamp + REPLAY_MAX_FRAME_DIFFERENCE;
+  }
+
+  // A replay frame may move the recorded position ahead of scaled wall time.
+  // Hold that completed frame until elapsed time catches up.
+  if (g_TimeScaleFinal <= 0.0f ||
+      g_PlaybackElapsedVideoFrames < (f32)g_ReplayTimestamp) {
+    return 0;
+  }
+
   if (g_ReplayFrameIndex >= g_ActiveReplayHeader.frame_count) {
     practice_replay_stop_playback();
     return delta_frames;
@@ -588,7 +597,13 @@ s32 practice_replay_override_delta(s32 delta_frames) {
     }
     g_PlaybackFrameLoaded = TRUE;
   }
+
+  g_PlaybackAdvanceFrame = TRUE;
   return g_PlaybackFrame.delta_frames;
+}
+
+s32 practice_replay_is_paused_frame(void) {
+  return g_ReplayIsPlaying && !g_PlaybackAdvanceFrame;
 }
 
 void practice_replay_on_frame_start(void) {
@@ -602,7 +617,14 @@ void practice_replay_on_frame_start(void) {
     if (!g_ReplayDivergenceLogged) {
       char timestamp[16];
       format_timestamp(g_ReplayTimestamp, timestamp);
-      practiceLogError("Replay diverged at %s", timestamp);
+      practiceLogError(
+          "Replay diverged at %s: rng %08x%08x/%08x%08x chr %08x%08x/%08x%08x",
+          timestamp, (u32)(g_randomSeed >> 32), (u32)g_randomSeed,
+          (u32)(g_PlaybackFrame.random_seed >> 32),
+          (u32)g_PlaybackFrame.random_seed, (u32)(g_chrObjRandomSeed >> 32),
+          (u32)g_chrObjRandomSeed,
+          (u32)(g_PlaybackFrame.chr_obj_random_seed >> 32),
+          (u32)g_PlaybackFrame.chr_obj_random_seed);
       g_ReplayDivergenceLogged = TRUE;
     }
   }
@@ -662,21 +684,26 @@ static void practice_replay_record_callback(struct contsample *samples,
 
 static s32 practice_replay_playback_callback(struct contsample *samples,
                                              s32 last_idx) {
+  u16 real_buttons;
   u16 real_pressed;
   u16 trigger = practice.left_trigger_hotkeys ? L_TRIG : R_TRIG;
   s32 next_idx;
   s32 i;
 
   joySetContDataIndex(0);
+  real_buttons = joyGetButtons(0, ANY_BUTTON);
   real_pressed = joyGetButtonsPressedThisFrame(0, ANY_BUTTON);
   joySetContDataIndex(1);
-  if (real_pressed & ~trigger) {
+  if ((real_pressed & ~trigger) && !(real_buttons & trigger)) {
     char timestamp[16];
     format_timestamp(g_ReplayTimestamp, timestamp);
     practiceLogInfo("Replay: Playback cancelled at %s", timestamp);
     practice_replay_stop_playback();
     return last_idx;
   }
+
+  if (!g_PlaybackAdvanceFrame)
+    return last_idx;
 
   if (!g_ReplayIsPlaying || !g_PlaybackFrameLoaded)
     return last_idx;

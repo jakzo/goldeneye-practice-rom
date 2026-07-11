@@ -56,6 +56,9 @@ extern bool g_DebugLogsEnabled;
 #define STATE_RUNWAY_PLANE 15
 #define REPLAY 16
 #define LEVEL_RESTART_HOTKEY 17
+#define REPLAY_RUNWAY_1X 18
+#define REPLAY_RUNWAY_04X 19
+#define REPLAY_RUNWAY_HOTKEYS 20
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -74,6 +77,7 @@ static s32 g_ReplayTestPhase;
 static s32 g_ReplayTestPlaybackSeen;
 static s32 g_ReplayTestPlaybackCount;
 static s32 g_ReplayTestInitialInvert;
+static s32 g_ReplayTestHotkeyFrame;
 static s32 g_LevelRestartTestPhase;
 static s32 g_LevelRestartTimer;
 
@@ -88,11 +92,17 @@ void practice_tests_set_case(s32 test_case) {
   g_ReplayTestPlaybackSeen = FALSE;
   g_ReplayTestPlaybackCount = 0;
   g_ReplayTestInitialInvert = FALSE;
+  g_ReplayTestHotkeyFrame = 0;
   g_LevelRestartTestPhase = 0;
   g_LevelRestartTimer = 0;
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
+  } else if (test_case == REPLAY_RUNWAY_1X ||
+             test_case == REPLAY_RUNWAY_04X ||
+             test_case == REPLAY_RUNWAY_HOTKEYS) {
+    set_time_scale(test_case == REPLAY_RUNWAY_04X ? 0.4f : 1.0f);
+    practice_replay_request_playback();
   }
 
   g_DebugLogsEnabled = test_case != 0;
@@ -108,6 +118,9 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_DESTROYED_PROP:
   case STATE_RUNWAY_PLANE:
   case CRASH:
+  case REPLAY_RUNWAY_1X:
+  case REPLAY_RUNWAY_04X:
+  case REPLAY_RUNWAY_HOTKEYS:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
   case REPLAY:
@@ -129,6 +142,11 @@ s32 practice_tests_boot_level(s32 test_case) {
   default:
     return LEVELID_NONE;
   }
+}
+
+s32 practice_tests_should_disable_intro(s32 test_case) {
+  return test_case != REPLAY_RUNWAY_1X && test_case != REPLAY_RUNWAY_04X &&
+         test_case != REPLAY_RUNWAY_HOTKEYS;
 }
 
 #define MAX_SAVED_TEST_CHILDREN 8
@@ -315,12 +333,16 @@ void practice_tests_tick() {
           emu_log("REPLAY_OPTIONS_NOT_RESTORED playback=%d",
                   g_ReplayTestPlaybackCount);
           emu_log("TEST_FAILED");
-        } else if (g_ReplayTestPlaybackCount < 3) {
+        } else if (g_ReplayTestPlaybackCount < 4) {
+          f32 playback_time_scales[] = {1.0f, 0.4f, 2.0f, 1.0f};
+
           emu_log("REPLAY_RESTART playback=%d", g_ReplayTestPlaybackCount + 1);
           g_ReplayTestPlaybackSeen = FALSE;
+          set_time_scale(playback_time_scales[g_ReplayTestPlaybackCount]);
           practice_replay_request_playback();
           bossSetLoadedStage(LEVELID_BUNKER1);
         } else {
+          set_time_scale(1.0f);
           emu_log("TEST_COMPLETE");
           g_ReplayTestPhase = 2;
         }
@@ -1436,6 +1458,60 @@ void practice_tests_frame() {
   const s32 SETTLE_FRAMES = 30;
   const s32 LOG_FRAMES = 30;
   const s32 NUM_ITERATIONS = 10;
+
+  if (g_practice_test_case == REPLAY ||
+      g_practice_test_case == REPLAY_RUNWAY_HOTKEYS) {
+    u16 trigger = hotkey_trigger();
+
+    if (((g_practice_test_case == REPLAY && g_ReplayTestPhase == 1 &&
+          g_ReplayTestPlaybackCount == 3) ||
+         g_practice_test_case == REPLAY_RUNWAY_HOTKEYS) &&
+        g_ReplayIsPlaying) {
+      s32 hotkey_phase = g_ReplayTestHotkeyFrame % 30;
+
+      g_SimulatedButtons &= ~(L_JPAD | R_JPAD);
+      if (hotkey_phase < 10) {
+        g_SimulatedButtons |= trigger;
+        if (hotkey_phase == 2) {
+          g_SimulatedButtons |=
+              (g_ReplayTestHotkeyFrame / 30) % 2 ? R_JPAD : L_JPAD;
+        }
+      } else {
+        g_SimulatedButtons &= ~trigger;
+      }
+      g_ReplayTestHotkeyFrame++;
+    } else {
+      g_SimulatedButtons &= ~trigger;
+      g_ReplayTestHotkeyFrame = 0;
+    }
+  }
+
+  if (g_practice_test_case == REPLAY_RUNWAY_1X ||
+      g_practice_test_case == REPLAY_RUNWAY_04X ||
+      g_practice_test_case == REPLAY_RUNWAY_HOTKEYS) {
+    if (g_ReplayIsPlaying) {
+      g_ReplayTestPlaybackSeen = TRUE;
+    } else if (g_ReplayTestPlaybackSeen) {
+      set_time_scale(1.0f);
+      g_SimulatedButtons &= ~hotkey_trigger();
+
+      if (practice_replay_had_divergence()) {
+        emu_log("RUNWAY_REPLAY_DIVERGED timestamp=%d duration=%d",
+                practice_replay_get_timestamp(),
+                practice_replay_get_duration());
+        emu_log("TEST_FAILED");
+      } else if (practice_replay_get_timestamp() !=
+                 practice_replay_get_duration()) {
+        emu_log("RUNWAY_REPLAY_TIMESTAMP_MISMATCH timestamp=%d duration=%d",
+                practice_replay_get_timestamp(),
+                practice_replay_get_duration());
+        emu_log("TEST_FAILED");
+      } else {
+        emu_log("TEST_COMPLETE");
+      }
+      g_ReplayTestPlaybackSeen = FALSE;
+    }
+  }
 
   if (g_practice_test_case != RNG_LOAD) {
     return;

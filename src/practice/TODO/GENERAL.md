@@ -2,8 +2,6 @@
     - Finish all the missing bits and bugs
 - Lag monitor
     - Small graph of speed loss
-- Deterministic replay system
-    - Make hotkeys (like pause and timescale) work during replay
 - Align lag
     - Measure the amount of lag the original ROM gets compared to the practice ROM
     - Implement efficiency improvements to bring the practice ROM's lag roughly in line with the original
@@ -19,3 +17,6 @@
 - Grenade cam
     - Bug: explosion and smoke textures get messed up
 - Figure out frame delta determinism after load
+- Code cleanup
+    - Add `void` to functions with no parameters
+    - Use consistent naming (snake case)

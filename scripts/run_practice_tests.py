@@ -22,10 +22,18 @@ from pathlib import Path
 WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
+SRAM_SIZE_BYTES = 128 * 1024
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
+RUNWAY_REPLAY_FIXTURE = ROOT / "tests/replays/runway.ram"
+REPLAY_FIXTURE_TESTS = {
+    "REPLAY_RUNWAY_1X",
+    "REPLAY_RUNWAY_04X",
+    "REPLAY_RUNWAY_HOTKEYS",
+}
+TEST_MIN_TIMEOUT_SECONDS = {"REPLAY_RUNWAY_04X": 180}
 PRINT_LOCK = threading.Lock()
 COLOR_RESET = "\033[0m"
 TEST_COLOR_CODES = (
@@ -67,6 +75,13 @@ def parse_args():
         "--test",
         metavar="TEST_CASE",
         help="run only the named test case",
+    )
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="TEST_CASE",
+        help="exclude a named test case (may be specified more than once)",
     )
     parser.add_argument(
         "--junit-xml",
@@ -262,6 +277,16 @@ def select_test(test_case, rom):
     return result.returncode == 0
 
 
+def install_replay_fixture(test_case, rom):
+    if test_case not in REPLAY_FIXTURE_TESTS:
+        return
+
+    sram = RUNWAY_REPLAY_FIXTURE.read_bytes()
+    if len(sram) != SRAM_SIZE_BYTES:
+        raise ValueError("Runway replay SRAM fixture has the wrong size")
+    rom.with_suffix(".ram").write_bytes(sram)
+
+
 def stream_output(process, output_queue):
     assert process.stdout is not None
     for line in process.stdout:
@@ -416,6 +441,13 @@ def run_test_case(test_case, command, rom_path, temp_dir, stop_event, timeout):
     rom = test_dir / rom_path.name
     shutil.copyfile(rom_path, rom)
 
+    try:
+        install_replay_fixture(test_case, rom)
+    except (OSError, ValueError) as error:
+        return TestResult(test_case, False, f"fixture setup failed: {error}", 0.0)
+
+    timeout = max(timeout, TEST_MIN_TIMEOUT_SECONDS.get(test_case, 0))
+
     print_test_line(test_case, "=== patching ===")
     if not select_test(test_case, rom):
         return TestResult(test_case, False, "ROM patch failed", 0.0)
@@ -541,7 +573,14 @@ def main():
         print(f"error: {error}", file=sys.stderr)
         return 1
 
-    configure_test_colors(test_cases, args.color)
+    unknown_exclusions = sorted(set(args.exclude) - set(test_cases))
+    if unknown_exclusions:
+        print(
+            f"error: unknown excluded test case(s): "
+            f"{', '.join(unknown_exclusions)}",
+            file=sys.stderr,
+        )
+        return 2
 
     if args.test:
         if args.test not in test_cases:
@@ -552,6 +591,14 @@ def main():
             )
             return 2
         test_cases = [args.test]
+
+    excluded_tests = set(args.exclude)
+    test_cases = [test for test in test_cases if test not in excluded_tests]
+    if not test_cases:
+        print("error: all selected test cases were excluded", file=sys.stderr)
+        return 2
+
+    configure_test_colors(test_cases, args.color)
 
     command = emulator_command()
     if command is None:

@@ -854,7 +854,7 @@ u16 joyGetButtons(s8 contpadnum, u16 mask)
     }
 
 #ifdef PRACTICE_ROM
-    if (contpadnum == 0)
+    if (contpadnum == 0 && g_ContDataPtr->playbackcontcount < 0)
     {
         return (g_ContDataPtr->samples[g_ContDataPtr->curlast].pads[contpadnum].button | g_SimulatedButtons) & mask;
     }
@@ -876,7 +876,7 @@ u16 joyGetButtonsPressedThisFrame(s8 contpadnum, u16 mask)
     }
 
 #ifdef PRACTICE_ROM
-    if (contpadnum == 0)
+    if (contpadnum == 0 && g_ContDataPtr->playbackcontcount < 0)
     {
         return (g_ContDataPtr->buttonspressed[contpadnum] | g_SimulatedButtonsPressed) & mask;
     }

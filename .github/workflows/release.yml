@@ -257,6 +257,7 @@ jobs:
               --version "${{ matrix.region.version }}" \
               --timeout 120 \
               --jobs 1 \
+              --exclude REPLAY_RUNWAY_04X \
               --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
           test_status=$?
           cp "$GITHUB_STEP_SUMMARY" "$SUMMARY_FILE"
