@@ -14,6 +14,7 @@
 #include "objecthandler.h"
 #include "player.h"
 #include "practice_hotkeys.h"
+#include "practice_debug.h"
 #include "practice_profile.h"
 #include "practice_replay.h"
 #include "practice_timescale.h"
@@ -230,6 +231,7 @@ void practice_tests_tick() {
   if (g_save_test_timer == -1 && g_CameraMode == CAMERAMODE_FP) {
     g_save_test_timer = 0;
     emu_log("TEST_STARTED");
+    practice_log_memory_usage();
   }
 
   if (g_save_test_timer < 0)

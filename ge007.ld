@@ -226,6 +226,9 @@ SECTIONS
 #include "ld/game.bss.ld.inc"
       build/OUTCODE/src/practice.o (.bss.*);
       *libgcc.a (.bss .bss.*);
+      *(COMMON);
+      /* _start clears BSS in 8-byte chunks and requires an exact multiple. */
+      . = ALIGN(8);
    }
    _bssSegmentEnd = ADDR(.bss) + SIZEOF(.bss);
    _bssSegmentSize = SIZEOF(.bss);

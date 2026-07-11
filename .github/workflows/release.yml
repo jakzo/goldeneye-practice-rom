@@ -115,7 +115,7 @@ jobs:
       - metadata
       - build-ares
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -146,9 +146,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            binutils-mips-linux-gnu \
             ffmpeg \
-            gcc-mips-linux-gnu \
             libcanberra-gtk3-module \
             libcapstone-dev \
             libgl-dev \
@@ -158,8 +156,9 @@ jobs:
             xauth \
             xdelta3 \
             xvfb
-          wget -q https://github.com/n64decomp/qemu-irix/releases/download/v2.11-deb/qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
-          sudo dpkg -i qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
+
+      - name: Build pinned ROM toolchain image
+        run: docker build --target goldeneye --tag goldeneye .
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -199,12 +198,50 @@ jobs:
             ./scripts/extract_diff.j.sh
           fi
 
-      - name: Build practice ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
+      - name: Build IDO reference ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
         run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
           make -j$(nproc)
-          IDO_RECOMP=NO
+          IDO_RECOMP=YES
+          ORIGINAL_CC=ido
+          BUILD_DIR_BASE=build/ido
           VERSION=${{ matrix.region.version }}
           DEV=${{ matrix.build.dev }}
+
+      - name: Build mixed practice ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
+          make -j$(nproc)
+          IDO_RECOMP=YES
+          ORIGINAL_CC=mixed
+          VERSION=${{ matrix.region.version }}
+          DEV=${{ matrix.build.dev }}
+
+      - name: Verify migration harness
+        if: matrix.build.mode == 'release' && matrix.region.version == 'US'
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye make abi-check ORIGINAL_CC=mixed
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye make gcc-global-asm-proof ORIGINAL_CC=mixed
+
+      - name: Compare IDO and mixed artifacts
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
+          make migration-report
+          ORIGINAL_CC=mixed
+          VERSION=${{ matrix.region.version }}
+          DEV=${{ matrix.build.dev }}
+
+      - name: Upload migration manifests and reports
+        uses: actions/upload-artifact@v6
+        with:
+          name: migration-report-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: |
+            build/${{ matrix.region.code }}/.build_config
+            build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.map
+            build/${{ matrix.region.code }}/migration/
+            build/ido/${{ matrix.region.code }}/.build_config
+            build/ido/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.map
+          if-no-files-found: error
 
       - name: Generate xdelta patch
         env:
@@ -232,6 +269,82 @@ jobs:
           path: ${{ env.ARES_PREFIX }}
           key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
           fail-on-cache-miss: true
+
+      - name: Build pre-migration profiler baseline
+        if: matrix.build.mode == 'release' && matrix.region.version == 'US'
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
+          make -j$(nproc)
+          IDO_RECOMP=YES
+          ORIGINAL_CC=ido
+          BUILD_DIR_BASE=build/profile-ido
+          VERSION=US
+          DEV=0
+          PROFILE_PRACTICE=1
+
+      - name: Capture pre-migration profiler baseline
+        if: matrix.build.mode == 'release' && matrix.region.version == 'US'
+        env:
+          ARES: ${{ env.ARES_PREFIX }}/bin/ares
+          ARES_ARGS: >-
+            --fullscreen
+            --no-file-prompt
+            --setting Audio/Driver=None
+            --setting Input/Driver=None
+          XDG_CONFIG_HOME: /tmp/ares-config-profile
+          XDG_DATA_HOME: /tmp/ares-data-profile
+        run: |
+          xvfb-run --auto-servernum \
+            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
+            ./scripts/run_practice_tests.py \
+              --skip-build \
+              --rom-path build/profile-ido/u/ge007.u.z64 \
+              --test REPLAY_RUNWAY_1X \
+              --build-mode release \
+              --version US \
+              --timeout 180 \
+              --profile-csv "$RUNNER_TEMP/migration-phase-0-profile.csv"
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "$PWD:/home/dev" -v "$RUNNER_TEMP:$RUNNER_TEMP" goldeneye \
+            python3 scripts/migration/profile_summary.py \
+              --elf build/profile-ido/u/ge007.u.elf \
+              --csv "$RUNNER_TEMP/migration-phase-0-profile.csv" \
+              --phase "Pre-migration baseline after Phase 0" \
+              --base-average-frame-cycles 1156528 \
+              --output "$RUNNER_TEMP/migration-phase-0-profile.json"
+
+      - name: Upload pre-migration profiler baseline
+        if: matrix.build.mode == 'release' && matrix.region.version == 'US'
+        uses: actions/upload-artifact@v6
+        with:
+          name: migration-profiler-phase-0-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/migration-phase-0-profile.csv
+            ${{ runner.temp }}/migration-phase-0-profile.json
+          if-no-files-found: error
+
+      - name: Capture complete pre-migration IDO test baseline
+        if: matrix.build.mode == 'release' && matrix.region.version == 'US'
+        env:
+          ARES: ${{ env.ARES_PREFIX }}/bin/ares
+          ARES_ARGS: >-
+            --fullscreen
+            --no-file-prompt
+            --setting Audio/Driver=None
+            --setting Input/Driver=None
+          XDG_CONFIG_HOME: /tmp/ares-config-ido
+          XDG_DATA_HOME: /tmp/ares-data-ido
+        run: |
+          xvfb-run --auto-servernum \
+            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
+            ./scripts/run_practice_tests.py \
+              --skip-build \
+              --rom-path build/ido/u/ge007.u.z64 \
+              --build-mode release \
+              --version US \
+              --timeout 180 \
+              --jobs 1 \
+              --junit-xml "$RUNNER_TEMP/practice-test-artifacts/ido-baseline.xml"
 
       - name: Run practice tests (${{ matrix.build.mode }}, ${{ matrix.region.version }})
         env:
@@ -280,7 +393,9 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
+          path: |
+            ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
+            ${{ runner.temp }}/practice-test-artifacts/*.xml
           if-no-files-found: warn
 
       - name: Upload failed test artifacts

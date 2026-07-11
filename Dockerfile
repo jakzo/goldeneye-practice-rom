@@ -1,8 +1,20 @@
 FROM ubuntu:22.04 AS base
 
+ARG MIPS_BINUTILS_VERSION=2.38-1ubuntu1cross2
+ARG MIPS_GCC_META_VERSION=4:10.2.0-1
+ARG MIPS_GCC_VERSION=10.3.0-1ubuntu1cross2
+
 # install distro packages
 RUN apt update
-RUN apt -y install bash-completion sudo binutils-mips-linux-gnu gcc-mips-linux-gnu g++-mips-linux-gnu wget make git python3 libcapstone-dev pkg-config build-essential
+RUN apt -y install \
+    bash-completion \
+    sudo \
+    binutils-mips-linux-gnu=${MIPS_BINUTILS_VERSION} \
+    gcc-mips-linux-gnu=${MIPS_GCC_META_VERSION} \
+    gcc-10-mips-linux-gnu=${MIPS_GCC_VERSION} \
+    g++-mips-linux-gnu=${MIPS_GCC_META_VERSION} \
+    g++-10-mips-linux-gnu=${MIPS_GCC_VERSION} \
+    wget make git python3 libcapstone-dev pkg-config build-essential
 
 # install qemu (can be removed if you're using ido recomp)
 RUN wget https://github.com/n64decomp/qemu-irix/releases/download/v2.11-deb/qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb -P /tmp
@@ -19,21 +31,26 @@ WORKDIR /home/dev
 
 CMD ["/bin/bash"]
 
-FROM ubuntu:24.04 AS test
+FROM ubuntu:22.04 AS test
 
 ARG ARES_VERSION=v148
+ARG MIPS_BINUTILS_VERSION=2.38-1ubuntu1cross2
+ARG MIPS_GCC_META_VERSION=4:10.2.0-1
+ARG MIPS_GCC_VERSION=10.3.0-1ubuntu1cross2
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt -y install \
-    binutils-mips-linux-gnu \
+    binutils-mips-linux-gnu=${MIPS_BINUTILS_VERSION} \
     build-essential \
     ca-certificates \
     cmake \
     curl \
     ffmpeg \
-    g++-mips-linux-gnu \
-    gcc-mips-linux-gnu \
+    g++-mips-linux-gnu=${MIPS_GCC_META_VERSION} \
+    g++-10-mips-linux-gnu=${MIPS_GCC_VERSION} \
+    gcc-mips-linux-gnu=${MIPS_GCC_META_VERSION} \
+    gcc-10-mips-linux-gnu=${MIPS_GCC_VERSION} \
     git \
     libcanberra-gtk3-module \
     libcapstone-dev \

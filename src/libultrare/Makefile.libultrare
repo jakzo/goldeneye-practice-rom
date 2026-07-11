@@ -294,6 +294,18 @@ LIBULTRARE_OS_S_FILES :=
 
 ULTRAFILES_S := $(foreach dir,src/libultrare,$(wildcard $(dir)/*.s))
 
+LIBULTRA_C_SOURCE_FILES := \
+	$(foreach file,$(LIBULTRA_AUDIO_C_FILES),src/libultra/audio/$(file).c) \
+	$(foreach file,$(LIBULTRARE_AUDIO_C_FILES),src/libultrare/audio/$(file).c) \
+	$(foreach file,$(LIBULTRA_GU_C_FILES),src/libultra/gu/$(file).c) \
+	$(foreach file,$(LIBULTRARE_GU_C_FILES),src/libultrare/gu/$(file).c) \
+	$(foreach file,$(LIBULTRA_IO_C_FILES),src/libultra/io/$(file).c) \
+	$(foreach file,$(LIBULTRARE_IO_C_FILES),src/libultrare/io/$(file).c) \
+	$(foreach file,$(LIBULTRA_LIBC_C_FILES),src/libultra/libc/$(file).c) \
+	$(foreach file,$(LIBULTRARE_LIBC_C_FILES),src/libultrare/libc/$(file).c) \
+	$(foreach file,$(LIBULTRA_OS_C_FILES),src/libultra/os/$(file).c) \
+	$(foreach file,$(LIBULTRARE_OS_C_FILES),src/libultrare/os/$(file).c)
+
 ULTRAOBJECTS := $(foreach file,$(ULTRAFILES_S),$(BUILD_DIR)/$(file:.s=.o)) \
 				$(foreach file,$(ULTRAFILES_C),$(BUILD_DIR)/$(file:.c=.o)) \
                 \
@@ -331,13 +343,15 @@ ULTRAOBJECTS := $(foreach file,$(ULTRAFILES_S),$(BUILD_DIR)/$(file:.s=.o)) \
 #
 
 $(BUILD_DIR)/src/libultra/%.o: src/libultra/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultra/%.o: src/libultra/%.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/%.o: src/libultrare/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/%.o: src/libultrare/%.s
 	$(AS) $(ASFLAGS) -o $@ $<
@@ -353,13 +367,15 @@ $(BUILD_DIR)/src/libultrare/audio/%.o: LIBULTRA_OPTIMIZATION := -O3
 $(BUILD_DIR)/src/libultrare/audio/env.o: ASSERT_FLAG :=
 
 $(BUILD_DIR)/src/libultra/audio/%.o: src/libultra/audio/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultra/audio/%.o: src/libultra/audio/%.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/audio/%.o: src/libultrare/audio/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/audio/%.o: src/libultrare/audio/%.s
 	$(AS) $(ASFLAGS) -o $@ $<
@@ -378,13 +394,15 @@ $(BUILD_DIR)/src/libultra/gu/%.o: LIBULTRA_OPTIMIZATION := -O3
 $(BUILD_DIR)/src/libultrare/gu/%.o: LIBULTRA_OPTIMIZATION := -O3
 
 $(BUILD_DIR)/src/libultra/gu/%.o: src/libultra/gu/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultra/gu/%.o: src/libultra/gu/%.s
 	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/gu/%.o: src/libultrare/gu/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/gu/%.o: src/libultrare/gu/%.s
 	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
@@ -401,13 +419,15 @@ $(BUILD_DIR)/src/libultrare/io/pimgr.o: LIBULTRA_OPTIMIZATION := -O2
 endif
 
 $(BUILD_DIR)/src/libultra/io/%.o: src/libultra/io/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultra/io/%.o: src/libultra/io/%.s
 	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/io/%.o: src/libultrare/io/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 
 $(BUILD_DIR)/src/libultrare/io/%.o: src/libultrare/io/%.s
@@ -427,13 +447,15 @@ $(BUILD_DIR)/src/libultra/libc/ll.o: MIPSISET := -mips3 -o32
 $(BUILD_DIR)/src/libultra/libc/llcvt.o: MIPSISET := -mips3 -o32
 
 $(BUILD_DIR)/src/libultra/libc/%.o: src/libultra/libc/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultra/libc/%.o: src/libultra/libc/%.s
 	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/libc/%.o: src/libultrare/libc/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/libc/%.o: src/libultrare/libc/%.s
 	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
@@ -447,13 +469,15 @@ $(BUILD_DIR)/src/libultrare/libc/%.o: src/libultrare/libc/%.s
 # note that `_FINALROM` is defined, this is for the declaration of `__osEventStateTab[OS_NUM_EVENTS]`
 
 $(BUILD_DIR)/src/libultra/os/%.o: src/libultra/os/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -D_FINALROM -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -D_FINALROM -o $@ $<
 
 $(BUILD_DIR)/src/libultra/os/%.o: src/libultra/os/%.s
 	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/os/%.o: src/libultrare/os/%.c
-	$(CC) -c $(CFLAGS_LIBULTRA) -D_FINALROM -o $@ $<
+	@mkdir -p $(@D)
+	$(call original-cc,$<) -c $(call original-libultra-flags,$<) -D_FINALROM -o $@ $<
 
 $(BUILD_DIR)/src/libultrare/os/%.o: src/libultrare/os/%.s
 	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<

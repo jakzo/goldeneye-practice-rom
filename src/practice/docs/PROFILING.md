@@ -75,7 +75,7 @@ capture, copy it to master's checked-in
 
 The original capture must use its normal `FINAL=YES` IDO `-O2` build. Compare
 it with the practice release build, where original engine code is also IDO
-`-O2` and practice code is GCC `-O2`; do not use the `DEV=1` practice capture
+`-O2` and practice code is GCC `-Os`; do not use a non-release practice capture
 as the release regression.
 
 ### Replay determinism checks

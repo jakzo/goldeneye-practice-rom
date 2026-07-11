@@ -107,6 +107,12 @@ def parse_args():
         help="use an existing test ROM instead of building it",
     )
     parser.add_argument(
+        "--rom-path",
+        metavar="PATH",
+        type=Path,
+        help="test this ROM path (implies --skip-build)",
+    )
+    parser.add_argument(
         "--version",
         choices=("US", "EU", "JP"),
         default="US",
@@ -631,8 +637,10 @@ def main():
         return 1
 
     country_code = {"US": "u", "EU": "e", "JP": "j"}[args.version]
-    rom_path = ROOT / f"build/{country_code}/ge007.{country_code}.z64"
-    if args.skip_build:
+    rom_path = args.rom_path or ROOT / f"build/{country_code}/ge007.{country_code}.z64"
+    if not rom_path.is_absolute():
+        rom_path = ROOT / rom_path
+    if args.skip_build or args.rom_path:
         if not rom_path.is_file():
             print(f"error: test ROM does not exist: {rom_path}", file=sys.stderr)
             return 1

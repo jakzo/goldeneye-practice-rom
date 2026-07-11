@@ -1,0 +1,4 @@
+# One repository-relative C source path per line.
+#
+# Empty in Phase 0: ORIGINAL_CC=mixed must reproduce the IDO reference build.
+# Add original game/engine/SDK sources here as cohorts migrate to GCC.
