@@ -57,7 +57,7 @@ jobs:
             echo "EOF" >> "$GITHUB_OUTPUT"
           fi
 
-  ares:
+  build-ares:
     runs-on: ubuntu-24.04
 
     steps:
@@ -110,10 +110,10 @@ jobs:
           cmake --build /tmp/ares-build --parallel 2
           cmake --install /tmp/ares-build
 
-  build:
+  build-and-test:
     needs:
       - metadata
-      - ares
+      - build-ares
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -262,6 +262,18 @@ jobs:
           cp "$GITHUB_STEP_SUMMARY" "$SUMMARY_FILE"
           exit "$test_status"
 
+      - name: Prepare missing test result summary
+        if: always()
+        env:
+          SUMMARY_FILE: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
+        run: |
+          if [ ! -s "$SUMMARY_FILE" ]; then
+            printf '# Practice ROM tests — %s / %s\n\n' \
+              '${{ matrix.build.mode }}' '${{ matrix.region.version }}' > "$SUMMARY_FILE"
+            printf 'Tests did not finish because the build job failed before producing a test summary.\n' \
+              >> "$SUMMARY_FILE"
+          fi
+
       - name: Upload test result summary
         if: always()
         uses: actions/upload-artifact@v6
@@ -282,12 +294,12 @@ jobs:
   release:
     needs:
       - metadata
-      - build
+      - build-and-test
     if: >-
       always() &&
       github.event_name != 'pull_request' &&
       needs.metadata.result == 'success' &&
-      (needs.metadata.outputs.prerelease == 'true' || needs.build.result == 'success')
+      (needs.metadata.outputs.prerelease == 'true' || needs.build-and-test.result == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -311,6 +323,7 @@ jobs:
 
       - name: Download test result summaries
         if: needs.metadata.outputs.prerelease == 'true'
+        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           pattern: practice-test-summary-*-${{ github.run_attempt }}
@@ -324,15 +337,20 @@ jobs:
         run: |
           printf '%s' "$RELEASE_BODY" > "$RUNNER_TEMP/release-notes.md"
           if [ "$PRERELEASE" = "true" ]; then
-            summary_count=$(find "$RUNNER_TEMP/summaries" -name '*.md' | wc -l)
+            mkdir -p "$RUNNER_TEMP/summaries"
+            summary_count=$(find "$RUNNER_TEMP/summaries" -type f -name '*.md' | wc -l)
             if [ "$summary_count" -ne 6 ]; then
-              echo "::error::Expected 6 test summaries, found $summary_count."
-              exit 1
+              echo "::warning::Expected 6 test summaries, found $summary_count. Publishing available summaries."
             fi
             printf '\n\n---\n\n' >> "$RUNNER_TEMP/release-notes.md"
-            find "$RUNNER_TEMP/summaries" -name '*.md' -print0 \
-              | sort -z \
-              | xargs -0 cat >> "$RUNNER_TEMP/release-notes.md"
+            if [ "$summary_count" -gt 0 ]; then
+              find "$RUNNER_TEMP/summaries" -type f -name '*.md' -print0 \
+                | sort -z \
+                | xargs -0 cat >> "$RUNNER_TEMP/release-notes.md"
+            else
+              printf 'Test summaries were unavailable because the build jobs failed before testing finished.\n' \
+                >> "$RUNNER_TEMP/release-notes.md"
+            fi
           fi
 
       - name: Publish release

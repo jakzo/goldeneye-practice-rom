@@ -19,8 +19,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-TEST_COMPLETE = "TEST_COMPLETE"
-TEST_FAILED = "TEST_FAILED"
 WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
@@ -333,9 +331,11 @@ def run_test(test_case, command, rom, runtime_dir, stop_event, timeout):
             print_test_line(test_case, line.rstrip("\r\n"))
             if line.startswith(WARNING_PREFIX) or line.startswith(ERROR_PREFIX):
                 return False, line.strip(), "".join(output)
-            if TEST_FAILED in line:
+            if "TEST_FAILED" in line:
                 return False, "failed", "".join(output)
-            if TEST_COMPLETE in line:
+            if "CRASH_END" in line:
+                return False, "crashed", "".join(output)
+            if "TEST_COMPLETE" in line:
                 return True, "completed", "".join(output)
     finally:
         stop_emulator(process)
