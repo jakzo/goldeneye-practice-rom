@@ -3,7 +3,6 @@
 - Lag monitor
     - Small graph of speed loss
 - Align lag
-    - Measure the amount of lag the original ROM gets compared to the practice ROM
     - Implement efficiency improvements to bring the practice ROM's lag roughly in line with the original
 - Dam gate guard indicator
     - Show their speed/progress to the gate
