@@ -20,4 +20,4 @@ It uses debugging symbols to understand the locations of all functions and track
     - Frame start and stop timings
     - Average frame delta
     - Automatic start and stop on level start/stop
-- [x] Generate an SVG flame graph from the folded-stack data
+- [x] Generate an interactive HTML flame graph from the folded-stack data

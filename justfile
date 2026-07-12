@@ -72,7 +72,7 @@ profile-ares ARES ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="bu
     mkdir -p "$(dirname "{{ OUTPUT }}")"
     ARES_N64_PROFILE_SYMBOLS="$(pwd)/{{ ELF }}" ARES_N64_PROFILE_OUTPUT="$(pwd)/{{ OUTPUT }}" "{{ ARES }}" --no-file-prompt "$(pwd)/{{ ROM }}"
 
-# Render one profiler .folded capture as an SVG flame graph.
+# Render one profiler .folded capture as an interactive HTML flame graph.
 profile-ares-flamegraph INPUT OUTPUT="":
     python3 ares/tools/n64-profiler-flamegraph.py "{{ INPUT }}" {{ if OUTPUT == "" { "" } else { '"' + OUTPUT + '"' } }}
 
