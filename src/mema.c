@@ -549,6 +549,25 @@ s32 memaGetLongestFree(void)
 	return 0;
 }
 
+#ifdef PROFILE_PRACTICE
+void memaGetFreeStats(u32 *totalfree, u32 *largestfree)
+{
+	struct memaspace *curr;
+	u32 total = 0;
+	u32 largest = 0;
+
+	for (curr = &g_MemoryAllocations.spaces[0]; curr->addr != -1; curr++) {
+		total += curr->size;
+		if (curr->size > largest) {
+			largest = curr->size;
+		}
+	}
+
+	*totalfree = total;
+	*largestfree = largest;
+}
+#endif
+
 /**
  * Resize an existing memaspace. Either by shrinking the old one, or
  * by registering a new memaspace containing the remaining bytes.

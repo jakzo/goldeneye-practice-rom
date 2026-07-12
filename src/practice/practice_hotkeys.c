@@ -88,13 +88,14 @@ bool practice_check_hotkeys(void) {
     return TRUE;
   }
 
-#if DEV
-  // TODO: Display memory usage while paused?
+#ifdef PROFILE_PRACTICE
   if (jgbptf & R_CBUTTONS) {
     practice_log_memory_usage();
     return TRUE;
   }
+#endif
 
+#if DEV
   // Log the room the player is currently in (useful for finding room IDs).
   if (jgbptf & U_CBUTTONS) {
     practiceLogInfo("Room: %d", g_BgCurrentRoom);

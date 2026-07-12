@@ -1,5 +1,6 @@
 #include "practice_profile.h"
 #include "emu_log.h"
+#include "practice_debug.h"
 #include "practice_replay.h"
 #include "tlb_manage.h"
 
@@ -62,11 +63,13 @@ void practice_profile_end(PracticeProfileArea area) {
     g_ProfileCycles[area] += osGetCount() - g_ProfileStart[area];
 }
 
-void practice_profile_frame_end(void) {
+void practice_profile_frame_end(Gfx *gdl) {
   u32 tlbLoads;
   u32 tlbTotalCycles;
   u32 tlbDmaCycles;
   u32 tlbIcacheCycles;
+
+  practice_memory_profile_sample(gdl);
 
   if (!g_ProfileFrameActive)
     return;

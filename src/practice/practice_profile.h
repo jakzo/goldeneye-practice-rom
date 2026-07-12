@@ -25,13 +25,13 @@ void practice_profile_set_enabled(s32 enabled);
 void practice_profile_frame_start(s32 delta_frames);
 void practice_profile_begin(PracticeProfileArea area);
 void practice_profile_end(PracticeProfileArea area);
-void practice_profile_frame_end(void);
+void practice_profile_frame_end(Gfx *gdl);
 #else
 #define practice_profile_set_enabled(enabled) ((void)0)
 #define practice_profile_frame_start(delta_frames) ((void)0)
 #define practice_profile_begin(area) ((void)0)
 #define practice_profile_end(area) ((void)0)
-#define practice_profile_frame_end() ((void)0)
+#define practice_profile_frame_end(gdl) ((void)0)
 #endif
 
 #endif

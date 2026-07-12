@@ -41,6 +41,7 @@
 #include "PR/R4300.h"
 #include "practice/practice_config.h"
 #include "practice/practice_hotkeys.h"
+#include "practice/practice_debug.h"
 #include "practice/practice_profile.h"
 #include "practice/practice_replay.h"
 #include "practice/practice_timescale.h"
@@ -449,6 +450,9 @@ void bossMainloop(void)
         }
 
         memaReset(mempAllocBytesInBank(g_CurentMaMallocValue, MEMPOOL_STAGE), g_CurentMaMallocValue);
+#ifdef PRACTICE_ROM
+        practice_memory_profile_reset();
+#endif
         reset_play_data_ptrs();
 
         localSelectedNumPlayers = 0;
@@ -677,7 +681,7 @@ void bossMainloop(void)
                             gdl = debmenuDraw(gdl);
 #ifdef PRACTICE_ROM
                             practice_profile_end(PRACTICE_PROFILE_TICK);
-                            practice_profile_frame_end();
+                            practice_profile_frame_end(gdl);
 #endif
 
                             if (get_memusage_display_flag())
