@@ -64,6 +64,18 @@ profile-runway OUTPUT="src/practice/docs/profile_runway_practice.csv":
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test REPLAY_RUNWAY_1X --profile-csv "{{ OUTPUT }}"
 
+# Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
+profile-ares ARES ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007":
+    test -x "{{ ARES }}"
+    test -f "{{ ROM }}"
+    test -f "{{ ELF }}"
+    mkdir -p "$(dirname "{{ OUTPUT }}")"
+    ARES_N64_PROFILE_SYMBOLS="$(pwd)/{{ ELF }}" ARES_N64_PROFILE_OUTPUT="$(pwd)/{{ OUTPUT }}" "{{ ARES }}" --no-file-prompt "$(pwd)/{{ ROM }}"
+
+# Render one profiler .folded capture as an SVG flame graph.
+profile-ares-flamegraph INPUT OUTPUT="":
+    python3 ares/tools/n64-profiler-flamegraph.py "{{ INPUT }}" {{ if OUTPUT == "" { "" } else { '"' + OUTPUT + '"' } }}
+
 test-all JOBS="":
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" -e PRACTICE_TEST_JOBS="{{ JOBS }}" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --build-mode release
