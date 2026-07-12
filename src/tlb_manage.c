@@ -39,7 +39,7 @@
  */
 #ifdef PRACTICE_ROM
 // TLB pages hold code, practice rom adds a lot of code so need to increase this
-#define MANAGEMENT_TABLE_COUNT  256
+#define MANAGEMENT_TABLE_COUNT  160
 #else
 #define MANAGEMENT_TABLE_COUNT  128
 #endif
@@ -47,10 +47,26 @@
 /**
  * Number of entries in the mapping table.
  */
+
+#ifdef PRACTICE_ROM
+
+// Increase cached TLB count since there is now more code to run
+// This is reducing memory, tried to compensate for it by deleting some other
+// unused stuff but the game does have less memory than before still
+#ifndef VERSION_EU
+#define MAPPING_TABLE_COUNT 100
+#else
+#define MAPPING_TABLE_COUNT 103
+#endif
+
+#else
+
 #ifndef VERSION_EU
 #define MAPPING_TABLE_COUNT 90
 #else
 #define MAPPING_TABLE_COUNT 93
+#endif
+
 #endif
 
 #define TLB_SEGMENT_COUNT MAPPING_TABLE_COUNT
