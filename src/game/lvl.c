@@ -53,6 +53,9 @@
 #include "bondview_r.h"
 #include "initBondDATAdefaults.h"
 #include "viewport.h"
+#ifdef REPLAY_PLAYBACK
+#include "replay.h"
+#endif
 #include "stan.h"
 #include "gun.h"
 #include "unk_091080.h"
@@ -303,6 +306,9 @@ void lvlStageLoad(s32 stage)
     s32 i;
     struct player_data *player_data;
 
+#ifdef REPLAY_PLAYBACK
+    replay_before_stage_load(stage);
+#endif
     g_CurrentStageToLoad = stage;
 
     // this if block pushes where g_CurrentStageToLoad gets loaded to the
@@ -498,6 +504,9 @@ void lvlStageLoad(s32 stage)
         }
 
         set_cur_player(0);
+#ifdef REPLAY_PLAYBACK
+        replay_on_stage_load();
+#endif
     }
 
     set_contents_of_80036078(0);

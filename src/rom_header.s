@@ -11,7 +11,11 @@
 .ascii "GOLDENEYE           " # ROM name: 20 bytes
 .word  0x00000000 # unknown
 .word  0x0000004E # cartridge
+.ifdef REPLAY_PLAYBACK
+.ascii "ED"       # libdragon homebrew ID; enables explicit save metadata
+.else
 .ascii "GE"       # cartridge ID
+.endif
 .ifdef LANG_US
 .ascii "E"        # country
 .endif
@@ -21,4 +25,8 @@
 .ifdef LANG_EU
 .ascii "P"        # country
 .endif
+.ifdef REPLAY_PLAYBACK
+.byte  0x60       # libdragon metadata: 1 Mbit SRAM
+.else
 .byte  0x00       # version
+.endif

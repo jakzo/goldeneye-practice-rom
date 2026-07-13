@@ -1,5 +1,50 @@
 # Goldeneye 007
 
+## Performance benchmarks
+
+These commands build the replay-enabled base decomp and benchmark a
+deterministic replay for each region using the profiling build of
+ares. Set `ARES` to the profiler-enabled ares executable first:
+
+```bash
+export ARES=/path/to/ares
+export ARES_ARGS="--setting Audio/Driver=None --setting Input/Driver=None"
+mkdir -p build/performance/base
+```
+
+US (`archives.ram`, 202 frames):
+
+```bash
+docker run --rm -v "$(pwd):/home/dev" goldeneye make -j8 REPLAY_PLAYBACK=1 COMPARE=0 VERSION=US
+ARES_N64_PROFILE_SYMBOLS="$(pwd)/build/u/ge007.u.elf" \
+ARES_N64_PROFILE_OUTPUT="$(pwd)/build/performance/base/archives-us" \
+ARES_N64_PROFILE_REPLAY=1 \
+python3 scripts/run_replay.py tests/replays/archives.ram --version US --timeout 120
+```
+
+JP (`archives.ram`, 202 frames):
+
+```bash
+docker run --rm -v "$(pwd):/home/dev" goldeneye make -j8 REPLAY_PLAYBACK=1 COMPARE=0 VERSION=JP
+ARES_N64_PROFILE_SYMBOLS="$(pwd)/build/j/ge007.j.elf" \
+ARES_N64_PROFILE_OUTPUT="$(pwd)/build/performance/base/archives-jp" \
+ARES_N64_PROFILE_REPLAY=1 \
+python3 scripts/run_replay.py tests/replays/archives.ram --version JP --timeout 120
+```
+
+EU (`archives_eu.ram`, 218 frames):
+
+```bash
+docker run --rm -v "$(pwd):/home/dev" goldeneye make -j8 REPLAY_PLAYBACK=1 COMPARE=0 VERSION=EU
+ARES_N64_PROFILE_SYMBOLS="$(pwd)/build/e/ge007.e.elf" \
+ARES_N64_PROFILE_OUTPUT="$(pwd)/build/performance/base/archives-eu" \
+ARES_N64_PROFILE_REPLAY=1 \
+python3 scripts/run_replay.py tests/replays/archives_eu.ram --version EU --timeout 120
+```
+
+Each command fails on replay divergence, an incomplete capture, or an
+unexpected profiler frame count.
+
 [![NTSC-Status][NTCS-badge]][NTCS-link]
 [![JP-Status][JP-badge]][JP-link]
 [![PAL-Status][PAL-badge]][PAL-link]

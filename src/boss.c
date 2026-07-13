@@ -39,6 +39,9 @@
 #include "game/player.h"
 #include "game/unk_0C0A70.h"
 #include "PR/R4300.h"
+#ifdef REPLAY_PLAYBACK
+#include "replay.h"
+#endif
 
 /**
  * @file boss.c
@@ -165,6 +168,9 @@ void bossInitMainthreadData(void)
     rspInit();
     dynInit();
     joyInit();
+#ifdef REPLAY_PLAYBACK
+    replay_init();
+#endif
     osCreateMesgQueue(&bossmq, &bossmsg, 1);
 
     for (i = 0; i != MAXCONTROLLERS; i++)
@@ -314,6 +320,9 @@ void bossMainloop(void)
 
     done = 0;
     reset_mem_bank_5();
+#ifdef REPLAY_PLAYBACK
+    g_StageNum = replay_get_stage();
+#endif
 
     if (tokenFind(1, "-level_") != NULL)
     {

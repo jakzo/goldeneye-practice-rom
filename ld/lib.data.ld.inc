@@ -20,6 +20,9 @@
       build/OUTCODE/src/getra.o (.data);
       build/OUTCODE/src/ramrom.o (.data);
       build/OUTCODE/src/boss.o (.data);
+#ifdef REPLAY_PLAYBACK
+      build/OUTCODE/src/replay.o (.data);
+#endif
       build/OUTCODE/src/music.o (.data);
       build/OUTCODE/src/snd.o (.data);
       build/OUTCODE/src/memp.o (.data);
