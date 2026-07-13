@@ -41,6 +41,11 @@ jobs:
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "make_latest=false" >> "$GITHUB_OUTPUT"
             echo "file_prefix=goldeneye_practice_rom_build_${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+            echo "body<<EOF" >> "$GITHUB_OUTPUT"
+            echo "This release contains the latest development build of the practice ROM." >> "$GITHUB_OUTPUT"
+            echo "Features may be incomplete or broken." >> "$GITHUB_OUTPUT"
+            echo "You may want to download the [latest stable release](https://github.com/jakzo/goldeneye-practice-rom/releases/latest) instead." >> "$GITHUB_OUTPUT"
+            echo "EOF" >> "$GITHUB_OUTPUT"
           else
             first_entry=$(awk '/^# /{if(found) exit; found=1} found{print}' CHANGELOG.md)
             version=$(echo "$first_entry" | head -n1 | sed 's/^# //')

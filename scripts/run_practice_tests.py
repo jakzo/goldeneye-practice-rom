@@ -610,9 +610,10 @@ def write_github_summary(results):
 
     passed_count = sum(result.passed for result in results)
     lines = [
-        "## Practice ROM test results",
-        "",
         f"**{passed_count} passed, {len(results) - passed_count} failed**",
+        "",
+        "<details>",
+        "<summary>View individual test results</summary>",
         "",
         "| Test | Result | Duration |",
         "| --- | --- | ---: |",
@@ -622,6 +623,7 @@ def write_github_summary(results):
         lines.append(
             f"| `{result.name}` | {status} | {result.duration:.2f}s |"
         )
+    lines.extend(["", "</details>"])
 
     with open(summary_path, "a", encoding="utf-8") as summary:
         summary.write("\n".join(lines) + "\n")

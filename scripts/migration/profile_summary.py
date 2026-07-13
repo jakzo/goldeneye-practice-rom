@@ -93,12 +93,21 @@ def markdown_summary(result, recorded):
     region = result["region"]
     build_mode = result["build_mode"]
     lines = [
-        f"## Performance — {region}",
+        (
+            "**Performance impact:** "
+            f"{result['frame_cycles_difference_from_base_percent']:+.2f}% "
+            "vs base decomp, "
+            f"{result['frame_cycles_difference_from_previous_percent']:+.2f}% "
+            "vs previous release"
+        ),
+        "",
+        "<details>",
+        "<summary>View performance details</summary>",
         "",
         (
             "| Build | Total code size (bytes) | Average TLB loads/frame | "
             "Average frame cycles | Difference from base decomp | "
-            "Difference from recorded release | Frames |"
+            "Difference from previous release | Frames |"
         ),
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
         (
@@ -114,9 +123,11 @@ def markdown_summary(result, recorded):
             f"{result['average_tlb_loads']:.2f} | "
             f"{result['average_frame_cycles']:,.0f} | "
             f"{result['frame_cycles_difference_from_base_percent']:+.2f}% | "
-            f"{result['frame_cycles_difference_from_recorded_percent']:+.2f}% | "
+            f"{result['frame_cycles_difference_from_previous_percent']:+.2f}% | "
             f"{result['frames']} |"
         ),
+        "",
+        "</details>",
         "",
     ]
     return "\n".join(lines)
@@ -159,7 +170,7 @@ def main():
         "frame_cycles_difference_from_base_percent": difference_from_base,
     }
     if recorded is not None:
-        result["frame_cycles_difference_from_recorded_percent"] = percent_difference(
+        result["frame_cycles_difference_from_previous_percent"] = percent_difference(
             average_frame_cycles, float(recorded["average_frame_cycles"])
         )
 
