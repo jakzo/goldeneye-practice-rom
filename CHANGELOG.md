@@ -37,8 +37,7 @@
 
 ## Performance
 
-- Restored practice-ROM performance to parity with the original ROM, improving from about 0.6x speed to normal speed in the Runway replay benchmark (the optimized build measured about 1% faster than the original); see the [performance benchmarks](src/practice/docs/TODO/PERFORMANCE.md)
-- Removed unused debug and ZX Spectrum code and expanded the cached TLB code capacity to eliminate the extra code-loading stalls
+- Improved practice ROM performance to near parity with the original ROM, improving from about 0.6x speed to 0.9x speed in the Archives replay benchmark; see the [performance benchmarks](src/practice/docs/TODO/PERFORMANCE.md)
 
 ## Stability and development
 
