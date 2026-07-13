@@ -23,6 +23,9 @@ WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
 SRAM_SIZE_BYTES = 128 * 1024
+REPLAY_HEADER_OFFSET = 0x600
+REPLAY_REGION_OFFSET = REPLAY_HEADER_OFFSET + 0x10
+REPLAY_REGIONS = {"US": 1, "JP": 2, "EU": 3}
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
@@ -33,7 +36,11 @@ REPLAY_FIXTURES = {
     "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
     "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives.ram",
 }
-TEST_MIN_TIMEOUT_SECONDS = {"REPLAY_ARCHIVES_04X": 180}
+EU_REPLAY_FIXTURES = {
+    "REPLAY_ARCHIVES": ROOT / "tests/replays/archives_eu.ram",
+    "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives_eu.ram",
+    "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives_eu.ram",
+}
 PRINT_LOCK = threading.Lock()
 COLOR_RESET = "\033[0m"
 TEST_COLOR_CODES = (
@@ -94,6 +101,14 @@ def parse_args():
         metavar="PATH",
         type=Path,
         help="write PROFILE_CSV rows from a single test to this CSV file",
+    )
+    parser.add_argument(
+        "--wait-for-emulator-exit",
+        action="store_true",
+        help=(
+            "wait for a successful emulator exit after the replay "
+            "(used when ares must flush profiler output)"
+        ),
     )
     parser.add_argument(
         "--build-mode",
@@ -291,14 +306,17 @@ def select_test(test_case, rom):
     return result.returncode == 0
 
 
-def install_replay_fixture(test_case, rom):
-    fixture = REPLAY_FIXTURES.get(test_case)
+def install_replay_fixture(test_case, rom, version):
+    fixture = (
+        EU_REPLAY_FIXTURES.get(test_case) if version == "EU" else None
+    ) or REPLAY_FIXTURES.get(test_case)
     if fixture is None:
         return
 
-    sram = fixture.read_bytes()
+    sram = bytearray(fixture.read_bytes())
     if len(sram) != SRAM_SIZE_BYTES:
         raise ValueError(f"{fixture.name} replay SRAM fixture has the wrong size")
+    sram[REPLAY_REGION_OFFSET] = REPLAY_REGIONS[version]
     rom.with_suffix(".ram").write_bytes(sram)
 
 
@@ -321,7 +339,15 @@ def stop_emulator(process):
         process.wait()
 
 
-def run_test(test_case, command, rom, runtime_dir, stop_event, timeout):
+def run_test(
+    test_case,
+    command,
+    rom,
+    runtime_dir,
+    stop_event,
+    timeout,
+    wait_for_emulator_exit,
+):
     environment = os.environ.copy()
     environment["XDG_CONFIG_HOME"] = str(runtime_dir / "config")
     environment["XDG_DATA_HOME"] = str(runtime_dir / "data")
@@ -341,6 +367,7 @@ def run_test(test_case, command, rom, runtime_dir, stop_event, timeout):
     output_thread.start()
     deadline = time.monotonic() + timeout
     output = []
+    test_completed = False
 
     try:
         while True:
@@ -361,9 +388,17 @@ def run_test(test_case, command, rom, runtime_dir, stop_event, timeout):
                 continue
 
             if line is None:
+                status = process.wait()
+                if wait_for_emulator_exit and status == 0:
+                    detail = (
+                        "completed and emulator exited"
+                        if test_completed
+                        else "emulator exited after profiled replay"
+                    )
+                    return True, detail, "".join(output)
                 return (
                     False,
-                    f"emulator exited with status {process.wait()}",
+                    f"emulator exited with status {status}",
                     "".join(output),
                 )
 
@@ -376,7 +411,10 @@ def run_test(test_case, command, rom, runtime_dir, stop_event, timeout):
             if "CRASH_END" in line:
                 return False, "crashed", "".join(output)
             if "TEST_COMPLETE" in line:
-                return True, "completed", "".join(output)
+                if wait_for_emulator_exit:
+                    test_completed = True
+                else:
+                    return True, "completed", "".join(output)
     finally:
         stop_emulator(process)
         output_thread.join(timeout=1)
@@ -450,18 +488,25 @@ def stop_video_capture(process):
             process.wait()
 
 
-def run_test_case(test_case, command, rom_path, temp_dir, stop_event, timeout):
+def run_test_case(
+    test_case,
+    command,
+    rom_path,
+    temp_dir,
+    stop_event,
+    timeout,
+    wait_for_emulator_exit,
+    version,
+):
     test_dir = temp_dir / test_case
     test_dir.mkdir()
     rom = test_dir / rom_path.name
     shutil.copyfile(rom_path, rom)
 
     try:
-        install_replay_fixture(test_case, rom)
+        install_replay_fixture(test_case, rom, version)
     except (OSError, ValueError) as error:
         return TestResult(test_case, False, f"fixture setup failed: {error}", 0.0)
-
-    timeout = max(timeout, TEST_MIN_TIMEOUT_SECONDS.get(test_case, 0))
 
     print_test_line(test_case, "=== patching ===")
     if not select_test(test_case, rom):
@@ -475,7 +520,13 @@ def run_test_case(test_case, command, rom_path, temp_dir, stop_event, timeout):
     started_at = time.monotonic()
     try:
         passed, detail, output = run_test(
-            test_case, command, rom, test_dir, stop_event, timeout
+            test_case,
+            command,
+            rom,
+            test_dir,
+            stop_event,
+            timeout,
+            wait_for_emulator_exit,
         )
     except OSError as error:
         passed = False
@@ -670,6 +721,8 @@ def main():
                             temp_dir,
                             stop_event,
                             args.timeout,
+                            args.wait_for_emulator_exit,
+                            args.version,
                         ): test_case
                         for test_case in test_cases
                     }

@@ -80,7 +80,7 @@ profile-release-us ARES="ares/build_macos/desktop-ui/Release/ares.app/Contents/M
     cp tests/replays/archives.ram build/u/ge007.u.ram
     ARES_N64_PROFILE_REPLAY=1 just profile-ares "{{ ARES }}" build/u/ge007.u.z64 build/u/ge007.u.elf "{{ OUTPUT }}"
     just profile-ares-flamegraph "{{ OUTPUT }}-001.folded" "{{ OUTPUT }}-001.html"
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/migration/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ MIGRATION_POINT }}" --base-average-frame-cycles 1854468.2227722772 --output "{{ OUTPUT }}-performance.json"
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/migration/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ MIGRATION_POINT }}" --build-mode release --region US --baseline src/practice/docs/performance_baselines.json --output "{{ OUTPUT }}-performance.json"
 
 # Render one profiler .folded capture as an interactive HTML flame graph.
 profile-ares-flamegraph INPUT OUTPUT="":

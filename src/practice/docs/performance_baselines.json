@@ -1,0 +1,59 @@
+{
+  "base_decomp_replay": {
+    "average_frame_cycles": 1854468.2227722772,
+    "average_tlb_loads": 2.14,
+    "frame_cycles_difference_from_base_percent": 0.0,
+    "frames": 202,
+    "total_code_size_bytes": 1070832
+  },
+  "benchmark": "REPLAY_ARCHIVES",
+  "builds": {
+    "dev": {
+      "EU": {
+        "average_frame_cycles": 1669956.8532110092,
+        "average_tlb_loads": 1.036697247706422,
+        "frame_cycles_difference_from_base_percent": -9.94955682149348,
+        "frames": 218,
+        "total_code_size_bytes": 1091872
+      },
+      "JP": {
+        "average_frame_cycles": 1922418.415841584,
+        "average_tlb_loads": 2.3366336633663365,
+        "frame_cycles_difference_from_base_percent": 3.664133590152705,
+        "frames": 202,
+        "total_code_size_bytes": 1173616
+      },
+      "US": {
+        "average_frame_cycles": 1995095.8514851485,
+        "average_tlb_loads": 3.267326732673267,
+        "frame_cycles_difference_from_base_percent": 7.583178130852231,
+        "frames": 202,
+        "total_code_size_bytes": 1170224
+      }
+    },
+    "release": {
+      "EU": {
+        "average_frame_cycles": 1696477.7293577981,
+        "average_tlb_loads": 1.4311926605504588,
+        "frame_cycles_difference_from_base_percent": -8.519450022082143,
+        "frames": 218,
+        "total_code_size_bytes": 1091504
+      },
+      "JP": {
+        "average_frame_cycles": 1956373.7574257427,
+        "average_tlb_loads": 2.6683168316831685,
+        "frame_cycles_difference_from_base_percent": 5.495135122947812,
+        "frames": 202,
+        "total_code_size_bytes": 1173216
+      },
+      "US": {
+        "average_frame_cycles": 2041658.7524752475,
+        "average_tlb_loads": 3.287128712871287,
+        "frame_cycles_difference_from_base_percent": 10.094027355353433,
+        "frames": 202,
+        "total_code_size_bytes": 1169824
+      }
+    }
+  },
+  "schema_version": 1
+}

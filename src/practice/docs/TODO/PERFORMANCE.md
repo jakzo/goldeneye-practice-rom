@@ -23,6 +23,8 @@ Notes:
 | 95 TLB pages | 1,169,824 | 3.29 | 2,042,063 | +10.12% | 202 |
 | 100 TLB pages | 1,169,792 | 1.52 | 1,865,819 | +0.61% | 202 |
 
+See [performance_baselines.json](../performance_baselines.json) for current state.
+
 ## ares profiler
 
 A fork of the ares emulator source is included as the `ares` submodule. This

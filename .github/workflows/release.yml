@@ -7,6 +7,7 @@ on:
     paths-ignore:
       - "*.md"
       - ".gitignore"
+      - "src/practice/docs/performance_baselines.json"
   pull_request:
   workflow_dispatch:
 
@@ -14,8 +15,7 @@ permissions:
   contents: read
 
 env:
-  ARES_VERSION: v148
-  ARES_PREFIX: ${{ github.workspace }}/.cache/ares-v148
+  ARES_PREFIX: ${{ github.workspace }}/.cache/ares
 
 jobs:
   metadata:
@@ -59,14 +59,27 @@ jobs:
 
   build-ares:
     runs-on: ubuntu-24.04
+    outputs:
+      cache-key: ${{ steps.ares-revision.outputs.cache-key }}
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Determine ares cache key
+        id: ares-revision
+        run: echo "cache-key=ares-${RUNNER_OS}-${RUNNER_ARCH}-$(git rev-parse HEAD:ares)" >> "$GITHUB_OUTPUT"
+
       - name: Cache ares
         id: cache-ares
         uses: actions/cache@v6
         with:
           path: ${{ env.ARES_PREFIX }}
-          key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
+          key: ${{ steps.ares-revision.outputs.cache-key }}
+
+      - name: Checkout ares profiler submodule
+        if: steps.cache-ares.outputs.cache-hit != 'true'
+        run: git submodule update --init --depth 1 ares
 
       - name: Install ares build dependencies
         if: steps.cache-ares.outputs.cache-hit != 'true'
@@ -86,11 +99,8 @@ jobs:
       - name: Build ares
         if: steps.cache-ares.outputs.cache-hit != 'true'
         run: |
-          curl --fail --location --retry 3 \
-            "https://github.com/ares-emulator/ares/archive/refs/tags/${ARES_VERSION}.tar.gz" \
-            | tar --extract --gzip --directory /tmp
           cmake \
-            -S "/tmp/ares-${ARES_VERSION#v}" \
+            -S ares \
             -B /tmp/ares-build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
@@ -267,7 +277,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ env.ARES_PREFIX }}
-          key: ares-${{ runner.os }}-${{ runner.arch }}-${{ env.ARES_VERSION }}
+          key: ${{ needs.build-ares.outputs.cache-key }}
           fail-on-cache-miss: true
 
       - name: Run practice tests (${{ matrix.build.mode }}, ${{ matrix.region.version }})
@@ -282,7 +292,6 @@ jobs:
           XDG_DATA_HOME: /tmp/ares-data
           PRACTICE_TEST_VIDEO_DIR: ${{ runner.temp }}/practice-test-artifacts/videos
           PRACTICE_TEST_VIDEO_SIZE: 640x480
-          SUMMARY_FILE: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
         run: |
           printf '# Practice ROM tests — %s / %s\n\n' '${{ matrix.build.mode }}' '${{ matrix.region.version }}' >> "$GITHUB_STEP_SUMMARY"
           set +e
@@ -295,10 +304,80 @@ jobs:
               --timeout 120 \
               --jobs 1 \
               --exclude REPLAY_RUNWAY \
+              --exclude REPLAY_ARCHIVES \
               --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
           test_status=$?
-          cp "$GITHUB_STEP_SUMMARY" "$SUMMARY_FILE"
           exit "$test_status"
+
+      - name: Run profiled Archives replay (${{ matrix.region.version }})
+        env:
+          ARES: ${{ env.ARES_PREFIX }}/bin/ares
+          ARES_ARGS: >-
+            --fullscreen
+            --no-file-prompt
+            --setting Audio/Driver=None
+            --setting Input/Driver=None
+          ARES_N64_PROFILE_SYMBOLS: ${{ github.workspace }}/build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf
+          ARES_N64_PROFILE_OUTPUT: ${{ github.workspace }}/build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives
+          ARES_N64_PROFILE_REPLAY: "1"
+          XDG_CONFIG_HOME: /tmp/ares-config
+          XDG_DATA_HOME: /tmp/ares-data
+          PRACTICE_TEST_VIDEO_DIR: ${{ runner.temp }}/practice-test-artifacts/videos
+          PRACTICE_TEST_VIDEO_SIZE: 640x480
+        run: |
+          xvfb-run --auto-servernum \
+            --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
+            ./scripts/run_practice_tests.py \
+              --skip-build \
+              --test REPLAY_ARCHIVES \
+              --wait-for-emulator-exit \
+              --build-mode "${{ matrix.build.mode }}" \
+              --version "${{ matrix.region.version }}" \
+              --timeout 600 \
+              --jobs 1 \
+              --junit-xml "$RUNNER_TEMP/practice-test-artifacts/performance-results.xml"
+          test -s "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives-001-game-frames.csv"
+
+      - name: Summarize Archives performance (${{ matrix.region.version }})
+        run: |
+          threshold_args=()
+          if [ "${{ matrix.build.mode }}" = "release" ]; then
+            threshold_args=(--max-base-regression-percent 20)
+          fi
+          set +e
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye \
+            python3 scripts/migration/profile_summary.py \
+            --elf "build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf" \
+            --csv "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives-001-game-frames.csv" \
+            --phase "Tested ${{ matrix.build.mode }} ${{ matrix.region.version }}" \
+            --build-mode "${{ matrix.build.mode }}" \
+            --region "${{ matrix.region.version }}" \
+            --baseline src/practice/docs/performance_baselines.json \
+            --output "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/stats-${{ matrix.build.mode }}-${{ matrix.region.version }}.json" \
+            --summary "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/summary.md" \
+            "${threshold_args[@]}"
+          stats_status=$?
+          if [ -f "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/summary.md" ]; then
+            cat "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$stats_status"
+
+      - name: Upload Archives performance stats
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: performance-stats-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: |
+            build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/
+            ${{ runner.temp }}/practice-test-artifacts/performance-results.xml
+          if-no-files-found: warn
+          compression-level: 0
+
+      - name: Capture test result summary
+        if: always()
+        env:
+          SUMMARY_FILE: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
+        run: cp "$GITHUB_STEP_SUMMARY" "$SUMMARY_FILE"
 
       - name: Prepare missing test result summary
         if: always()
@@ -330,6 +409,45 @@ jobs:
           path: ${{ runner.temp }}/practice-test-artifacts
           if-no-files-found: warn
           compression-level: 0
+
+  update-performance-baselines:
+    needs:
+      - build-and-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout master
+        uses: actions/checkout@v7
+        with:
+          ref: master
+
+      - name: Download regional performance stats
+        uses: actions/download-artifact@v8
+        with:
+          pattern: performance-stats-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/performance
+
+      - name: Update checked-in performance stats
+        run: |
+          mapfile -t stats < <(find "$RUNNER_TEMP/performance" -type f -name 'stats-*.json' | sort)
+          ./scripts/migration/update_performance_baselines.py \
+            --baseline src/practice/docs/performance_baselines.json \
+            "${stats[@]}"
+
+      - name: Commit updated performance stats
+        run: |
+          if git diff --quiet -- src/practice/docs/performance_baselines.json; then
+            echo "Performance stats are unchanged."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/practice/docs/performance_baselines.json
+          git commit -m "update performance stats [skip ci]"
+          git push origin HEAD:master
 
   release:
     needs:
