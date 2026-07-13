@@ -95,18 +95,7 @@ _musicsampletblSegmentRomEnd:
   .section .musiccompressed
   .global \name
   \name:
-  .ifdef VERSION_US
-    .incbin "build\/u\/assets\/music\/\name\.rz"
-  .endif
-  .ifdef VERSION_JP
-    .incbin "build\/j\/assets\/music\/\name\.rz"
-  .endif
-  .ifdef VERSION_EU
-    .incbin "build\/e\/assets\/music\/\name\.rz"
-  .endif
-  .ifdef VERSION_DEBUG
-    .incbin "build\/d\/assets\/music\/\name\.rz"
-  .endif
+    .incbin "assets\/music\/\name\.rz"
   end_\name:
 
   .section .musicdecompressed
@@ -124,18 +113,7 @@ music_fileA is used for the entries that end with A....the A doesn't seem to be 
   .section .musiccompressed
   .global \name
   \name:
-  .ifdef VERSION_US
-    .incbin "build\/u\/assets\/music\/\name\.rz"
-  .endif
-  .ifdef VERSION_JP
-    .incbin "build\/j\/assets\/music\/\name\.rz"
-  .endif
-  .ifdef VERSION_EU
-    .incbin "build\/e\/assets\/music\/\name\.rz"
-  .endif
-  .ifdef VERSION_DEBUG
-    .incbin "build\/d\/assets\/music\/\name\.rz"
-  .endif
+    .incbin "assets\/music\/\name\.rz"
     .byte 0xA
   end_\name:
 
@@ -212,5 +190,4 @@ music_fileA Mfrigate_outro
 .section .musiccompressed
 .half 0
 .word 0
-
 

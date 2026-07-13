@@ -256,7 +256,7 @@ LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld
 LDFLAGS := -T $(LD_SCRIPT) -Map $(BUILD_DIR)/ge007.$(OUTCODE).map --no-warn-mismatch
 
 AS := $(TOOLCHAIN)as
-ASFLAGS := -march=vr4300 -mabi=32 $(INCLUDE) $(ASMDEFS) --defsym PRACTICE_ROM=1
+ASFLAGS := -march=vr4300 -mabi=32 $(INCLUDE) -I $(BUILD_DIR) $(ASMDEFS) --defsym PRACTICE_ROM=1
 # Use the system installed armips if available. Otherwise use the one provided with this repository.
 ifneq (,$(shell which armips 2>/dev/null))
   ARMIPS              := armips

@@ -10,21 +10,7 @@
 
 .section .text, "ax"
 glabel rspbootTextStart
-.ifdef VERSION_US
-.incbin "build/u/rsp/rspboot.bin"
-.endif
-.ifdef VERSION_JP
-.incbin "build/j/rsp/rspboot.bin"
-.endif
-.ifdef VERSION_EU
-.incbin "build/e/rsp/rspboot.bin"
-.endif
-.ifdef VERSION_DEBUG
-.incbin "build/d/rsp/rspboot.bin"
-.endif
-.ifdef VERSION_USB
-.incbin "build/usb/rsp/rspboot.bin"
-.endif
+.incbin "rsp/rspboot.bin"
 glabel rspbootTextEnd
 .section .data
 .section .rodata
