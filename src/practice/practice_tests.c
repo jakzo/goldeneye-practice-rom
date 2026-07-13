@@ -273,42 +273,36 @@ void practice_tests_tick() {
 
   case REPLAY: {
     if (g_ReplayTestPhase == 0) {
-      switch (g_save_test_timer) {
-      case 20:
+      if (after_frames(10)) {
         emu_log("REPLAY_WALK");
         g_ReplayTestInitialInvert = get_cur_player_look_vertical_inverted();
         g_SimulatedButtons |= U_CBUTTONS;
-        break;
-      case 39:
-        set_cur_player_look_vertical_inverted(!g_ReplayTestInitialInvert);
-        g_ForcedDeltaFrames = 0;
-        break;
-      case 40:
+      } else if (after_frames(15)) {
         g_SimulatedButtons &= ~U_CBUTTONS;
-        break;
-      case 60:
+      } else if (after_frames(20)) {
         emu_log("REPLAY_OPEN_DOOR");
         g_SimulatedButtons |= B_BUTTON;
-        break;
-      case 61:
+      } else if (after_frames(1)) {
         g_SimulatedButtons &= ~B_BUTTON;
-        break;
-      case 81:
-      case 102:
-      case 123:
+      } else if (after_frames(20)) {
         emu_log("REPLAY_SHOOT");
         g_SimulatedButtons |= Z_TRIG;
-        break;
-      case 82:
-      case 103:
-      case 124:
+      } else if (after_frames(1)) {
         g_SimulatedButtons &= ~Z_TRIG;
-        break;
-      case 139:
+      } else if (after_frames(20)) {
+        emu_log("REPLAY_SHOOT");
+        g_SimulatedButtons |= Z_TRIG;
+      } else if (after_frames(1)) {
+        g_SimulatedButtons &= ~Z_TRIG;
+      } else if (after_frames(20)) {
+        emu_log("REPLAY_SHOOT");
+        g_SimulatedButtons |= Z_TRIG;
+      } else if (after_frames(1)) {
+        g_SimulatedButtons &= ~Z_TRIG;
+      } else if (after_frames(15)) {
         set_cur_player_look_vertical_inverted(g_ReplayTestInitialInvert);
         g_ForcedDeltaFrames = 0;
-        break;
-      case 184:
+      } else if (after_frames(30)) {
         emu_log("REPLAY_RESTART");
         g_SimulatedButtons = 0;
         g_SimulatedStickX = 0;
@@ -319,7 +313,6 @@ void practice_tests_tick() {
         practice_replay_request_playback();
         g_ReplayTestPhase = 1;
         bossSetLoadedStage(LEVELID_BUNKER1);
-        break;
       }
     } else if (g_ReplayTestPhase == 1) {
       if (g_ReplayIsPlaying) {

@@ -475,10 +475,10 @@ void practice_replay_on_stage_load(void) {
     if (!g_ReplayIsRecording)
       return;
     joySetRecordFunc(practice_replay_record_callback);
-    practiceLogInfo("Replay: Recording started (%s seeds)",
+    practiceLogInfo("Replay: Recording started%s",
                     g_ActiveReplayHeader.flags & REPLAY_FLAG_FRAME_SEEDS
-                        ? "with"
-                        : "without");
+                        ? "(with seeds)"
+                        : "");
   } else if (g_ReplayIsPlaying) {
     if (!load_playback_frame()) {
       practiceLogWarn("Replay: Invalid frame data");
