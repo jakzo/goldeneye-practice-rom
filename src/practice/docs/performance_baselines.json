@@ -1,5 +1,4 @@
 {
-  "benchmark": "REPLAY_ARCHIVES",
   "base_decomp_replay": {
     "EU": {
       "average_frame_cycles": 1686393.8165137614,
@@ -23,49 +22,50 @@
       "total_code_size_bytes": 1070928
     }
   },
+  "benchmark": "REPLAY_ARCHIVES",
   "builds": {
     "dev": {
       "EU": {
-        "average_frame_cycles": 1669956.8532110092,
-        "average_tlb_loads": 1.036697247706422,
-        "frame_cycles_difference_from_base_percent": -0.9746811890434909,
+        "average_frame_cycles": 1737206.4587155962,
+        "average_tlb_loads": 1.6697247706422018,
+        "frame_cycles_difference_from_base_percent": 3.0130946700740693,
         "frames": 218,
-        "total_code_size_bytes": 1091872
+        "total_code_size_bytes": 1091920
       },
       "JP": {
-        "average_frame_cycles": 1922418.415841584,
-        "average_tlb_loads": 2.3366336633663365,
-        "frame_cycles_difference_from_base_percent": 1.7484838637315134,
+        "average_frame_cycles": 2088360.7821782178,
+        "average_tlb_loads": 3.797029702970297,
+        "frame_cycles_difference_from_base_percent": 10.531371108452824,
         "frames": 202,
         "total_code_size_bytes": 1173616
       },
       "US": {
-        "average_frame_cycles": 1995095.8514851485,
-        "average_tlb_loads": 3.267326732673267,
-        "frame_cycles_difference_from_base_percent": 7.592484845389912,
+        "average_frame_cycles": 2012929.6831683167,
+        "average_tlb_loads": 3.6584158415841586,
+        "frame_cycles_difference_from_base_percent": 8.554236263838385,
         "frames": 202,
         "total_code_size_bytes": 1170224
       }
     },
     "release": {
       "EU": {
-        "average_frame_cycles": 1696477.7293577981,
-        "average_tlb_loads": 1.4311926605504588,
-        "frame_cycles_difference_from_base_percent": 0.5979571761525383,
+        "average_frame_cycles": 1735071.2431192661,
+        "average_tlb_loads": 1.5963302752293578,
+        "frame_cycles_difference_from_base_percent": 2.886480377764566,
         "frames": 218,
-        "total_code_size_bytes": 1091504
+        "total_code_size_bytes": 1091536
       },
       "JP": {
-        "average_frame_cycles": 1956373.7574257427,
-        "average_tlb_loads": 2.6683168316831685,
-        "frame_cycles_difference_from_base_percent": 3.5456496091245557,
+        "average_frame_cycles": 2035003.495049505,
+        "average_tlb_loads": 3.49009900990099,
+        "frame_cycles_difference_from_base_percent": 7.707312087955126,
         "frames": 202,
         "total_code_size_bytes": 1173216
       },
       "US": {
-        "average_frame_cycles": 2041658.7524752475,
-        "average_tlb_loads": 3.287128712871287,
-        "frame_cycles_difference_from_base_percent": 10.103551276311165,
+        "average_frame_cycles": 2098547.707920792,
+        "average_tlb_loads": 3.6881188118811883,
+        "frame_cycles_difference_from_base_percent": 13.171486118684014,
         "frames": 202,
         "total_code_size_bytes": 1169824
       }
