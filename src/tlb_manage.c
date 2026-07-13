@@ -55,9 +55,9 @@
 // unused stuff but the game does have less memory than before still
 // You will know you have gone too far if Dam fails to start
 #ifndef VERSION_EU
-#define MAPPING_TABLE_COUNT 95
+#define MAPPING_TABLE_COUNT 94
 #else
-#define MAPPING_TABLE_COUNT 98
+#define MAPPING_TABLE_COUNT 97
 #endif
 
 #else

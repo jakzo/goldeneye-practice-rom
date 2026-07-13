@@ -51,9 +51,18 @@ ares-dev BOOT_LEVEL="TITLE":
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}
     ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 ./build/u/ge007.u.z64
 
-test-debug TEST_CASE:
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1 TEST_CASE="{{ TEST_CASE }}"
-    ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 ./build/u/ge007.u.z64
+test-debug TEST_CASE REGION="us":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    region="$(printf '%s' "{{ REGION }}" | tr '[:upper:]' '[:lower:]')"
+    case "$region" in
+        us) version="US"; outcode="u" ;;
+        eu) version="EU"; outcode="e" ;;
+        jp) version="JP"; outcode="j" ;;
+        *) echo "error: region must be one of: us, eu, jp" >&2; exit 2 ;;
+    esac
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1 VERSION="$version" TEST_CASE="{{ TEST_CASE }}"
+    ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 "./build/$outcode/ge007.$outcode.z64"
 
 test TEST_CASE:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi

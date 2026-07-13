@@ -72,13 +72,14 @@ def load_comparison(args):
     if data.get("schema_version") != 1:
         raise SystemExit(f"unsupported baseline schema in {args.baseline}")
     try:
-        base = data["base_decomp_replay"]
+        base = data["base_decomp_replay"][args.region]
         recorded = data["builds"][args.build_mode][args.region]
         base_average = float(base["average_frame_cycles"])
         float(recorded["average_frame_cycles"])
     except (KeyError, TypeError, ValueError) as error:
         raise SystemExit(
-            f"baseline is missing valid base/{args.build_mode}/{args.region} "
+            f"baseline is missing valid base/{args.region} or "
+            f"{args.build_mode}/{args.region} "
             f"frame-cycle stats: {error}"
         ) from error
     return base_average, recorded
