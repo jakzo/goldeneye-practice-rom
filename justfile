@@ -59,10 +59,10 @@ test TEST_CASE:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test "{{ TEST_CASE }}"
 
-# Profile the deterministic 1x Runway replay and save per-frame CPU timings.
-profile-runway OUTPUT="src/practice/docs/profile_runway_practice.csv":
+# Profile the deterministic Archives replay and save per-frame CPU timings.
+profile-archives OUTPUT="src/practice/docs/profile_archives_practice.csv":
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
-    docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test REPLAY_RUNWAY_1X --profile-csv "{{ OUTPUT }}"
+    docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test REPLAY_ARCHIVES --timeout 480 --profile-csv "{{ OUTPUT }}"
 
 # Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
 profile-ares ARES ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007":
@@ -72,15 +72,15 @@ profile-ares ARES ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="bu
     mkdir -p "$(dirname "{{ OUTPUT }}")"
     ARES_N64_PROFILE_SYMBOLS="$(pwd)/{{ ELF }}" ARES_N64_PROFILE_OUTPUT="$(pwd)/{{ OUTPUT }}" "{{ ARES }}" --no-file-prompt "$(pwd)/{{ ROM }}"
 
-# Build and profile the release US ROM running the deterministic 1x Runway replay.
-profile-release-us ARES="ares/build_macos/desktop-ui/Release/ares.app/Contents/MacOS/ares" OUTPUT="build/profile/runway-release-us" MIGRATION_POINT="Current release US":
+# Build and profile the release US ROM running the deterministic Archives replay.
+profile-release-us ARES="ares/build_macos/desktop-ui/Release/ares.app/Contents/MacOS/ares" OUTPUT="build/profile/archives-release-us" MIGRATION_POINT="Current release US":
     DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --build ares/build_macos --config Release --parallel {{ num_cpus() }}
     if test -z "$(docker images -q {{ image }})"; then just setup; fi
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=0 VERSION=US COMPARE=0 TEST_CASE=REPLAY_RUNWAY_1X
-    cp tests/replays/runway.ram build/u/ge007.u.ram
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=0 VERSION=US COMPARE=0 TEST_CASE=REPLAY_ARCHIVES
+    cp tests/replays/archives.ram build/u/ge007.u.ram
     ARES_N64_PROFILE_REPLAY=1 just profile-ares "{{ ARES }}" build/u/ge007.u.z64 build/u/ge007.u.elf "{{ OUTPUT }}"
     just profile-ares-flamegraph "{{ OUTPUT }}-001.folded" "{{ OUTPUT }}-001.html"
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/migration/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ MIGRATION_POINT }}" --base-average-frame-cycles 1156528 --output "{{ OUTPUT }}-performance.json"
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/migration/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ MIGRATION_POINT }}" --base-average-frame-cycles 1854468.2227722772 --output "{{ OUTPUT }}-performance.json"
 
 # Render one profiler .folded capture as an interactive HTML flame graph.
 profile-ares-flamegraph INPUT OUTPUT="":

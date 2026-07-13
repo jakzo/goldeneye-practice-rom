@@ -9,7 +9,7 @@ Exact byte matching to the retail ROM is not a realistic acceptance condition on
 ### Mandatory phase-close profiling
 
 After every migration phase, rebuild the US release profiler with
-`PROFILE_PRACTICE=1` and `ORIGINAL_CC=mixed`, run `REPLAY_RUNWAY_1X`, then run
+`PROFILE_PRACTICE=1` and `ORIGINAL_CC=mixed`, run `REPLAY_ARCHIVES`, then run
 `scripts/migration/profile_summary.py` against that exact ELF/CSV pair, using
 1,156,528 as `--base-average-frame-cycles`. Append one row to the table above
 with total code size, average TLB loads, average frame cycles, percentage

@@ -58,9 +58,10 @@ extern bool g_DebugLogsEnabled;
 #define STATE_RUNWAY_PLANE 15
 #define REPLAY 16
 #define LEVEL_RESTART_HOTKEY 17
-#define REPLAY_RUNWAY_1X 18
-#define REPLAY_RUNWAY_04X 19
-#define REPLAY_RUNWAY_HOTKEYS 20
+#define REPLAY_RUNWAY 18
+#define REPLAY_ARCHIVES 19
+#define REPLAY_ARCHIVES_04X 20
+#define REPLAY_ARCHIVES_HOTKEYS 21
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -97,14 +98,15 @@ void practice_tests_set_case(s32 test_case) {
   g_ReplayTestHotkeyFrame = 0;
   g_LevelRestartTestPhase = 0;
   g_LevelRestartTimer = 0;
-  practice_profile_set_enabled(test_case == REPLAY_RUNWAY_1X);
+  practice_profile_set_enabled(test_case == REPLAY_RUNWAY ||
+                               test_case == REPLAY_ARCHIVES);
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
-  } else if (test_case == REPLAY_RUNWAY_1X ||
-             test_case == REPLAY_RUNWAY_04X ||
-             test_case == REPLAY_RUNWAY_HOTKEYS) {
-    set_time_scale(test_case == REPLAY_RUNWAY_04X ? 0.4f : 1.0f);
+  } else if (test_case == REPLAY_RUNWAY || test_case == REPLAY_ARCHIVES ||
+             test_case == REPLAY_ARCHIVES_04X ||
+             test_case == REPLAY_ARCHIVES_HOTKEYS) {
+    set_time_scale(test_case == REPLAY_ARCHIVES_04X ? 0.4f : 1.0f);
     practice_replay_request_playback();
   }
 
@@ -121,9 +123,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_DESTROYED_PROP:
   case STATE_RUNWAY_PLANE:
   case CRASH:
-  case REPLAY_RUNWAY_1X:
-  case REPLAY_RUNWAY_04X:
-  case REPLAY_RUNWAY_HOTKEYS:
+  case REPLAY_RUNWAY:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
   case REPLAY:
@@ -132,6 +132,9 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_DAM:
     return LEVELID_DAM;
   case STATE_ARCHIVES_KEY:
+  case REPLAY_ARCHIVES:
+  case REPLAY_ARCHIVES_04X:
+  case REPLAY_ARCHIVES_HOTKEYS:
     return LEVELID_ARCHIVES;
   case STATE_TRAIN_HATCH:
     return LEVELID_TRAIN;
@@ -148,8 +151,9 @@ s32 practice_tests_boot_level(s32 test_case) {
 }
 
 s32 practice_tests_should_disable_intro(s32 test_case) {
-  return test_case != REPLAY_RUNWAY_1X && test_case != REPLAY_RUNWAY_04X &&
-         test_case != REPLAY_RUNWAY_HOTKEYS;
+  return test_case != REPLAY_RUNWAY && test_case != REPLAY_ARCHIVES &&
+         test_case != REPLAY_ARCHIVES_04X &&
+         test_case != REPLAY_ARCHIVES_HOTKEYS;
 }
 
 #define MAX_SAVED_TEST_CHILDREN 8
@@ -1407,9 +1411,6 @@ void practice_tests_tick() {
       emu_log("PRESS_Z");
       g_SimulatedButtons |= Z_TRIG;
     } else if (after_frames(30)) {
-      emu_log("FREEZE");
-      set_time_scale(0.0f);
-    } else if (after_frames(120)) {
       emu_log("SLOWMO_0.1");
       set_time_scale(0.1f);
     } else if (after_frames(240)) {
@@ -1464,12 +1465,12 @@ void practice_tests_frame() {
   const s32 NUM_ITERATIONS = 10;
 
   if (g_practice_test_case == REPLAY ||
-      g_practice_test_case == REPLAY_RUNWAY_HOTKEYS) {
+      g_practice_test_case == REPLAY_ARCHIVES_HOTKEYS) {
     u16 trigger = hotkey_trigger();
 
     if (((g_practice_test_case == REPLAY && g_ReplayTestPhase == 1 &&
           g_ReplayTestPlaybackCount == 3) ||
-         g_practice_test_case == REPLAY_RUNWAY_HOTKEYS) &&
+         g_practice_test_case == REPLAY_ARCHIVES_HOTKEYS) &&
         g_ReplayIsPlaying) {
       s32 hotkey_phase = g_ReplayTestHotkeyFrame % 30;
 
@@ -1490,9 +1491,10 @@ void practice_tests_frame() {
     }
   }
 
-  if (g_practice_test_case == REPLAY_RUNWAY_1X ||
-      g_practice_test_case == REPLAY_RUNWAY_04X ||
-      g_practice_test_case == REPLAY_RUNWAY_HOTKEYS) {
+  if (g_practice_test_case == REPLAY_RUNWAY ||
+      g_practice_test_case == REPLAY_ARCHIVES ||
+      g_practice_test_case == REPLAY_ARCHIVES_04X ||
+      g_practice_test_case == REPLAY_ARCHIVES_HOTKEYS) {
     if (g_ReplayIsPlaying) {
       g_ReplayTestPlaybackSeen = TRUE;
     } else if (g_ReplayTestPlaybackSeen) {
@@ -1500,13 +1502,13 @@ void practice_tests_frame() {
       g_SimulatedButtons &= ~hotkey_trigger();
 
       if (practice_replay_had_divergence()) {
-        emu_log("RUNWAY_REPLAY_DIVERGED timestamp=%d duration=%d",
+        emu_log("REPLAY_DIVERGED timestamp=%d duration=%d",
                 practice_replay_get_timestamp(),
                 practice_replay_get_duration());
         emu_log("TEST_FAILED");
       } else if (practice_replay_get_timestamp() !=
                  practice_replay_get_duration()) {
-        emu_log("RUNWAY_REPLAY_TIMESTAMP_MISMATCH timestamp=%d duration=%d",
+        emu_log("REPLAY_TIMESTAMP_MISMATCH timestamp=%d duration=%d",
                 practice_replay_get_timestamp(),
                 practice_replay_get_duration());
         emu_log("TEST_FAILED");

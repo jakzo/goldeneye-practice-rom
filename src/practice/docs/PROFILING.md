@@ -36,13 +36,13 @@ The profiler is retained long term but compiled only with
 ROM and ordinary test builds compile all profiling calls and TLB counters out,
 so the diagnostic code does not introduce hot-path calls or page loads.
 
-The deterministic 1x Runway replay can record per-rendered-frame CPU timings:
+The deterministic Archives replay can record per-rendered-frame CPU timings:
 
 ```sh
 just profile-runway
 ```
 
-This runs `REPLAY_RUNWAY_1X` in ares and writes
+This runs `REPLAY_ARCHIVES` in ares and writes
 [`profile_runway_practice.csv`](profile_runway_practice.csv). To choose another
 path, run `just profile-runway path/to/output.csv`.
 
@@ -88,7 +88,7 @@ not force those per-frame values.
 
 The base profiler logs `TEST_FAILED replay diverged` and stops immediately on
 a mismatch. The practice replay records and logs the actual and expected
-values, and `REPLAY_RUNWAY_1X` emits `TEST_FAILED` when playback ends. The
+values, and `REPLAY_ARCHIVES` emits `TEST_FAILED` when playback ends. The
 capture scripts treat either result as failure, so a CSV from a divergent run
 must not be used.
 

@@ -7,6 +7,8 @@
 - Added deterministic input recording and playback, including frame timing, control-option changes and initial random seeds
 - Added replay controls to the level briefing settings; playback can be cancelled by pressing a normal controller button
 - Fixed replay desynchronization, replay cancellation and restoration of controller state after playback
+- Practice hotkeys now remain available during playback, including pause and time-scale controls
+- Fixed replay pacing at changed time scales and prevented paused or held frames from advancing simulation or consuming random state
 - Replays share SRAM storage with save states, so recording or saving one overwrites the other; 2.x control styles are not yet supported
 
 ## Lag analysis
@@ -19,6 +21,7 @@
 
 - Save states now restore mines, tinted glass, bullet casings, embedded objects, deformed object vertices, shot lights and their glass shards, and Runway's plane animation
 - Fixed crashes caused by stale room-to-prop registrations after loading, including loads from level-ending cutscenes
+- Fixed PAL save states corrupting restored hand and weapon-model state
 - Fixed state loading in production builds
 
 ## Grenade camera
@@ -32,10 +35,19 @@
 - Improved the briefing settings layout and shortened option labels to prevent overlap
 - Fixed the level-restart hotkey
 
+## Performance
+
+- Restored practice-ROM performance to parity with the original ROM, improving from about 0.6x speed to normal speed in the Runway replay benchmark (the optimized build measured about 1% faster than the original); see the [performance benchmarks](src/practice/docs/TODO/PERFORMANCE.md)
+- Removed unused debug and ZX Spectrum code and expanded the cached TLB code capacity to eliminate the extra code-loading stalls
+
 ## Stability and development
 
+- Fixed a PAL practice-ROM crash when first-person weapon state was updated
 - Added a crash handler that reports diagnostic information when practice tests fail
+- Added CPU, TLB and memory profiling, deterministic replay captures and interactive ares flame graphs for tracking performance regressions
+- Added a validated GCC migration harness and expanded release automation across US, PAL and Japanese development and release builds
 - Parallelized emulator tests and improved replay, save-state and lag regression coverage
+- Added a project logo and refreshed the README presentation
 
 # 0.5.0
 

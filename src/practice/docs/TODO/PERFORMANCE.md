@@ -5,8 +5,8 @@ We need the performance of the practice ROM to pretty closely match the original
 Use `just profile-release-us` to get stats for the current practice ROM.
 
 All these results are collected using:
-- Release build of US practice ROM
-- Running a deterministic Runway replay
+- Release US builds
+- Running a deterministic Archives replay at 1.0x time scale
 - Inside a custom ares v148
 - Instrumented to produce Goldeneye performance profiling stats
 
@@ -14,14 +14,14 @@ Notes:
 - "Total code size" is the sum of the linked `.code`, `.inflate`, and `.game` sections
 - Frame cycles are the game completing the update loop from physics to render
 - TLB loads are software code-page loads and the main source of slowdown
-- The base decomp baseline is measured from the original ROM with only the deterministic Runway replay added on the `base-decomp-replay` branch
+- The base decomp baseline is measured from the original ROM with only the deterministic Archives replay added on the `base-decomp-replay` branch
 
 | Migration point | Total code size (bytes) | Average TLB loads/frame | Average frame cycles | Difference from base decomp | Frames |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Base decomp (no practice ROM changes; original code IDO `-O2`) | 1,071,808 | 0.66 | 1,156,528 | 0.00% | 689 |
-| Pre-migration baseline after Phase 0 (original code IDO `-O2`, practice GCC `-Os`) | 1,171,568 | 4.48 | 1,614,545 | +39.60% | 689 |
-| Current release US | 1,170,336 | 6.95 | 1,872,725 | +61.93% | 689 |
-| 103 TLB pages | 1,170,336 | 0.27 | 1,184,755 | +2.44% | 689 |
+| Base decomp | 1,070,832 | 2.14 | 1,854,468 | 0.00% | 202 |
+| 90 TLB pages | 1,169,824 | 10.34 | 2,765,109 | +49.11% | 202 |
+| 95 TLB pages | 1,169,824 | 3.29 | 2,042,063 | +10.12% | 202 |
+| 100 TLB pages | 1,169,792 | 1.52 | 1,865,819 | +0.61% | 202 |
 
 ## ares profiler
 

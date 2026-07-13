@@ -7,7 +7,7 @@
 #ifdef PROFILE_PRACTICE
 
 /*
- * Diagnostic-only CPU profiling for the deterministic Runway replay. Keeping
+ * Diagnostic-only CPU profiling for deterministic replays. Keeping
  * one start count and one elapsed count per area makes the profiler small and
  * avoids retaining a frame history in scarce N64 memory.
  */

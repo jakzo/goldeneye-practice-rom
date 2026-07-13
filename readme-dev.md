@@ -13,7 +13,7 @@ just setup
 just sc64
 ```
 
-Run `just profile-runway` to capture the deterministic Runway replay's CPU
+Run `just profile-archives` to capture the deterministic Archives replay's CPU
 timings. See the [profiling methodology and baseline](src/practice/docs/PROFILING.md).
 
 ## Development

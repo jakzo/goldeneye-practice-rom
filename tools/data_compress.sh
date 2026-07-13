@@ -7,7 +7,8 @@ MAPFILE="$BUILD_DIR/ge007.$2.map"
 #fixme as I will fail if vaddr of data gets moved!!!
 DATASEG_START=$(printf "%d\n" 0x$(grep ${MAPFILE} -e '__csegtempPos =' | cut -d "x" -f3))
 DATASEG_HEXADDR=$(printf "%016x\n" ${DATASEG_START})
-DATASEG_LEN=$(printf "%d\n" 0x$(grep ${MAPFILE} -e "load address 0x${DATASEG_HEXADDR}" | cut -d "x" -f3 | cut -d " " -f1))
+DATASEG_HEXADDR_SHORT=$(printf "%x\n" ${DATASEG_START})
+DATASEG_LEN=$(printf "%d\n" 0x$(grep -E ${MAPFILE} -e "load address 0x0*${DATASEG_HEXADDR_SHORT}" | cut -d "x" -f3 | cut -d " " -f1))
 
 #build/rebuild aaa_rip
 [ ! -x tools/aaa_rip/aaa_rip ] && make -C tools/aaa_rip

@@ -27,13 +27,13 @@ SRAM_SIZE_BYTES = 128 * 1024
 ROOT = Path(__file__).resolve().parent.parent
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
-RUNWAY_REPLAY_FIXTURE = ROOT / "tests/replays/runway.ram"
-REPLAY_FIXTURE_TESTS = {
-    "REPLAY_RUNWAY_1X",
-    "REPLAY_RUNWAY_04X",
-    "REPLAY_RUNWAY_HOTKEYS",
+REPLAY_FIXTURES = {
+    "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
+    "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
+    "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
+    "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives.ram",
 }
-TEST_MIN_TIMEOUT_SECONDS = {"REPLAY_RUNWAY_04X": 180}
+TEST_MIN_TIMEOUT_SECONDS = {"REPLAY_ARCHIVES_04X": 180}
 PRINT_LOCK = threading.Lock()
 COLOR_RESET = "\033[0m"
 TEST_COLOR_CODES = (
@@ -292,12 +292,13 @@ def select_test(test_case, rom):
 
 
 def install_replay_fixture(test_case, rom):
-    if test_case not in REPLAY_FIXTURE_TESTS:
+    fixture = REPLAY_FIXTURES.get(test_case)
+    if fixture is None:
         return
 
-    sram = RUNWAY_REPLAY_FIXTURE.read_bytes()
+    sram = fixture.read_bytes()
     if len(sram) != SRAM_SIZE_BYTES:
-        raise ValueError("Runway replay SRAM fixture has the wrong size")
+        raise ValueError(f"{fixture.name} replay SRAM fixture has the wrong size")
     rom.with_suffix(".ram").write_bytes(sram)
 
 

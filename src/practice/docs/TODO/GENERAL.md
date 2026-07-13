@@ -6,7 +6,6 @@
     - Implement efficiency improvements to bring the practice ROM's lag roughly in line with the original
 - Dam gate guard indicator
     - Show their speed/progress to the gate
-- TLB improvements
 - Splits
     - Hotkey to enter splits editor
     - Shows split regions in the world
@@ -16,6 +15,8 @@
 - Grenade cam
     - Bug: explosion and smoke textures get messed up
 - Figure out frame delta determinism after load
-- Code cleanup
+- Code cleanup (of added practice code)
     - Add `void` to functions with no parameters
     - Use consistent naming (snake case)
+    - Minimize TLB cache misses by not entering far away functions if you don't have to
+        - E.g. don't do `function practice_x(void) { return g_x; }` and call it from game code when you could just `extern s32 x;` (or inline the function)
