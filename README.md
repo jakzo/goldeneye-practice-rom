@@ -18,6 +18,7 @@
 ## Known issues
 
 - The practice ROM is ~1.4x slower than the original (need to clear memory and/or optimize TLB caching)
+- External cameras (grenade cam, hostage cam) can cause a crash when there are multiple of them
 
 ## Features
 

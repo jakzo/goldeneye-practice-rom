@@ -7,6 +7,7 @@
 #include "game/textrelated.h"
 #include "practice_config.h"
 #include "practice_external_camera.h"
+#include "stan.h"
 #include <bondconstants.h>
 #include <bondtypes.h>
 #include <math.h>
@@ -19,6 +20,7 @@
 #define FRIGATE_HOSTAGE_REACHED_AI_OFFSET 91
 #define FRIGATE_HOSTAGE_ESCAPED_AI_OFFSET 224
 #define FRIGATE_HOSTAGE_REACHED_DISTANCE 500.0f
+#define FRIGATE_HOSTAGE_MAX_CAMERAS 2
 #define HOSTAGE_PROGRESS_X 5
 #define HOSTAGE_PROGRESS_Y 12
 #define HOSTAGE_PROGRESS_LINE_HEIGHT 10
@@ -96,6 +98,34 @@ static f32 horizontal_distance(const coord3d *from, const coord3d *to) {
   f32 dx = to->x - from->x;
   f32 dz = to->z - from->z;
   return sqrtf(dx * dx + dz * dz);
+}
+
+static void adjust_virtual_position_y(ChrRecord *hostage,
+                                      coord3d *virtual_position) {
+  PropRecord *prop = hostage->prop;
+  StandTile *virtual_stan;
+  f32 prop_floor_y;
+  f32 prop_floor_offset;
+
+  if (prop->stan == NULL) {
+    virtual_position->y = prop->pos.y;
+    return;
+  }
+
+  virtual_stan = prop->stan;
+  if (!walkTilesBetweenPoints_NoCallback(
+          &virtual_stan, prop->pos.x, prop->pos.z, virtual_position->x,
+          virtual_position->z)) {
+    virtual_position->y = prop->pos.y;
+    return;
+  }
+
+  prop_floor_y = stanGetPositionYValue(prop->stan, prop->pos.x, prop->pos.z);
+  prop_floor_offset = prop->pos.y - prop_floor_y;
+  virtual_position->y =
+      stanGetPositionYValue(virtual_stan, virtual_position->x,
+                            virtual_position->z) +
+      prop_floor_offset;
 }
 
 static s32 hostage_route_targets_selected_pad(ChrRecord *hostage,
@@ -241,6 +271,7 @@ void practice_frigate_hostage_cam_tick(void) {
   AIRecord *escape_ai;
   ChrRecord *hostage;
   coord3d virtual_position;
+  s32 camera_count = 0;
   s32 i;
 
   if (bossGetStageNum() != LEVELID_FRIGATE) {
@@ -259,11 +290,16 @@ void practice_frigate_hostage_cam_tick(void) {
     hostage = chrFindByLiteralId(s_FrigateHostageChrIds[i]);
     update_hostage_progress(hostage, i, escape_ai);
 
-    if (practice.frigate_hostage_cam && is_freed_living_hostage(hostage)) {
+    if (practice.frigate_hostage_cam &&
+        camera_count < FRIGATE_HOSTAGE_MAX_CAMERAS &&
+        is_freed_living_hostage(hostage)) {
       chrlvGetPatrolPercentOrPosition(hostage, &virtual_position);
-      practice_external_camera_add_npc_follow_view(
-          hostage, &s_FrigateHostageCamera, &virtual_position,
-          PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY, 0);
+      adjust_virtual_position_y(hostage, &virtual_position);
+      if (practice_external_camera_add_npc_follow_view(
+              hostage, &s_FrigateHostageCamera, &virtual_position,
+              PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY, 0)) {
+        camera_count++;
+      }
     }
   }
 }

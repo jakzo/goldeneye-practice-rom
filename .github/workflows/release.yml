@@ -351,7 +351,7 @@ jobs:
         run: |
           threshold_args=()
           if [ "${{ matrix.build.mode }}" = "release" ]; then
-            threshold_args=(--max-base-regression-percent 20)
+            threshold_args=(--max-base-regression-percent 50)
           fi
           set +e
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye \

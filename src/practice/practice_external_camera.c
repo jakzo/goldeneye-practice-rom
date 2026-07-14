@@ -31,6 +31,17 @@ struct PracticeExternalCameraPropState {
   u8 has_been_seen[PROP_STATE_BITMAP_SIZE];
 };
 
+struct PracticeExternalCameraTrackedActionState {
+  PropRecord *prop;
+  ChrRecord *chr;
+  ACT_TYPE actiontype;
+  union {
+    struct act_gopos gopos;
+    struct act_patrol patrol;
+  } action;
+  bool valid;
+};
+
 static struct PracticeExternalCameraView
     g_ExternalCameraViews[PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS];
 static s32 g_ExternalCameraViewCount;
@@ -198,8 +209,6 @@ save_prop_visibility_state(struct PracticeExternalCameraPropState *state) {
   }
 }
 
-// TODO: Seems like there is a bug that a chr can never go off screen if they
-// start the cam on screen
 static void restore_prop_visibility_state(
     const struct PracticeExternalCameraPropState *state) {
   ChrRecord *chr;
@@ -259,6 +268,43 @@ static void prepare_pip_props(void) {
   g_playerPointers[PLAYER_2] = saved_player_two;
 }
 
+static void save_tracked_action_state(
+    const struct PracticeExternalCameraView *view,
+    struct PracticeExternalCameraTrackedActionState *state) {
+  PropRecord *prop = view->tracked_prop;
+
+  state->valid = FALSE;
+  if (prop == NULL || prop->type != PROP_TYPE_CHR || prop->chr == NULL) {
+    return;
+  }
+
+  state->chr = prop->chr;
+  state->prop = prop;
+  state->actiontype = state->chr->actiontype;
+  if (state->actiontype == ACT_GOPOS) {
+    state->action.gopos = state->chr->act_gopos;
+    state->valid = TRUE;
+  } else if (state->actiontype == ACT_PATROL) {
+    state->action.patrol = state->chr->act_patrol;
+    state->valid = TRUE;
+  }
+}
+
+static void restore_tracked_action_state(
+    const struct PracticeExternalCameraTrackedActionState *state) {
+  if (!state->valid || state->chr == NULL || state->prop == NULL ||
+      state->chr->prop != state->prop || state->prop->chr != state->chr) {
+    return;
+  }
+
+  state->chr->actiontype = state->actiontype;
+  if (state->actiontype == ACT_GOPOS) {
+    state->chr->act_gopos = state->action.gopos;
+  } else if (state->actiontype == ACT_PATROL) {
+    state->chr->act_patrol = state->action.patrol;
+  }
+}
+
 Gfx *practice_external_camera_render(Gfx *gdl) {
   s32 i;
   s32 s;
@@ -274,6 +320,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   struct PropRecord *saved_tracked_props[PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS];
   u8 saved_tracked_flags[PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS];
   bool saved_tracked_flags_valid[PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS];
+  struct PracticeExternalCameraTrackedActionState
+      saved_tracked_actions[PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS];
   struct PracticeExternalCameraPropState saved_prop_state;
   bool preserve_gameplay_visibility = FALSE;
   struct ObjectRecord *render_item;
@@ -358,6 +406,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     if (saved_tracked_flags_valid[s]) {
       saved_tracked_flags[s] = saved_tracked_props[s]->flags;
     }
+    save_tracked_action_state(&g_ExternalCameraViews[s],
+                              &saved_tracked_actions[s]);
     if (g_ExternalCameraViews[s].flags &
         PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY) {
       preserve_gameplay_visibility = TRUE;
@@ -562,6 +612,14 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     g_IsRenderingExternalCamera = TRUE;
     prepare_pip_props();
 
+    // The zero-time visibility pass still runs character action logic. An
+    // onscreen tracked NPC is forced out of WAYMODE_MAGIC and has its re-entry
+    // cooldown restarted, so restore tracked travel actions before returning
+    // to gameplay.
+    for (i = 0; i < g_ExternalCameraViewCount; i++) {
+      restore_tracked_action_state(&saved_tracked_actions[i]);
+    }
+
     if (render_item_valid) {
       render_item->flags2 = saved_render_item_flags2;
     }
@@ -692,11 +750,17 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
 
   gdl = video_related_F(gdl);
 
-  // bgRoomVisibilityRelated above leaves the last PIP's rooms marked visible.
-  // Rebuild them from Bond's restored camera so the next gameplay tick makes
-  // the same loaded/off-screen decisions it would make without the PIPs.
+  // bgRoomVisibilityRelated and prepare_pip_props above leave both the room
+  // visibility and prop dispatcher bookkeeping prepared for the last PIP.
+  // Rebuild both from Bond's restored camera. Restoring the visibility bits
+  // alone is not enough: a character which was onscreen when its PIP started
+  // can otherwise remain on the PIP's active/onscreen path indefinitely.
   if (preserve_gameplay_visibility) {
     bgRoomVisibilityRelated();
+    prepare_pip_props();
+    for (i = 0; i < g_ExternalCameraViewCount; i++) {
+      restore_tracked_action_state(&saved_tracked_actions[i]);
+    }
   }
 
   return gdl;
