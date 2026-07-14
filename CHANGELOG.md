@@ -1,5 +1,26 @@
 ### Unreleased
 
+# 0.6.1
+
+## External cameras
+
+- Added an optional third-person camera on Dam that follows the gate guard while Bond is near the gate area
+- Added an optional third-person camera on Frigate that follows freed hostages until they escape or despawn
+- Refactored the grenade camera into a shared external-camera system supporting up to three simultaneous picture-in-picture views
+- External NPC cameras preserve normal off-screen movement so observing guards or hostages does not alter their gameplay behavior
+
+## Frigate hostage progress
+
+- Added an optional display that lists freed hostages in rescue order and shows their selected escape destination
+- Added estimated route times and movement-state indicators, including whether each hostage is moving normally or using off-screen movement
+- Added status reporting for hostages that reach a destination, fail to find or complete a route, die, or escape
+
+## Interface and memory
+
+- Added level-specific settings for the Dam guard camera, Frigate hostage camera and Frigate hostage progress display
+- Disabled the existing Dam gate-guard status indicator by default
+- Reclaimed TLB mapping-table memory for the new practice features
+
 # 0.6.0
 
 ## Replays
