@@ -44,6 +44,9 @@ struct PracticeConfig {
   s32 lag_estimate_enabled;
   s32 replay_mode;
   s32 record_replay_seeds;
+  s32 dam_guard_cam;
+  s32 frigate_hostage_cam;
+  s32 frigate_hostage_progress;
 };
 
 extern struct PracticeConfig practice;

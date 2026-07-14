@@ -15,10 +15,31 @@
         - [EverDrive 64](https://krikzz.com/our-products/cartridges/ed64x7.html)
         - Copy the ROM to either of these via the micro SD card or USB
 
+## Known issues
+
+- The practice ROM is ~1.4x slower than the original (need to clear memory and/or optimize TLB caching)
+
 ## Features
 
 - **Timer displayed during gameplay**
 - **End screen timer displays hundredths**
+- **Save states**
+    - During gameplay press `L + D-Down` to save current state
+    - During gameplay press `L + D-Up` to load current state
+    - There are several minor visual/audio pieces of state which are not saved or loaded but should not affect gameplay
+        - If there is some state not saved that DOES affect gameplay, let me know (@jakzo on Discord)
+    - Not fully stable, expect occassional crashes
+        - If you can reliably reproduce the crash, let me know so I can fix it (@jakzo on Discord)
+    - "Why don't things play out the exact same way when I load state then leave the game alone?"
+        - The game doesn't run with the **exact** same performance each time after restoring state and this causes the random number generator to become out of sync which means anything using randomness in the game (everything from visuals to collisions) will diverge
+- **Replays**
+    - On a level's briefing screen, set `Replay next level` to `Record` to record the next attempt
+    - After a recording exists for that level, set it to `Playback` to replay the saved inputs, frame timing, control option changes, and initial random seeds
+    - Practice hotkeys remain available during playback; other button presses cancel playback and resume normal control
+    - Replays and save states use the same SRAM space, so saving either one overwrites the other and only one replay can be saved at a time
+    - 2.x control styles are not currently supported
+- **Grenade camera**
+    - When throwing most projectiles, shows a picture-in-picture view that follows it so you can see where it landed
 - **Time scale control**
     - During gameplay press `L + D-Left` to decrease game speed by 10%
     - During gameplay press `L + D-Right` to increase game speed by 10%
@@ -52,31 +73,21 @@
 
 - **Dam**
     - Indicator for when the gate guard has loaded in
+    - Third-person camera which tracks the gate guard
     - Option to never play the gate intro cutscene
+- **Frigate**
+    - Hostage escape progress display, ordered by when each hostage is freed
+        - `PAD1` through `PAD6` identify the six random escape destinations
+        - A time such as `12.3s` is the estimated time remaining on the current waypoint route; it resets if the hostage chooses another destination
+        - Green text means the hostage is using off-screen magic movement; red text means normal movement
+        - `REACHED` means the hostage reached the current destination and is choosing another one
+        - `ROUTING` means there is no active waypoint route to estimate
+        - `NO PATH` means the hostage escaped after failing to start a route to its selected destination
+        - `STOPPED` means an active route stopped at or away from its selected destination and triggered escape handling
+        - `DEAD` means a freed hostage died before escaping
+    - Third-person camera which tracks freed hostages until they despawn
 - **Runway**
     - Splits
-
-### ℹ️ Beta features
-
-These features have some minor bugs or limitations but should be usable:
-
-- **Save states**
-    - During gameplay press `L + D-Down` to save current state
-    - During gameplay press `L + D-Up` to load current state
-    - There are several minor visual/audio pieces of state which are not saved or loaded but should not affect gameplay
-        - If there is some state not saved that DOES affect gameplay, let me know (@jakzo on Discord)
-    - Not fully stable, expect occassional crashes
-        - If you can reliably reproduce the crash, let me know so I can fix it (@jakzo on Discord)
-    - "Why don't things play out the exact same way when I load state then leave the game alone?"
-        - The game doesn't run with the **exact** same performance each time after restoring state and this causes the random number generator to become out of sync which means anything using randomness in the game (everything from visuals to collisions) will diverge
-- **Replays**
-    - On a level's briefing screen, set `Replay next level` to `Record` to record the next attempt
-    - After a recording exists for that level, set it to `Playback` to replay the saved inputs, frame timing, control option changes, and initial random seeds
-    - Practice hotkeys remain available during playback; other button presses cancel playback and resume normal control
-    - Replays and save states use the same SRAM space, so saving either one overwrites the other and only one replay can be saved at a time
-    - 2.x control styles are not currently supported
-- **Grenade camera**
-    - When throwing most projectiles, shows a picture-in-picture view that follows it so you can see where it landed
 
 ## Development
 

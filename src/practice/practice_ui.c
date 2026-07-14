@@ -8,6 +8,8 @@
 #include "game/unk_0C0A70.h"
 #include "player.h"
 #include "practice_config.h"
+#include "practice_dam_guard_cam.h"
+#include "practice_frigate_hostage_cam.h"
 #include "practice_lag.h"
 #include "practice_replay.h"
 #include <PR/os.h>
@@ -462,8 +464,6 @@ Gfx *practice_ui_render_pill(Gfx *gdl, const char *text, u32 text_color,
 
 // --- DAM gate guard room tracker ------------------------------------------
 
-extern s32 g_BgCurrentRoom;
-
 #define GATE_GUARD_ROOM 113
 
 #define PILL_COLOR_GREEN 0x00B00066
@@ -476,13 +476,8 @@ static Gfx *render_gate_guard_pill(Gfx *gdl) {
     return gdl;
   }
 
-  {
-    bool is_near_gate_guard =
-        g_BgCurrentRoom >= 110 && g_BgCurrentRoom <= 111 ||
-        g_BgCurrentRoom >= 124 && g_BgCurrentRoom <= 131;
-    if (!is_near_gate_guard) {
-      return gdl;
-    }
+  if (!practice_dam_gate_guard_area_active()) {
+    return gdl;
   }
 
   {
@@ -627,6 +622,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
   g_PillStackY = PILL_MARGIN_TOP;
 
   gdl = render_gate_guard_pill(gdl);
+  gdl = practice_frigate_hostage_progress_render(gdl);
 
   if (g_LogQueueCount > 0) {
     ensure_timing_initialized();

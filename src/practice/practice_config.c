@@ -25,13 +25,16 @@ struct PracticeConfig practice = {
     TRUE,                     // show_mission_timer
     TRUE,                     // grenade_cam
     TRUE,                     // splits_enabled
-    TRUE,                     // gate_guard_status
+    FALSE,                    // gate_guard_status
     FALSE,                    // dam_gate_intro_enabled
     FALSE,                    // log_splits
     FALSE,                    // speedometer_enabled
     TRUE,                     // lag_estimate_enabled
     PRACTICE_REPLAY_DISABLED, // replay_mode
     FALSE,                    // record_replay_seeds
+    FALSE,                    // dam_guard_cam
+    FALSE,                    // frigate_hostage_cam
+    TRUE,                     // frigate_hostage_progress
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -142,6 +145,7 @@ static const struct PracticeOption s_on_off[] = {
 };
 
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
+static s32 frigate_apply(s32 stage_id) { return stage_id == LEVELID_FRIGATE; }
 
 static s32 s_boot_level_option = LEVELID_TITLE;
 
@@ -211,10 +215,15 @@ static s32 replay_mode_options(s32 stage_id, s32 option_index,
 }
 
 static const struct PracticeSetting s_level_settings[] = {
-    OPTIONS_SETTING("Gate guard status", gate_guard_status, s_on_off,
+    OPTIONS_SETTING("Gate guard status", gate_guard_status, s_off_on,
                     dam_apply),
+    OPTIONS_SETTING("Guard follow cam", dam_guard_cam, s_off_on, dam_apply),
     OPTIONS_SETTING("Gate intro cutscene", dam_gate_intro_enabled, s_off_on,
                     dam_apply),
+    OPTIONS_SETTING("Hostage progress", frigate_hostage_progress, s_on_off,
+                    frigate_apply),
+    OPTIONS_SETTING("Hostage cam", frigate_hostage_cam, s_off_on,
+                    frigate_apply),
     DYNAMIC_OPTIONS_SETTING("Boot into level", boot_level, boot_level_options),
     OPTIONS_SETTING("Splits", splits_enabled, s_on_off, has_splits),
 };

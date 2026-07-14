@@ -36,6 +36,7 @@
 #include "practice/practice_grenade_cam.h"
 #include "practice/practice_dam_guard_cam.h"
 #include "practice/practice_external_camera.h"
+#include "practice/practice_frigate_hostage_cam.h"
 #include "practice/practice_dialog.h"
 #include "practice/practice_ui.h"
 #include "practice/practice_splits.h"
@@ -1129,6 +1130,7 @@ Gfx* lvlRender(Gfx* DL)
         practice_profile_begin(PRACTICE_PROFILE_RENDER_PRACTICE);
         practice_external_camera_begin_frame();
         practice_dam_guard_cam_tick();
+        practice_frigate_hostage_cam_tick();
         practice_grenade_cam_tick();
         DL = practice_external_camera_render(DL);
         practice_profile_begin(PRACTICE_PROFILE_UI);
