@@ -34,6 +34,8 @@
 #include "initmenus.h"
 #include "cheat_buttons.h"
 #include "practice/practice_grenade_cam.h"
+#include "practice/practice_dam_guard_cam.h"
+#include "practice/practice_external_camera.h"
 #include "practice/practice_dialog.h"
 #include "practice/practice_ui.h"
 #include "practice/practice_splits.h"
@@ -1125,8 +1127,10 @@ Gfx* lvlRender(Gfx* DL)
 
 #ifdef PRACTICE_ROM
         practice_profile_begin(PRACTICE_PROFILE_RENDER_PRACTICE);
+        practice_external_camera_begin_frame();
+        practice_dam_guard_cam_tick();
         practice_grenade_cam_tick();
-        DL = practice_grenade_cam_render(DL);
+        DL = practice_external_camera_render(DL);
         practice_profile_begin(PRACTICE_PROFILE_UI);
         DL = practice_ui_render(DL);
         practice_profile_end(PRACTICE_PROFILE_UI);

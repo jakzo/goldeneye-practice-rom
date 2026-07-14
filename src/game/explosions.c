@@ -20,7 +20,7 @@
 #include "matrixmath.h"
 #include "music.h"
 #include "player.h"
-#include "practice/practice_grenade_cam.h"
+#include "practice/practice_external_camera.h"
 #include "random.h"
 #include "snd.h"
 #include "stan.h"
@@ -987,7 +987,7 @@ Gfx *explosionRenderPart(struct ExplosionPart *arg0, Gfx *gdl, struct coord3d *c
     sp44 = sp98->f[2] + (sp5C * f2);
 
 #ifdef PRACTICE_ROM
-    if (practice_grenade_cam_is_rendering() &&
+    if (practice_external_camera_is_rendering() &&
         dynGetFreeVtx() < (s32)(4 * sizeof(Vtx) + 0x1000)) {
         return gdl;
     }
@@ -1101,7 +1101,7 @@ Gfx *explosionSmokeRenderPart(struct Smoke *smoke, struct SmokePart *smoke_part,
     }
 
 #ifdef PRACTICE_ROM
-    if (practice_grenade_cam_is_rendering() &&
+    if (practice_external_camera_is_rendering() &&
         dynGetFreeVtx() < (s32)(4 * sizeof(Vtx) + 0x1000)) {
         return gdl;
     }
@@ -1756,7 +1756,7 @@ Gfx *explosionRenderFlyingParticles(Gfx *gdl)
                 && (sp80.m[3][2] > -20000.0f))
             {
 #ifdef PRACTICE_ROM
-                if (practice_grenade_cam_is_rendering() &&
+                if (practice_external_camera_is_rendering() &&
                     dynGetFreeVtx() < (s32)(sizeof(Mtx) + 0x1000)) {
                     break;
                 }
