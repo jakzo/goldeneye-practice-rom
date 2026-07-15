@@ -68,6 +68,7 @@ test-debug TEST_CASE REGION="us": build-ares
         *) echo "error: region must be one of: us, eu, jp" >&2; exit 2 ;;
     esac
     docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1 VERSION="$version" TEST_CASE="{{ TEST_CASE }}"
+    python3 -c 'import sys; from pathlib import Path; from scripts.run_practice_tests import install_replay_fixture; install_replay_fixture(sys.argv[1], Path(sys.argv[2]), sys.argv[3])' "{{ TEST_CASE }}" "./build/$outcode/ge007.$outcode.z64" "$version"
     "{{ ares_bin }}" --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 "./build/$outcode/ge007.$outcode.z64"
 
 test TEST_CASE:

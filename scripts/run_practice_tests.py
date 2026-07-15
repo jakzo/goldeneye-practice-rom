@@ -22,6 +22,9 @@ from pathlib import Path
 WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
+MINIMUM_TEST_TIMEOUT_SECONDS = {
+    "REPLAY_DAM": 300,
+}
 SRAM_SIZE_BYTES = 128 * 1024
 REPLAY_HEADER_OFFSET = 0x600
 REPLAY_REGION_OFFSET = REPLAY_HEADER_OFFSET + 0x10
@@ -31,6 +34,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 REPLAY_FIXTURES = {
+    "REPLAY_DAM": ROOT / "tests/replays/dam.ram",
     "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
     "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
     "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
@@ -498,6 +502,7 @@ def run_test_case(
     wait_for_emulator_exit,
     version,
 ):
+    timeout = max(timeout, MINIMUM_TEST_TIMEOUT_SECONDS.get(test_case, 0))
     test_dir = temp_dir / test_case
     test_dir.mkdir()
     rom = test_dir / rom_path.name

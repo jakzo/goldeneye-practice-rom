@@ -92,6 +92,7 @@ extern void __ull_divremi(unsigned long long *quotient,
 #define MIGRATION_PHASE3 23
 #define MIGRATION_PHASE4 24
 #define MIGRATION_PHASE6 25
+#define REPLAY_DAM 26
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -133,7 +134,8 @@ void practice_tests_set_case(s32 test_case) {
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
-  } else if (test_case == REPLAY_RUNWAY || test_case == REPLAY_ARCHIVES ||
+  } else if (test_case == REPLAY_DAM || test_case == REPLAY_RUNWAY ||
+             test_case == REPLAY_ARCHIVES ||
              test_case == REPLAY_ARCHIVES_04X ||
              test_case == REPLAY_ARCHIVES_HOTKEYS) {
     set_time_scale(test_case == REPLAY_ARCHIVES_04X ? 0.4f : 1.0f);
@@ -162,6 +164,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case LEVEL_RESTART_HOTKEY:
     return LEVELID_BUNKER1;
   case STATE_DAM:
+  case REPLAY_DAM:
     return LEVELID_DAM;
   case STATE_ARCHIVES_KEY:
   case REPLAY_ARCHIVES:
@@ -185,7 +188,8 @@ s32 practice_tests_boot_level(s32 test_case) {
 }
 
 s32 practice_tests_should_disable_intro(s32 test_case) {
-  return test_case != REPLAY_RUNWAY && test_case != REPLAY_ARCHIVES &&
+  return test_case != REPLAY_DAM && test_case != REPLAY_RUNWAY &&
+         test_case != REPLAY_ARCHIVES &&
          test_case != REPLAY_ARCHIVES_04X &&
          test_case != REPLAY_ARCHIVES_HOTKEYS;
 }
@@ -1820,7 +1824,8 @@ void practice_tests_frame() {
     }
   }
 
-  if (g_practice_test_case == REPLAY_RUNWAY ||
+  if (g_practice_test_case == REPLAY_DAM ||
+      g_practice_test_case == REPLAY_RUNWAY ||
       g_practice_test_case == REPLAY_ARCHIVES ||
       g_practice_test_case == REPLAY_ARCHIVES_04X ||
       g_practice_test_case == REPLAY_ARCHIVES_HOTKEYS) {
