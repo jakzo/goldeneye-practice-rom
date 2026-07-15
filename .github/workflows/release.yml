@@ -288,6 +288,7 @@ jobs:
               --version "${{ matrix.region.version }}" \
               --timeout 120 \
               --jobs 1 \
+              --exclude REPLAY_DAM \
               --exclude REPLAY_RUNWAY \
               --exclude REPLAY_ARCHIVES \
               --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"

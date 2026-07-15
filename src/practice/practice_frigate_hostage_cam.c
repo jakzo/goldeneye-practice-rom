@@ -1,4 +1,5 @@
 #include "practice_frigate_hostage_cam.h"
+#include "bondhead.h"
 #include "boss.h"
 #include "chr.h"
 #include "chrai.h"
@@ -21,6 +22,10 @@
 #define FRIGATE_HOSTAGE_ESCAPED_AI_OFFSET 224
 #define FRIGATE_HOSTAGE_REACHED_DISTANCE 500.0f
 #define FRIGATE_HOSTAGE_MAX_CAMERAS 1
+#define FRIGATE_HOSTAGE_ROUTE_REPLAN_INDEX 3
+#define FRIGATE_HOSTAGE_MAX_ROUTE_CHUNKS 32
+#define FRIGATE_HOSTAGE_REROLL_STATUS_TICKS                                  \
+  ((s32)(2.0f * CHRLV_FRAMERATE_F))
 #define HOSTAGE_PROGRESS_X 5
 #define HOSTAGE_PROGRESS_Y 12
 #define HOSTAGE_PROGRESS_LINE_HEIGHT 10
@@ -41,11 +46,24 @@ typedef enum FrigateHostageTerminalReason {
   FRIGATE_HOSTAGE_DIED,
 } FrigateHostageTerminalReason;
 
+typedef enum FrigateHostageRerollReason {
+  FRIGATE_HOSTAGE_REROLL_NONE,
+  FRIGATE_HOSTAGE_REROLL_SEES_BOND,
+  FRIGATE_HOSTAGE_REROLL_STOPPED,
+  FRIGATE_HOSTAGE_REROLL_NO_PATH,
+} FrigateHostageRerollReason;
+
 typedef struct FrigateHostageProgress {
+  waypoint *tail_anchor;
+  waypoint *tail_target;
+  f32 tail_distance;
   s16 pad_id;
   u8 order;
   u8 terminal_reason;
   u8 route_started;
+  u8 selection_random;
+  u8 reroll_reason;
+  u8 reroll_ticks;
 } FrigateHostageProgress;
 
 static FrigateHostageProgress
@@ -73,10 +91,17 @@ static void reset_hostage_progress(void) {
   s32 i;
 
   for (i = 0; i < (s32)ARRAY_COUNT(s_FrigateHostageProgress); i++) {
+    s_FrigateHostageProgress[i].tail_anchor = NULL;
+    s_FrigateHostageProgress[i].tail_target = NULL;
+    s_FrigateHostageProgress[i].tail_distance = -1.0f;
     s_FrigateHostageProgress[i].pad_id = -1;
     s_FrigateHostageProgress[i].order = 0;
     s_FrigateHostageProgress[i].terminal_reason = FRIGATE_HOSTAGE_ACTIVE;
     s_FrigateHostageProgress[i].route_started = FALSE;
+    s_FrigateHostageProgress[i].selection_random = 0;
+    s_FrigateHostageProgress[i].reroll_reason =
+        FRIGATE_HOSTAGE_REROLL_NONE;
+    s_FrigateHostageProgress[i].reroll_ticks = 0;
   }
 
   s_FrigateHostageFreedCount = 0;
@@ -139,9 +164,7 @@ static s32 hostage_route_targets_selected_pad(ChrRecord *hostage, s16 pad_id) {
          1.0f;
 }
 
-static const coord3d *hostage_waypoint_position(ChrRecord *hostage, s32 index) {
-  waypoint *route_waypoint = hostage->act_gopos.waypoints[index];
-
+static const coord3d *hostage_waypoint_position(waypoint *route_waypoint) {
   if (route_waypoint == NULL) {
     return NULL;
   }
@@ -150,25 +173,95 @@ static const coord3d *hostage_waypoint_position(ChrRecord *hostage, s32 index) {
 }
 
 /*
+ * The engine only consumes route entries through index 3. On reaching that
+ * entry it replans the remaining route into the same six-entry array. Expand
+ * those chunks here so a truncated route is not mistaken for a direct final
+ * leg to targetpos.
+ */
+static f32 hostage_route_tail_distance(ChrRecord *hostage, waypoint *anchor) {
+  waypoint *route[MAX_CHRWAYPOINTS];
+  waypoint *from = anchor;
+  waypoint *chunk_start;
+  waypoint *to;
+  const coord3d *from_position;
+  const coord3d *to_position;
+  f32 distance = 0.0f;
+  s32 chunk;
+  s32 index;
+
+  if (anchor == NULL || hostage->act_gopos.target_path == NULL) {
+    return -1.0f;
+  }
+
+  for (chunk = 0; chunk < FRIGATE_HOSTAGE_MAX_ROUTE_CHUNKS; chunk++) {
+    chunk_start = from;
+    if (waypointFindRoute(from, hostage->act_gopos.target_path, route,
+                          MAX_CHRWAYPOINTS) < 2 ||
+        route[0] != from) {
+      return -1.0f;
+    }
+
+    from_position = hostage_waypoint_position(from);
+
+    for (index = 1; index <= FRIGATE_HOSTAGE_ROUTE_REPLAN_INDEX; index++) {
+      to = route[index];
+      if (to == NULL) {
+        return distance +
+               horizontal_distance(from_position,
+                                   &hostage->act_gopos.targetpos);
+      }
+
+      to_position = hostage_waypoint_position(to);
+      distance += horizontal_distance(from_position, to_position);
+      from = to;
+      from_position = to_position;
+    }
+
+    if (from == chunk_start) {
+      return -1.0f;
+    }
+  }
+
+  return -1.0f;
+}
+
+static f32 cached_hostage_route_tail_distance(
+    ChrRecord *hostage, FrigateHostageProgress *progress, waypoint *anchor) {
+  if (progress->tail_anchor != anchor ||
+      progress->tail_target != hostage->act_gopos.target_path ||
+      progress->tail_distance < 0.0f) {
+    progress->tail_anchor = anchor;
+    progress->tail_target = hostage->act_gopos.target_path;
+    progress->tail_distance = hostage_route_tail_distance(hostage, anchor);
+  }
+
+  return progress->tail_distance;
+}
+
+/*
  * Estimate the remaining route length from the active waypoint queue. Magic
  * movement leaves the prop at the start of its current segment, so use the
  * engine's interpolated segment distance for that first leg.
  */
-static f32 hostage_route_distance_remaining(ChrRecord *hostage) {
+static f32 hostage_route_distance_remaining(
+    ChrRecord *hostage, FrigateHostageProgress *progress) {
+  waypoint *route_waypoint;
   const coord3d *from;
   const coord3d *to;
+  f32 tail_distance;
   f32 distance = 0.0f;
   s32 index;
-  s32 appended_target = FALSE;
 
   if (hostage->actiontype != ACT_GOPOS || hostage->prop == NULL) {
     return -1.0f;
   }
 
   index = hostage->act_gopos.curindex;
-  if (index >= MAX_CHRWAYPOINTS) {
+  if (index > FRIGATE_HOSTAGE_ROUTE_REPLAN_INDEX) {
     return -1.0f;
   }
+
+  route_waypoint = hostage->act_gopos.waypoints[index];
 
   if (hostage->act_gopos.waydata.mode == WAYMODE_MAGIC) {
     f32 segment_remaining = hostage->act_gopos.waydata.segdisttotal -
@@ -177,39 +270,41 @@ static f32 hostage_route_distance_remaining(ChrRecord *hostage) {
       distance += segment_remaining;
     }
 
-    from = hostage_waypoint_position(hostage, index);
-    if (from == NULL) {
-      from = &hostage->act_gopos.targetpos;
-      appended_target = TRUE;
+    if (route_waypoint == NULL) {
+      return distance;
     }
+
+    from = hostage_waypoint_position(route_waypoint);
     index++;
   } else {
     from = &hostage->prop->pos;
   }
 
-  for (; index < MAX_CHRWAYPOINTS; index++) {
-    to = hostage_waypoint_position(hostage, index);
-    if (to == NULL) {
-      if (!appended_target) {
-        distance += horizontal_distance(from, &hostage->act_gopos.targetpos);
-        appended_target = TRUE;
-      }
-      break;
+  for (; index <= FRIGATE_HOSTAGE_ROUTE_REPLAN_INDEX; index++) {
+    route_waypoint = hostage->act_gopos.waypoints[index];
+    if (route_waypoint == NULL) {
+      return distance +
+             horizontal_distance(from, &hostage->act_gopos.targetpos);
     }
 
+    to = hostage_waypoint_position(route_waypoint);
     distance += horizontal_distance(from, to);
     from = to;
   }
 
-  if (!appended_target) {
-    distance += horizontal_distance(from, &hostage->act_gopos.targetpos);
+  tail_distance = cached_hostage_route_tail_distance(
+      hostage, progress,
+      hostage->act_gopos.waypoints[FRIGATE_HOSTAGE_ROUTE_REPLAN_INDEX]);
+  if (tail_distance < 0.0f) {
+    return -1.0f;
   }
 
-  return distance;
+  return distance + tail_distance;
 }
 
-static f32 hostage_route_seconds_remaining(ChrRecord *hostage) {
-  f32 distance = hostage_route_distance_remaining(hostage);
+static f32 hostage_route_seconds_remaining(
+    ChrRecord *hostage, FrigateHostageProgress *progress) {
+  f32 distance = hostage_route_distance_remaining(hostage, progress);
   f32 distance_per_tick;
 
   if (distance < 0.0f || hostage->model == NULL) {
@@ -228,6 +323,11 @@ static f32 hostage_route_seconds_remaining(ChrRecord *hostage) {
 static void update_hostage_progress(ChrRecord *hostage, s32 index,
                                     AIRecord *escape_ai) {
   FrigateHostageProgress *progress = &s_FrigateHostageProgress[index];
+  f32 rejected_pad_distance;
+
+  if (progress->reroll_ticks > 0) {
+    progress->reroll_ticks--;
+  }
 
   if (hostage == NULL || hostage->prop == NULL) {
     if (progress->order != 0 &&
@@ -246,9 +346,28 @@ static void update_hostage_progress(ChrRecord *hostage, s32 index,
   }
 
   if (hostage_pad_number(hostage->padpreset1) != 0 &&
-      progress->pad_id != hostage->padpreset1) {
+      (progress->pad_id != hostage->padpreset1 ||
+       progress->selection_random != hostage->random)) {
+    if (hostage_pad_number(progress->pad_id) != 0) {
+      rejected_pad_distance = chrGetDistanceToPad(hostage, progress->pad_id);
+      progress->reroll_ticks = FRIGATE_HOSTAGE_REROLL_STATUS_TICKS;
+
+      if (rejected_pad_distance >= 0.0f &&
+          rejected_pad_distance < FRIGATE_HOSTAGE_REACHED_DISTANCE) {
+        progress->reroll_reason = FRIGATE_HOSTAGE_REROLL_SEES_BOND;
+      } else if (progress->route_started) {
+        progress->reroll_reason = FRIGATE_HOSTAGE_REROLL_STOPPED;
+      } else {
+        progress->reroll_reason = FRIGATE_HOSTAGE_REROLL_NO_PATH;
+      }
+    }
+
+    progress->tail_anchor = NULL;
+    progress->tail_target = NULL;
+    progress->tail_distance = -1.0f;
     progress->pad_id = hostage->padpreset1;
     progress->route_started = FALSE;
+    progress->selection_random = hostage->random;
   }
 
   if (hostage_route_targets_selected_pad(hostage, progress->pad_id)) {
@@ -319,6 +438,7 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
   FrigateHostageProgress *progress;
   ChrRecord *hostage;
   char text[HOSTAGE_PROGRESS_TEXT_MAX];
+  const char *reroll_status;
   const char *status;
   f32 seconds;
   f32 pad_distance;
@@ -343,6 +463,17 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
     hostage = chrFindByLiteralId(s_FrigateHostageChrIds[hostage_index]);
     pad_number = hostage_pad_number(progress->pad_id);
     color = HOSTAGE_PROGRESS_RED;
+    reroll_status = NULL;
+
+    if (progress->reroll_ticks > 0) {
+      if (progress->reroll_reason == FRIGATE_HOSTAGE_REROLL_SEES_BOND) {
+        reroll_status = "seen bond";
+      } else if (progress->reroll_reason == FRIGATE_HOSTAGE_REROLL_STOPPED) {
+        reroll_status = "stopped";
+      } else {
+        reroll_status = "no path";
+      }
+    }
 
     if (hostage != NULL && hostage->prop != NULL &&
         hostage->actiontype == ACT_GOPOS &&
@@ -368,13 +499,28 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
       if (hostage->aioffset == FRIGATE_HOSTAGE_REACHED_AI_OFFSET ||
           (pad_distance >= 0.0f &&
            pad_distance < FRIGATE_HOSTAGE_REACHED_DISTANCE)) {
-        sprintf(text, "%d. PAD%d - REACHED", order, pad_number);
-      } else {
-        seconds = hostage_route_seconds_remaining(hostage);
-        if (seconds >= 0.0f) {
-          sprintf(text, "%d. PAD%d - %.1fs", order, pad_number, seconds);
+        if (reroll_status != NULL) {
+          sprintf(text, "%d. PAD%d - REACHED - %s", order, pad_number,
+                  reroll_status);
         } else {
-          sprintf(text, "%d. PAD%d - ROUTING", order, pad_number);
+          sprintf(text, "%d. PAD%d - REACHED", order, pad_number);
+        }
+      } else {
+        seconds = hostage_route_seconds_remaining(hostage, progress);
+        if (seconds >= 0.0f) {
+          if (reroll_status != NULL) {
+            sprintf(text, "%d. PAD%d - %.1fs - %s", order, pad_number,
+                    seconds, reroll_status);
+          } else {
+            sprintf(text, "%d. PAD%d - %.1fs", order, pad_number, seconds);
+          }
+        } else {
+          if (reroll_status != NULL) {
+            sprintf(text, "%d. PAD%d - ROUTING - %s", order, pad_number,
+                    reroll_status);
+          } else {
+            sprintf(text, "%d. PAD%d - ROUTING", order, pad_number);
+          }
         }
       }
     }

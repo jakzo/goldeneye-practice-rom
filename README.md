@@ -83,6 +83,10 @@
         - Green text means the hostage is using off-screen magic movement; red text means normal movement
         - `REACHED` means the hostage reached the current destination and is choosing another one
         - `ROUTING` means there is no active waypoint route to estimate
+        - After a destination is rejected, the new destination the game selected is shown along with the reason for the new selection:
+            - `seen bond` - the hostage had a line of sight to Bond
+            - `stopped` - the hostage's movement was halted mid journey
+            - `no path` - there is no path to the selected destination
         - `NO PATH` means the hostage escaped after failing to start a route to its selected destination
         - `STOPPED` means an active route stopped at or away from its selected destination and triggered escape handling
         - `DEAD` means a freed hostage died before escaping

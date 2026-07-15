@@ -135,3 +135,9 @@ The codebase heavily utilizes standard decompilation patterns to bridge C with y
     - See the settings in `.vscode/launch.json` for how to connect
     - `DEV=1` GCC C objects include debug information, so source breakpoints and variables work for decompiled game and practice C
     - `GLOBAL_ASM` functions remain assembly-only; use function breakpoints and inspect argument registers/memory when debugging them
+
+---
+
+## General
+
+Don't use agents unless asked.
