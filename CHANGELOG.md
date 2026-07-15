@@ -8,17 +8,24 @@
 - Added an optional third-person camera on Frigate that follows freed hostages until they escape or despawn
 - Refactored the grenade camera into a shared external-camera system supporting up to two simultaneous picture-in-picture views
 - External NPC cameras preserve normal off-screen movement so observing guards or hostages does not alter their gameplay behavior
+- Fixed a crash when an external camera rendered a room through overlapping portals
 
 ## Frigate hostage progress
 
 - Added an optional display that lists freed hostages in rescue order and shows their selected escape destination
-- Added estimated route times and movement-state indicators, including whether each hostage is moving normally or using off-screen movement
+- Added estimated route times across long, multi-part paths and movement-state indicators, including whether each hostage is moving normally or using off-screen movement
+- Added the newly selected destination and reason when a hostage rejects a destination after seeing Bond, stopping mid-route or failing to find a path
 - Added status reporting for hostages that reach a destination, fail to find or complete a route, die, or escape
 
 ## Interface and memory
 
 - Disabled the existing Dam gate-guard status indicator by default
 - Reclaimed TLB mapping-table memory for the new practice features, increasing lag but reducing crashes
+
+## Builds and testing
+
+- Completed the migration from the original IDO compiler to GCC for all C code and removed the legacy IDO toolchain
+- Added deterministic Dam replay coverage and expanded GCC build-invariant tests
 
 # 0.6.0
 
