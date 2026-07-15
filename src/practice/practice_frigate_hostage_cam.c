@@ -20,7 +20,7 @@
 #define FRIGATE_HOSTAGE_REACHED_AI_OFFSET 91
 #define FRIGATE_HOSTAGE_ESCAPED_AI_OFFSET 224
 #define FRIGATE_HOSTAGE_REACHED_DISTANCE 500.0f
-#define FRIGATE_HOSTAGE_MAX_CAMERAS 2
+#define FRIGATE_HOSTAGE_MAX_CAMERAS 1
 #define HOSTAGE_PROGRESS_X 5
 #define HOSTAGE_PROGRESS_Y 12
 #define HOSTAGE_PROGRESS_LINE_HEIGHT 10
@@ -113,23 +113,21 @@ static void adjust_virtual_position_y(ChrRecord *hostage,
   }
 
   virtual_stan = prop->stan;
-  if (!walkTilesBetweenPoints_NoCallback(
-          &virtual_stan, prop->pos.x, prop->pos.z, virtual_position->x,
-          virtual_position->z)) {
+  if (!walkTilesBetweenPoints_NoCallback(&virtual_stan, prop->pos.x,
+                                         prop->pos.z, virtual_position->x,
+                                         virtual_position->z)) {
     virtual_position->y = prop->pos.y;
     return;
   }
 
   prop_floor_y = stanGetPositionYValue(prop->stan, prop->pos.x, prop->pos.z);
   prop_floor_offset = prop->pos.y - prop_floor_y;
-  virtual_position->y =
-      stanGetPositionYValue(virtual_stan, virtual_position->x,
-                            virtual_position->z) +
-      prop_floor_offset;
+  virtual_position->y = stanGetPositionYValue(virtual_stan, virtual_position->x,
+                                              virtual_position->z) +
+                        prop_floor_offset;
 }
 
-static s32 hostage_route_targets_selected_pad(ChrRecord *hostage,
-                                              s16 pad_id) {
+static s32 hostage_route_targets_selected_pad(ChrRecord *hostage, s16 pad_id) {
   const coord3d *pad_position;
 
   if (hostage->actiontype != ACT_GOPOS || pad_id < 0) {
@@ -141,8 +139,7 @@ static s32 hostage_route_targets_selected_pad(ChrRecord *hostage,
          1.0f;
 }
 
-static const coord3d *hostage_waypoint_position(ChrRecord *hostage,
-                                                s32 index) {
+static const coord3d *hostage_waypoint_position(ChrRecord *hostage, s32 index) {
   waypoint *route_waypoint = hostage->act_gopos.waypoints[index];
 
   if (route_waypoint == NULL) {

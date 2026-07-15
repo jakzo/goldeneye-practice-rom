@@ -30,7 +30,7 @@ See [performance_baselines.json](../performance_baselines.json) for current stat
 A fork of the ares emulator source is included as the `ares` submodule. This
 version of ares profiles both the practice ROM and original ROM without adding
 instrumentation to either ROM. See `ares/ares/n64/PROFILER.md` and run
-`just profile-ares /path/to/custom/ares`.
+`just profile-ares`.
 
 It uses debugging symbols to understand the locations of all functions and tracks how often every function is called during gameplay. The `base-decomp-replay` branch contains the original ROM code with minimal modifications to be able to deterministically playback a recording made using the practice ROM.
 

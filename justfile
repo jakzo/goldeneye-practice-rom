@@ -1,5 +1,6 @@
 image := "goldeneye"
 test_image := "goldeneye-test"
+ares_bin := "ares/build_macos/desktop-ui/Release/ares.app/Contents/MacOS/ares"
 
 _default:
     just -l
@@ -43,15 +44,20 @@ make-dev:
 make-clean: reset
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }}
 
-ares:
+# Incrementally build the custom ares submodule used by host-side recipes.
+build-ares:
+    if [ ! -f ares/build_macos/CMakeCache.txt ]; then cd ares && DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --preset macos; fi
+    DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --build ares/build_macos --config Release --parallel {{ num_cpus() }}
+
+ares: build-ares
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }}
-    ares ./build/u/ge007.u.z64
+    "{{ ares_bin }}" ./build/u/ge007.u.z64
 
-ares-dev BOOT_LEVEL="TITLE":
+ares-dev BOOT_LEVEL="TITLE": build-ares
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}
-    ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 ./build/u/ge007.u.z64
+    "{{ ares_bin }}" --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 ./build/u/ge007.u.z64
 
-test-debug TEST_CASE REGION="us":
+test-debug TEST_CASE REGION="us": build-ares
     #!/usr/bin/env bash
     set -euo pipefail
     region="$(printf '%s' "{{ REGION }}" | tr '[:upper:]' '[:lower:]')"
@@ -62,7 +68,7 @@ test-debug TEST_CASE REGION="us":
         *) echo "error: region must be one of: us, eu, jp" >&2; exit 2 ;;
     esac
     docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=1 VERSION="$version" TEST_CASE="{{ TEST_CASE }}"
-    ares --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 "./build/$outcode/ge007.$outcode.z64"
+    "{{ ares_bin }}" --setting DebugServer/Enabled=true --setting DebugServer/UseIPv4=true --setting DebugServer/Port=9123 "./build/$outcode/ge007.$outcode.z64"
 
 test TEST_CASE:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
@@ -74,20 +80,19 @@ profile-archives OUTPUT="src/practice/docs/profile_archives_practice.csv":
     docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test REPLAY_ARCHIVES --timeout 480 --profile-csv "{{ OUTPUT }}"
 
 # Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
-profile-ares ARES ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007":
-    test -x "{{ ARES }}"
+profile-ares ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007": build-ares
+    test -x "{{ ares_bin }}"
     test -f "{{ ROM }}"
     test -f "{{ ELF }}"
     mkdir -p "$(dirname "{{ OUTPUT }}")"
-    ARES_N64_PROFILE_SYMBOLS="$(pwd)/{{ ELF }}" ARES_N64_PROFILE_OUTPUT="$(pwd)/{{ OUTPUT }}" "{{ ARES }}" --no-file-prompt "$(pwd)/{{ ROM }}"
+    ARES_N64_PROFILE_SYMBOLS="$(pwd)/{{ ELF }}" ARES_N64_PROFILE_OUTPUT="$(pwd)/{{ OUTPUT }}" "{{ ares_bin }}" --no-file-prompt "$(pwd)/{{ ROM }}"
 
 # Build and profile the release US ROM running the deterministic Archives replay.
-profile-release-us ARES="ares/build_macos/desktop-ui/Release/ares.app/Contents/MacOS/ares" OUTPUT="build/profile/archives-release-us" LABEL="Current release US":
-    DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --build ares/build_macos --config Release --parallel {{ num_cpus() }}
+profile-release-us OUTPUT="build/profile/archives-release-us" LABEL="Current release US":
     if test -z "$(docker images -q {{ image }})"; then just setup; fi
     docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=0 VERSION=US COMPARE=0 TEST_CASE=REPLAY_ARCHIVES
     cp tests/replays/archives.ram build/u/ge007.u.ram
-    ARES_N64_PROFILE_REPLAY=1 just profile-ares "{{ ARES }}" build/u/ge007.u.z64 build/u/ge007.u.elf "{{ OUTPUT }}"
+    ARES_N64_PROFILE_REPLAY=1 just profile-ares build/u/ge007.u.z64 build/u/ge007.u.elf "{{ OUTPUT }}"
     just profile-ares-flamegraph "{{ OUTPUT }}-001.folded" "{{ OUTPUT }}-001.html"
     docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/performance/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ LABEL }}" --build-mode release --region US --baseline src/practice/docs/performance_baselines.json --output "{{ OUTPUT }}-performance.json"
 

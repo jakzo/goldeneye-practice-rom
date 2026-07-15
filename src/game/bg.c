@@ -2047,12 +2047,69 @@ glabel sub_GAME_7F0B3C8C
 
 
 #ifdef PRACTICE_ROM
+// The external camera can reach the same room through overlapping portals
+// Rendering both is unnecessary was the cause of a crash so merging them here
+static s32 bgPracticeGetMergedRoomBounds(s32 index, struct bbox2d *bounds)
+{
+    s32 i;
+    s_bound_info *entry = &dword_CODE_bss_8007FFA0[index];
+
+    *bounds = entry->bbox;
+
+    for (i = 0; i < index; i++)
+    {
+        s_bound_info *previous = &dword_CODE_bss_8007FFA0[i];
+
+        if (previous->roomid == entry->roomid &&
+            previous->unk1 == entry->unk1 &&
+            previous->bbox.min.x < entry->bbox.max.x &&
+            previous->bbox.max.x > entry->bbox.min.x &&
+            previous->bbox.min.y < entry->bbox.max.y &&
+            previous->bbox.max.y > entry->bbox.min.y)
+        {
+            return FALSE;
+        }
+    }
+
+    for (i = index + 1; i < g_BgNumberOfRoomsDrawn; i++)
+    {
+        s_bound_info *next = &dword_CODE_bss_8007FFA0[i];
+
+        if (next->roomid == entry->roomid && next->unk1 == entry->unk1 &&
+            bounds->min.x < next->bbox.max.x &&
+            bounds->max.x > next->bbox.min.x &&
+            bounds->min.y < next->bbox.max.y &&
+            bounds->max.y > next->bbox.min.y)
+        {
+            if (next->bbox.min.x < bounds->min.x)
+            {
+                bounds->min.x = next->bbox.min.x;
+            }
+            if (next->bbox.min.y < bounds->min.y)
+            {
+                bounds->min.y = next->bbox.min.y;
+            }
+            if (next->bbox.max.x > bounds->max.x)
+            {
+                bounds->max.x = next->bbox.max.x;
+            }
+            if (next->bbox.max.y > bounds->max.y)
+            {
+                bounds->max.y = next->bbox.max.y;
+            }
+        }
+    }
+
+    return TRUE;
+}
+
 Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
 {
     s32 i;
     s32 j;
     s32 b_max;
     s32 b_min;
+    struct bbox2d room_bounds;
     b_min = 99999999;
     b_max = 0;
 
@@ -2067,7 +2124,8 @@ Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
 
         for (j=0; j<g_BgNumberOfRoomsDrawn; j++)
         {
-            if (i == dword_CODE_bss_8007FFA0[j].unk1)
+            if (i == dword_CODE_bss_8007FFA0[j].unk1 &&
+                bgPracticeGetMergedRoomBounds(j, &room_bounds))
             {
                 gSPMatrix(gdl++, osVirtualToPhysical((void*)currentPlayerGetProjectionMatrix()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
                 gdl = fogRenderClearFogMode(gdl);
@@ -2084,10 +2142,10 @@ Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
                 gdl = fogSetRenderFogColor(
                     bgScissorCurrentPlayerViewF(
                         gdl++,
-                        dword_CODE_bss_8007FFA0[j].bbox.f[0][0],
-                        dword_CODE_bss_8007FFA0[j].bbox.f[0][1],
-                        dword_CODE_bss_8007FFA0[j].bbox.f[1][0],
-                        dword_CODE_bss_8007FFA0[j].bbox.f[1][1]),
+                        room_bounds.min.x,
+                        room_bounds.min.y,
+                        room_bounds.max.x,
+                        room_bounds.max.y),
                     0);
 
                 if (get_debug_do_draw_bg())
@@ -2124,16 +2182,17 @@ Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
     {
         for (j=0; j<g_BgNumberOfRoomsDrawn; j++)
         {
-            if (i == dword_CODE_bss_8007FFA0[j].unk1)
+            if (i == dword_CODE_bss_8007FFA0[j].unk1 &&
+                bgPracticeGetMergedRoomBounds(j, &room_bounds))
             {
                 gSPMatrix(gdl++, osVirtualToPhysical((void*)get_BONDdata_field_10E0()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
                 gdl = fogSetRenderFogColor(
                     bgScissorCurrentPlayerViewF(
                         gdl++,
-                        dword_CODE_bss_8007FFA0[j].bbox.f[0][0],
-                        dword_CODE_bss_8007FFA0[j].bbox.f[0][1],
-                        dword_CODE_bss_8007FFA0[j].bbox.f[1][0],
-                        dword_CODE_bss_8007FFA0[j].bbox.f[1][1]),
+                        room_bounds.min.x,
+                        room_bounds.min.y,
+                        room_bounds.max.x,
+                        room_bounds.max.y),
                     1);
 
                 if (get_debug_do_draw_bg())
@@ -13475,8 +13534,6 @@ glabel sub_GAME_7F0BA2D4
 /* 0EF0EC 7F0BA5BC 27BD00B8 */   addiu $sp, $sp, 0xb8
 )
 #endif
-
-
 
 
 

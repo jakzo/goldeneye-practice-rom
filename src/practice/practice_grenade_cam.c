@@ -11,8 +11,8 @@
 #include <math.h>
 #include <ultra64.h>
 
-#define MAX_GRENADE_CAM_SLOTS 2
-#define FREEZE_DURATION_SEC 5.0f
+#define MAX_GRENADE_CAM_SLOTS 1
+#define FREEZE_DURATION_SEC 2.0f
 #define CAMERA_HEIGHT 300.0f
 #define MIN_CAMERA_HEIGHT 300.0f
 #define MAX_CAMERA_HEIGHT 700.0f
