@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize a deterministic profiler capture."""
+"""Summarize a deterministic ROM profiler capture."""
 
 import argparse
 import csv

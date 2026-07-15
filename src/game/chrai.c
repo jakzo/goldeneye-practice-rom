@@ -1393,7 +1393,11 @@ void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 {
                     AIRecord  *ai  = AiListp + Offset;
                     ChrRecord *chr = chrFindById(ChrEntityp, ai->val[0]);
+#ifdef __GNUC__
+                    vec3d      vec = New_Vector(0, 0, 0);
+#else
                     vec3d      vec = New_Vector();
+#endif
 
                     if (chr && chr->prop)
                     {
@@ -1413,7 +1417,11 @@ void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                     {
                         PropRecord      *prop = chrGetEquippedWeaponPropWithCheck(chr1, GUNRIGHT);
                         WeaponObjRecord *weapon;
+#ifdef __GNUC__
+                        vec3d            vec = New_Vector(0, 0, 0);
+#else
                         vec3d            vec = New_Vector();
+#endif
 
                         if (!prop) //not Right hand? try left
                         {
@@ -4571,7 +4579,11 @@ void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                 }
                 case AI_GasLeakAndFadeFog:
                 {
+#ifdef __GNUC__
+                    coord3d emitPos = New_Coord3d(0, 0, 0);
+#else
                     coord3d emitPos = New_Coord3d();
+#endif
                     init_trigger_toxic_gas_effect(&emitPos);
                     Offset += AI_GasLeakAndFadeFog_LENGTH;
                     break;

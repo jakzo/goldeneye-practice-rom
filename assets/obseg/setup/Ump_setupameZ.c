@@ -18,7 +18,7 @@ waypoint pathwaypoints[];
 PathRecord patrolpaths[];
 AIListRecord ailists[];
 
-stagesetup Ump_setupameZ = {
+stagesetup Ump_setupameZ STAGESETUP_HEADER = {
     &pathwaypoints,
     &pathsets,
     &intro,

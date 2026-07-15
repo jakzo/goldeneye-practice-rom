@@ -248,12 +248,24 @@ struct levelentry levelinfotable[] = {
 u32 D_8004481C[] = {0x1000100, 0};
 
 //D:80044824
+#ifdef __GNUC__
+/* GCC rejects initialized flexible-array members. Keep the original packed,
+ * variable-length representation explicitly; the assembly consumer walks it
+ * as bytes and expects g_BgCurrentRoom immediately after these 20 bytes. */
+u8 specialportalarray[] = {
+    0x03,
+    0x2C,0x2E,0x32, 0x37,0x3E,0x3F,0x4E, 0x56,0x59,0x5D,0x72, 0x76,0x79,0x7A,0xFF,
+    0x11,
+    0x00,0x3A,0xFF
+};
+#else
 s_specialportal specialportalarray[] = {
     {0x03,
         {0x2C,0x2E,0x32, 0x37,0x3E,0x3F,0x4E, 0x56,0x59,0x5D,0x72, 0x76,0x79,0x7A,0xFF}},
     {0x11,
         {0x00,0x3A,0xFF}}
 };
+#endif
 
 /**
  * Bond's current room.
@@ -12464,7 +12476,11 @@ void bgClearDataPortalsControlBytes1Low2Bits(s32 index)
  *
  * Address 0x7F0B9B64.
  */
+#ifdef PRACTICE_ROM
+void bgSwapConnectedRooms(s32 index)
+#else
 s8 bgSwapConnectedRooms(s32 index)
+#endif
 {
     u8 t;
 

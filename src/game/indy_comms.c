@@ -2,7 +2,11 @@
 #include "indy_commands.h"
 #include "indy_comms.h"
 
+#ifdef PRACTICE_ROM
+void indycommInit(void) {
+#else
 s32 indycommInit(void) {
+#endif
     if (indy_ready != 1)
     {
         indy_ready = 1;
@@ -43,7 +47,11 @@ void indycommHostSendDump(char *filename, u8 *data, u32 size)
   
     if (indy_ready) 
     {
+#ifdef __GNUC__
+        indycmdSendDump(filename, size, (struct indy_resource_entry_header *)data);
+#else
         indycmdSendDump(filename, size, data);
+#endif
         indycmdAckSendDump(auStack4);
     }
     return;
@@ -57,7 +65,11 @@ void indycommHostRamRomLoad(char *filename, u8 *target, s32 size)
   
     if (indy_ready)
     {
+#ifdef __GNUC__
+        indycmdSendRamRomLoad(filename,(u32)target,size);
+#else
         indycmdSendRamRomLoad(filename,target,size);
+#endif
         indycmdReceiveRamRom(&uStack4,&uStack8,&uStack12);
     }
     return;
@@ -81,7 +93,11 @@ u8 * indycommHostCheckFileExists(char *name, s32 *size)
         return NULL;
     } else {
         indycmdSendHostCheckFileExists(name);
+#ifdef __GNUC__
+        indycmdAckHostCheckFileExists((u8 *)&response,(u8 *)size);
+#else
         indycmdAckHostCheckFileExists(&response,size);
+#endif
     }
     return response;
 }
@@ -94,7 +110,11 @@ u8 *indycommHostSendCmd(u8 *cmdstr)
     }
     else {
         indycmdSendHostCmdPacket(cmdstr);
+#ifdef __GNUC__
+        indycmdAckHostCmdPacket((u8 *)&local_4);
+#else
         indycmdAckHostCmdPacket(&local_4);
+#endif
     }
     return local_4;
 }

@@ -42,4 +42,4 @@ ABI_ASSERT(timer_interval_offset, __builtin_offsetof(OSTimer, interval) == 0x08)
 ABI_ASSERT(timer_mq_offset, __builtin_offsetof(OSTimer, mq) == 0x18);
 #endif
 
-int migration_abi_checks_compile_only;
+int abi_checks_compile_only;

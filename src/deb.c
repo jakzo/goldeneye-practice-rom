@@ -70,7 +70,7 @@ u8 *debAllocate(s32 size) {
 
 void debAdd(const char *name, void *data) {
 #ifdef LEFTOVERDEBUG
-    struct deblistentry *entry = debAllocate(sizeof(struct deblistentry));
+    struct deblistentry *entry = (struct deblistentry *)debAllocate(sizeof(struct deblistentry));
     entry->next = g_DebList;
     entry->data = data;
     entry->name = name;

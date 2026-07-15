@@ -11,7 +11,7 @@
 // forward declarations
 StandTile tile_0;
 
-StandFileHeader Tbg_arch_all_p_stanZ = {
+StandFileHeader Tbg_arch_all_p_stanZ STAN_HEADER = {
     NULL,
     &tile_0,
     {0x00, 0x00, 0x00, 0x00}

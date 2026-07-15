@@ -6,6 +6,7 @@ SECTIONS
     _UsetupDataStart = ADDR(.data);
     _UsetupDataRomStart = 0x0000;
     .data 0x00000000 : AT(0x0000) {
+        * (.data.setup);
         * (.data);
     }
     _UsetupDataEnd = ADDR(.data) + SIZEOF(.data);

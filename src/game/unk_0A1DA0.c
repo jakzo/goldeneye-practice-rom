@@ -1211,6 +1211,7 @@ void sub_GAME_7F0A2F30(struct damage_display_parent *arg0, s32 arg1, s32 arg2, f
 #if defined(LEFTOVERDEBUG)
 GLOBAL_ASM(
 .late_rodata
+.late_rodata_alignment 8
 glabel D_80057740
 .word 0x4061d000, 0x00000000 /*142.5*/
 glabel D_80057748
@@ -1489,6 +1490,7 @@ glabel sub_GAME_7F0A2F30
 #if !defined(LEFTOVERDEBUG)
 GLOBAL_ASM(
 .late_rodata
+.late_rodata_alignment 8
 glabel D_8004CE10
 .word 0x4061d000
 glabel D_8004CE14

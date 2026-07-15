@@ -192,7 +192,12 @@ void bossInitMainthreadData(void)
 
     for (i = 0; i != MAXCONTROLLERS; i++)
     {
+#ifdef __GNUC__
+        /* 100 ms is exactly one tenth of the N64 clock; avoid __udivdi3. */
+        osSetTimer(&bosstimer, (u64)((u32)osClockRate / 10), 0, &bossmq, &bossmsg);
+#else
         osSetTimer(&bosstimer, OS_USEC_TO_CYCLES(100000), 0, &bossmq, &bossmsg);
+#endif
         osRecvMesg(&bossmq, &bossmsg, OS_MESG_BLOCK);
         if (i == 1)
         {

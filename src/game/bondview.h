@@ -2337,6 +2337,12 @@ typedef struct bondstruct_unk_80035904 {
 struct move_bond_temp_struct {
     s32 unk00;
     s32 unk04;
+#ifdef __GNUC__
+    /* stanTileDistanceRelated clears 16 words through this pointer. IDO's
+     * stack layout happened to provide adjacent scratch locals; describe the
+     * complete workspace so GCC cannot place live collision state there. */
+    s32 scratch[14];
+#endif
 };
 
 //D:80036424

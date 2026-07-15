@@ -1,3 +1,4 @@
+#ifndef __GNUC__
 long long __d_to_ll(double d)
 {
    return d;
@@ -30,3 +31,4 @@ float __ull_to_f(unsigned long long u)
 {
    return u;
 }
+#endif

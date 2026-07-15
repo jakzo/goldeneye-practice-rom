@@ -53,7 +53,7 @@ void rmonInit(void) {
     rmonCurrentMesgStack = 0;
     rmonCurrentMesgPrintfStack = 0;
 
-    osCreateMesgQueue(&rmonMessageQueue, &rmonMesg, RMON_MESSAGE_QUEUE_SIZE);
+    osCreateMesgQueue(&rmonMessageQueue, rmonMesg, RMON_MESSAGE_QUEUE_SIZE);
     osCreateMesgQueue(&rmonSleepMq, &rmonSleepMesg, 1);
 }
 #endif
@@ -92,7 +92,12 @@ void rmonMain(void) {
         }
         }
 
+#ifdef __GNUC__
+        /* One second is osClockRate ticks; avoid an unnecessary __udivdi3. */
+        osSetTimer(&rmonSleeptimer, osClockRate, 0, &rmonSleepMq, rmonSleepMesg);
+#else
         osSetTimer(&rmonSleeptimer, OS_USEC_TO_CYCLES(1000000), 0, &rmonSleepMq, rmonSleepMesg);
+#endif
         osRecvMesg(&rmonSleepMq, &rmonSleepMesg, OS_MESG_BLOCK);
     }
 #    endif
@@ -272,7 +277,8 @@ void osSyncPrintf(const char *fmt, ...)
     va_list args;
     va_start(args, fmt);
 #ifdef ENABLE_USB
-    ans = _Printf(&proutSprintf, buffer, fmt, args);
+    ans = _Printf((u8 *(*)(u8 *, const u8 *, size_t))proutSprintf,
+                  buffer, (const u8 *)fmt, args);
 #else
     ans = _Printf(&proutSyncPrintf, NULL, fmt, args);
 #endif
@@ -310,7 +316,8 @@ void osAsyncPrintf(const char *format, ...)
     dest->type = RMON_MESG_PRINTF;
 
     va_start(args, format);
-    written = _Printf(proutSprintf, dest->buffer, format, args);
+    written = _Printf((u8 *(*)(u8 *, const u8 *, size_t))proutSprintf,
+                      dest->buffer, (const u8 *)format, args);
     va_end(args);
     if (written >= 0) {
         if (written > RMON_MESSAGE_PRINTF_BUFFER_LENGTH - 1)

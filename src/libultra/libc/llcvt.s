@@ -1,0 +1,82 @@
+# Exact standalone form of the IDO 5.3 -O1 MIPS III conversion helpers.
+
+.set noat
+.set noreorder
+.set gp=64
+.set mips3
+
+.include "macros.inc"
+
+.section .text, "ax"
+.balign 16
+
+glabel __d_to_ll
+.word 0x46206109, 0x44222000, 0x00000000, 0x0002183c
+.word 0x0003183f, 0x03e00008, 0x0002103f
+.size __d_to_ll, . - __d_to_ll
+
+glabel __f_to_ll
+.word 0x46006109, 0x44222000, 0x00000000, 0x0002183c
+.word 0x0003183f, 0x03e00008, 0x0002103f
+.size __f_to_ll, . - __f_to_ll
+
+glabel __d_to_ull
+.word 0x444ef800, 0x24020001, 0x44c2f800, 0x00000000
+.word 0x46206125, 0x4442f800, 0x00000000, 0x30410004
+.word 0x30420078, 0x10400015, 0x3c0143e0, 0x44812800
+.word 0x44802000, 0x24020001, 0x46246101, 0x44c2f800
+.word 0x00000000, 0x46202125, 0x4442f800, 0x00000000
+.word 0x30410004, 0x30420078, 0x14400006, 0x00000000
+lui $t7, %hi(.Lllcvt_constants)
+ld $t7, %lo(.Lllcvt_constants)($t7)
+.word 0x44222000, 0x10000007, 0x004f1025, 0x10000005
+.word 0x2402ffff, 0x44222000, 0x00000000, 0x0440fffb
+.word 0x00000000, 0x44cef800, 0x0002183c, 0x0003183f
+.word 0x03e00008, 0x0002103f
+.size __d_to_ull, . - __d_to_ull
+
+glabel __f_to_ull
+.word 0x444ef800, 0x24020001, 0x44c2f800, 0x00000000
+.word 0x46006125, 0x4442f800, 0x00000000, 0x30410004
+.word 0x30420078, 0x10400014, 0x3c015f00, 0x44812000
+.word 0x24020001, 0x46046101, 0x44c2f800, 0x00000000
+.word 0x46002125, 0x4442f800, 0x00000000, 0x30410004
+.word 0x30420078, 0x14400006, 0x00000000
+lui $t7, %hi(.Lllcvt_constants)
+ld $t7, %lo(.Lllcvt_constants + 8)($t7)
+.word 0x44222000, 0x10000007, 0x004f1025, 0x10000005
+.word 0x2402ffff, 0x44222000, 0x00000000, 0x0440fffb
+.word 0x00000000, 0x44cef800, 0x0002183c, 0x0003183f
+.word 0x03e00008, 0x0002103f
+.size __f_to_ull, . - __f_to_ull
+
+glabel __ll_to_d
+.word 0xafa40000, 0xafa50004, 0xdfae0000, 0x44ae2000
+.word 0x03e00008, 0x46a02021
+.size __ll_to_d, . - __ll_to_d
+
+glabel __ll_to_f
+.word 0xafa40000, 0xafa50004, 0xdfae0000, 0x44ae2000
+.word 0x03e00008, 0x46a02020
+.size __ll_to_f, . - __ll_to_f
+
+glabel __ull_to_d
+.word 0xafa40000, 0xafa50004, 0xdfae0000, 0x44ae2000
+.word 0x05c10006, 0x46a02021, 0x3c0141f0, 0x44813800
+.word 0x44803000, 0x00000000, 0x46260000, 0x03e00008
+.word 0x00000000
+.size __ull_to_d, . - __ull_to_d
+
+glabel __ull_to_f
+.word 0xafa40000, 0xafa50004, 0xdfae0000, 0x44ae2000
+.word 0x05c10005, 0x46a02020, 0x3c014f80, 0x44813000
+.word 0x00000000, 0x46060000, 0x03e00008, 0x00000000
+.size __ull_to_f, . - __ull_to_f
+
+.balign 16
+
+.section .rodata, "a"
+.balign 16
+.Lllcvt_constants:
+.word 0x80000000, 0x00000000
+.word 0x80000000, 0x00000000

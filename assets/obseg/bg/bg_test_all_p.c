@@ -1,7 +1,7 @@
 #include "bg_all_p.h"
 
-u32 point_table_binary[];
-u32 pri_mapping_binary[];
+extern u32 point_table_binary[];
+extern u32 pri_mapping_binary[];
 
 /*
  * A single, deliberately plain room. The two triangles cover a 600 metre

@@ -14,11 +14,7 @@ RUN apt -y install \
     gcc-10-mips-linux-gnu=${MIPS_GCC_VERSION} \
     g++-mips-linux-gnu=${MIPS_GCC_META_VERSION} \
     g++-10-mips-linux-gnu=${MIPS_GCC_VERSION} \
-    wget make git python3 libcapstone-dev pkg-config build-essential
-
-# install qemu (can be removed if you're using ido recomp)
-RUN wget https://github.com/n64decomp/qemu-irix/releases/download/v2.11-deb/qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb -P /tmp
-RUN dpkg -i /tmp/qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
+    make git python3 libcapstone-dev pkg-config build-essential
 
 # setup sudo
 RUN echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers

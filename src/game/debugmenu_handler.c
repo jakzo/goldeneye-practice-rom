@@ -1,6 +1,7 @@
 #include <ultra64.h>
 #include "debugmenu_handler.h"
 #include "initgamedata.h"
+#include "bondview.h"
 #include <boss.h>
 #include <fr.h>
 

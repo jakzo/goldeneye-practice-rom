@@ -3,7 +3,11 @@
 #include <io/controller.h>
 #include <io/siint.h>
 
+#ifdef __GNUC__
+#define HALF_A_SECOND (osClockRate >> 1)
+#else
 #define HALF_A_SECOND OS_USEC_TO_CYCLES(500000)
+#endif
 
 u32 __osContinitialized = 0;
 OSPifRam __osContPifRam;
@@ -85,7 +89,11 @@ void __osPackRequestData(u8 cmd)
     __OSContRequesFormat requestformat;
     int i;
 
+#ifdef __GNUC__
+    for (i = 0; i < ARRLEN(__osContPifRam.ramarray); i++)
+#else
     for (i = 0; i < ARRLEN(__osContPifRam.ramarray) + 1; i++)
+#endif
     {
         __osContPifRam.ramarray[i] = 0;
     }

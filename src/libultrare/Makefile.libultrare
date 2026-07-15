@@ -8,12 +8,9 @@ LIBULTRA_OPTIMIZATION := -O1
 LIBULTRA_ASM_OPTIMIZATION := -O1
 
 
-# disable trying to link to __assert function
+# Disable trying to link to __assert function.
 ASSERT_FLAG := -DNDEBUG
 #ASSERT_FLAG := 
-
-# no `-signed` flag
-CFLAGS_LIBULTRA = -Wab,-r4300_mul -non_shared -G 0 -Xcpluscomm $(CFLAGWARNING) -woff 819,820,852,821,838,649 $(LIBULTRA_INCLUDE) $(LCDEFS) $(ASSERT_FLAG) -DTARGET_N64 $(MIPSISET) $(LIBULTRA_OPTIMIZATION)
 
 ASFLAGS_LIBULTRA = -march=vr4300 -mabi=32 $(INCLUDE) $(ASMDEFS) $(LIBULTRA_ASM_OPTIMIZATION)
 
@@ -200,8 +197,6 @@ LIBULTRARE_IO_S_FILES :=
 
 LIBULTRA_LIBC_C_FILES := \
     ldiv \
-    ll \
-    llcvt \
     string \
     xldtob \
     xlitob 
@@ -209,7 +204,9 @@ LIBULTRA_LIBC_C_FILES := \
 LIBULTRA_LIBC_S_FILES := \
     bcmp \
     bcopy \
-    bzero 
+    bzero \
+    ll \
+    llcvt
 
 
 LIBULTRARE_LIBC_C_FILES := \
@@ -440,11 +437,13 @@ $(BUILD_DIR)/src/libultrare/io/%.o: src/libultrare/io/%.s
 $(BUILD_DIR)/src/libultra/libc/%.o: LIBULTRA_OPTIMIZATION := -O3
 $(BUILD_DIR)/src/libultrare/libc/%.o: LIBULTRA_OPTIMIZATION := -O3
 
-$(BUILD_DIR)/src/libultra/libc/ll.o: LIBULTRA_OPTIMIZATION := -O1
-$(BUILD_DIR)/src/libultra/libc/llcvt.o: LIBULTRA_OPTIMIZATION := -O1
+$(BUILD_DIR)/src/libultra/libc/ll.o: src/libultra/libc/ll.s
+	@mkdir -p $(@D)
+	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
 
-$(BUILD_DIR)/src/libultra/libc/ll.o: MIPSISET := -mips3 -o32
-$(BUILD_DIR)/src/libultra/libc/llcvt.o: MIPSISET := -mips3 -o32
+$(BUILD_DIR)/src/libultra/libc/llcvt.o: src/libultra/libc/llcvt.s
+	@mkdir -p $(@D)
+	$(AS) $(ASFLAGS_LIBULTRA) -o $@ $<
 
 $(BUILD_DIR)/src/libultra/libc/%.o: src/libultra/libc/%.c
 	@mkdir -p $(@D)

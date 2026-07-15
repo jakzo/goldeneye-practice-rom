@@ -475,7 +475,17 @@ Gfx *chrpropsRenderPass(Gfx *gdl, s32 roomid, s32 renderpass)
     s32 i;
     s32* rp;
     s32 unused2;
+#ifdef PRACTICE_ROM
+    /*
+     * The engine treats rooms and unk30 as one eight-byte room list. Some
+     * props therefore have more than the four entries declared by rooms[].
+     * IDO left the unused locals below adjacent to sp48, but GCC removes them
+     * and an extended list would overwrite saved registers on the stack.
+     */
+    s32 sp48[PROPRECORD_STAN_ROOM_LEN * 2];
+#else
     s32 sp48[PROPRECORD_STAN_ROOM_LEN];
+#endif
     s32 unused3;
     s32 unused4;
 
@@ -5756,4 +5766,3 @@ ObjectRecord * sub_GAME_7F03FAB0(struct coord3d *pos, s32 RoomID)
 
     return NULL;
 }
-

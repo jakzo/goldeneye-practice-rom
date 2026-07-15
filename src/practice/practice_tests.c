@@ -9,19 +9,37 @@
 #include "emu_log.h"
 #include "gun.h"
 #include "initanitable.h"
+#include "init.h"
 #include "joy.h"
 #include "lvl.h"
+#include "lvl_text.h"
+#include "math_asinacos.h"
+#include "math_ceil.h"
+#include "math_floor.h"
+#include "matrixmath.h"
+#include "mp_music.h"
+#include "music.h"
+#include "music_0D2720.h"
 #include "objecthandler.h"
+#include "objective.h"
+#include "objective_status.h"
 #include "player.h"
 #include "practice_hotkeys.h"
 #include "practice_debug.h"
 #include "practice_profile.h"
 #include "practice_replay.h"
 #include "practice_timescale.h"
+#include "quaternion.h"
+#include "random.h"
+#include "str.h"
+#include "tlb_random.h"
 #include "state/practice_states.h"
 #include "state/practice_states_utils.h"
 #include "watch.h"
+#include "viewport.h"
+#include "assets/obseg/text/LmiscE.h"
 #include <bondgame.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ultra64.h>
 
@@ -39,6 +57,14 @@ extern bool sub_GAME_7F04B590(ModelFileHeader *header, ModelNode *node);
 extern void objDeform(ObjectRecord *obj, s32 destroyed_level);
 extern bool bondinvCheckHasKeyFlags(u32 wantkeyflags);
 extern bool g_DebugLogsEnabled;
+extern long long __ll_div(long long dividend, long long divisor);
+extern long long __ll_rem(unsigned long long dividend, long long divisor);
+extern long long __ll_mod(long long dividend, long long divisor);
+extern long long __f_to_ll(float value);
+extern double __ll_to_d(long long value);
+extern void __ull_divremi(unsigned long long *quotient,
+                         unsigned long long *remainder,
+                         unsigned long long dividend, unsigned short divisor);
 
 // --- start test cases ---
 #define STATE_DOOR 1
@@ -62,6 +88,10 @@ extern bool g_DebugLogsEnabled;
 #define REPLAY_ARCHIVES 19
 #define REPLAY_ARCHIVES_04X 20
 #define REPLAY_ARCHIVES_HOTKEYS 21
+#define MIGRATION_MATH 22
+#define MIGRATION_PHASE3 23
+#define MIGRATION_PHASE4 24
+#define MIGRATION_PHASE6 25
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -122,6 +152,8 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_CORRUPT_FREELIST:
   case STATE_DESTROYED_PROP:
   case STATE_RUNWAY_PLANE:
+  case MIGRATION_PHASE3:
+  case MIGRATION_PHASE4:
   case CRASH:
   case REPLAY_RUNWAY:
     return LEVELID_RUNWAY;
@@ -144,6 +176,8 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_CONTROL:
     return LEVELID_CONTROL;
   case TEST_MOVE_SPEED:
+  case MIGRATION_MATH:
+  case MIGRATION_PHASE6:
     return LEVELID_TEST;
   default:
     return LEVELID_NONE;
@@ -245,6 +279,308 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case MIGRATION_PHASE4: {
+    static const u32 expected_random[] = {
+        0x780b1177, 0x0d12f86a, 0xa90fd6a5, 0xa9edb1cc};
+    char formatted[64];
+    char *end;
+    u8 stack[32];
+    u64 saved_random_seed;
+    u64 saved_tlb_seed;
+    bool passed = TRUE;
+    s32 i;
+
+    if (!after_frames(30)) {
+      break;
+    }
+
+    emu_log("PHASE4_RNG_START");
+    saved_random_seed = g_randomSeed;
+    saved_tlb_seed = g_tlbRandomSeed;
+    g_randomSeed = 0x0123456789abcdefULL;
+    for (i = 0; i < ARRAYCOUNT(expected_random); i++) {
+      u32 actual = randomGetNext();
+      if (actual != expected_random[i]) {
+        emu_log("PHASE4_RNG_FAILED index=%d got=%08x expected=%08x", i,
+                actual, expected_random[i]);
+        passed = FALSE;
+      }
+    }
+    g_tlbRandomSeed = 0x0123456789abcdefULL;
+    {
+      u32 actual0 = tlbRandomGetNext();
+      u32 actual1 = tlbRandomGetNext();
+      if (actual0 != expected_random[0] || actual1 != expected_random[1]) {
+        emu_log("PHASE4_TLB_RNG_FAILED got=%08x,%08x expected=%08x,%08x",
+                actual0, actual1, expected_random[0], expected_random[1]);
+        passed = FALSE;
+      }
+    }
+    g_randomSeed = saved_random_seed;
+    g_tlbRandomSeed = saved_tlb_seed;
+
+    emu_log("PHASE4_STRING_START");
+    if (strtol(" -0x2a!", &end, 0) != -42 || *end != '!') {
+      emu_log("PHASE4_STRTOL_FAILED");
+      passed = FALSE;
+    }
+    sprintf(formatted, "%s:%d:%x", "gcc", -42, 0x2a);
+    if (strcmp(formatted, "gcc:-42:2a") != 0) {
+      emu_log("PHASE4_SPRINTF_FAILED got=%s", formatted);
+      passed = FALSE;
+    }
+    if (setSPToEnd(stack, sizeof(stack)) != stack + sizeof(stack) - 8) {
+      emu_log("PHASE4_STACK_HELPER_FAILED");
+      passed = FALSE;
+    }
+
+    emu_log("PHASE4_MUSIC_DECOMPRESS_START");
+    musicTrack2Stop();
+    musicTrack2Play(M_WIND);
+    musicTrack2Stop();
+
+    emu_log(passed ? "TEST_COMPLETE" : "TEST_FAILED");
+    break;
+  }
+
+  case MIGRATION_PHASE3: {
+    struct objective_entry objective;
+    struct objective_entry *saved_objective_ptrs[OBJECTIVES_MAX];
+    OBJECTIVESTATUS saved_objective_statuses[OBJECTIVES_MAX];
+    u32 *saved_tag;
+    struct watchMenuObjectiveText *saved_briefing;
+    struct criteria_roomentered *saved_entered;
+    struct criteria_deposit *saved_deposit;
+    struct criteria_picture *saved_picture;
+    s32 saved_objective_count;
+    s32 saved_objective_count_related;
+    s32 saved_z_buffer;
+    s32 saved_z_width;
+    s32 saved_z_height;
+    MISSION_STATE_ID saved_mission_state;
+    Gfx commands[2];
+    Gfx *command_end;
+    PropRecord *prop;
+    bool found_loaded_model = FALSE;
+    bool passed = TRUE;
+    s32 i;
+
+    if (!after_frames(30)) {
+      break;
+    }
+
+    emu_log("PHASE3_OBJECTIVE_START");
+    saved_objective_count = objective_count;
+    saved_objective_count_related = objective_count_related;
+    saved_tag = ptr_last_tag_entry_type16;
+    saved_briefing = ptr_last_briefing_setup_entry_type23;
+    saved_entered = ptr_last_enter_room_subobject_entry_type20;
+    saved_deposit = ptr_last_deposit_in_room_subobject_entry_type21;
+    saved_picture = ptr_last_photo_obj_in_room_subobject_entry_type1E;
+    for (i = 0; i < OBJECTIVES_MAX; i++) {
+      saved_objective_ptrs[i] = objective_ptrs[i];
+      saved_objective_statuses[i] = objectiveStatuses[i];
+    }
+
+    something_with_stage_objectives();
+    for (i = 0; i < OBJECTIVES_MAX; i++) {
+      if (objective_ptrs[i] != NULL ||
+          objectiveStatuses[i] != OBJECTIVESTATUS_INCOMPLETE) {
+        passed = FALSE;
+      }
+    }
+    objective.menu = BRIEFING_M;
+    add_ptr_to_objective(&objective);
+    if (objectiveGetCount() != BRIEFING_M + 1 ||
+        objective_ptrs[BRIEFING_M] != &objective) {
+      emu_log("PHASE3_OBJECTIVE_FAILED");
+      passed = FALSE;
+    }
+
+    objective_count = saved_objective_count;
+    objective_count_related = saved_objective_count_related;
+    ptr_last_tag_entry_type16 = saved_tag;
+    ptr_last_briefing_setup_entry_type23 = saved_briefing;
+    ptr_last_enter_room_subobject_entry_type20 = saved_entered;
+    ptr_last_deposit_in_room_subobject_entry_type21 = saved_deposit;
+    ptr_last_photo_obj_in_room_subobject_entry_type1E = saved_picture;
+    for (i = 0; i < OBJECTIVES_MAX; i++) {
+      objective_ptrs[i] = saved_objective_ptrs[i];
+      objectiveStatuses[i] = saved_objective_statuses[i];
+    }
+
+    emu_log("PHASE3_TEXT_START");
+    if (langGetLangBankIndexFromStagenum(LEVELID_TEST) != LDAM ||
+        langGet(getStringID(LMISC, MISC_STR_29_ERROR_LF)) == NULL) {
+      emu_log("PHASE3_TEXT_FAILED");
+      passed = FALSE;
+    }
+
+    emu_log("PHASE3_MODEL_START");
+    for (prop = ptr_obj_pos_list_first_entry; prop != NULL; prop = prop->next) {
+      if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON) &&
+          prop->obj != NULL && prop->obj->model != NULL) {
+        found_loaded_model = TRUE;
+        break;
+      }
+    }
+    if (!found_loaded_model) {
+      emu_log("PHASE3_MODEL_LOAD_FAILED");
+      passed = FALSE;
+    }
+
+    emu_log("PHASE3_VIEWPORT_START");
+    saved_z_buffer = z_buffer;
+    saved_z_width = z_buffer_width;
+    saved_z_height = z_buffer_height;
+    zbufSetBuffer(0x80400000, 320, 240);
+    command_end = zbufInit(commands);
+    if (command_end != commands + 2 || z_buffer_width != 320 ||
+        z_buffer_height != 240) {
+      emu_log("PHASE3_VIEWPORT_FAILED");
+      passed = FALSE;
+    }
+    zbufSetBuffer(saved_z_buffer, saved_z_width, saved_z_height);
+
+    emu_log("PHASE3_AUDIO_START");
+    if (getmusictrack_or_randomtrack(LEVELID_DAM) != M_DAM ||
+        musicGetBgTrackForStage(LEVELID_DAM) != -1 ||
+        musicGetXTrackForStage(LEVELID_DAM) != M_WIND ||
+        sub_GAME_7F0C0BF0() != get_mTrack2Vol()) {
+      emu_log("PHASE3_MUSIC_LOOKUP_FAILED");
+      passed = FALSE;
+    }
+    saved_mission_state = get_mission_state();
+    set_missionstate(MISSION_STATE_0);
+    set_missionstate(saved_mission_state);
+    if (get_mission_state() != saved_mission_state) {
+      emu_log("PHASE3_AUDIO_TRANSITION_FAILED");
+      passed = FALSE;
+    }
+
+    emu_log(passed ? "TEST_COMPLETE" : "TEST_FAILED");
+    break;
+  }
+
+  case MIGRATION_MATH: {
+    union {
+      f32 f;
+      u32 u;
+    } value;
+    Mtxf lhs;
+    Mtxf identity;
+    Mtxf result;
+    quatf quaternion;
+    mat44f quaternion_matrix;
+    bool passed = TRUE;
+    s32 i;
+    s32 j;
+
+    if (!after_frames(1)) {
+      break;
+    }
+
+#define CHECK_FLOAT_BITS(expression, expected)                                  \
+    do {                                                                        \
+      value.f = (expression);                                                   \
+      if (value.u != (expected)) {                                              \
+        emu_log("MATH_BITS_FAILED %s got=%08x expected=%08x", #expression,    \
+                value.u, (u32)(expected));                                      \
+        passed = FALSE;                                                         \
+      }                                                                         \
+    } while (0)
+
+    CHECK_FLOAT_BITS(ceilFloat(-1.25f), 0xbf800000);
+    CHECK_FLOAT_BITS(ceilFloat(-0.0f), 0x00000000);
+    CHECK_FLOAT_BITS(ceilFloat(1.25f), 0x40000000);
+    CHECK_FLOAT_BITS(floorFloat(-1.25f), 0xc0000000);
+    CHECK_FLOAT_BITS(floorFloat(-0.0f), 0x00000000);
+    CHECK_FLOAT_BITS(floorFloat(1.25f), 0x3f800000);
+
+    if (ceilFloatToInt(-1.25f) != -1 || ceilFloatToInt(1.25f) != 2 ||
+        floorFloatToInt(-1.25f) != -2 || floorFloatToInt(1.25f) != 1 ||
+        acos(0x7fff) != 0x003a || acos(0) != 0x8000 || asin(0) != -1) {
+      emu_log("MATH_INTEGER_VECTOR_FAILED");
+      passed = FALSE;
+    }
+
+    for (i = 0; i < 4; i++) {
+      for (j = 0; j < 4; j++) {
+        lhs.m[i][j] = (f32)(i * 4 + j + 1);
+      }
+    }
+    matrix_4x4_set_identity(&identity);
+    matrix_4x4_multiply(&lhs, &identity, &result);
+    for (i = 0; i < 4; i++) {
+      for (j = 0; j < 4; j++) {
+        if (result.m[i][j] != lhs.m[i][j]) {
+          emu_log("MATRIX_IDENTITY_FAILED row=%d column=%d", i, j);
+          passed = FALSE;
+        }
+      }
+    }
+
+    quaternion_set_rotation_around_x(0.0f, quaternion);
+    quaternion_to_matrix(quaternion, quaternion_matrix);
+    for (i = 0; i < 4; i++) {
+      for (j = 0; j < 4; j++) {
+        f32 expected = i == j ? 1.0f : 0.0f;
+        if (quaternion_matrix[i][j] != expected) {
+          emu_log("QUATERNION_IDENTITY_FAILED row=%d column=%d", i, j);
+          passed = FALSE;
+        }
+      }
+    }
+
+#undef CHECK_FLOAT_BITS
+
+    emu_log(passed ? "TEST_COMPLETE" : "TEST_FAILED");
+    break;
+  }
+
+  case MIGRATION_PHASE6: {
+    static const u32 expected_identity[16] = {
+        0x00010000, 0x00000000, 0x00000001, 0x00000000,
+        0x00000000, 0x00010000, 0x00000000, 0x00000001,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    };
+    Mtx identity;
+    u32 *words = (u32 *)&identity;
+    unsigned long long quotient;
+    unsigned long long remainder;
+    lldiv_t signed_division;
+    bool passed = TRUE;
+    s32 i;
+
+    if (!after_frames(1)) {
+      break;
+    }
+
+    guMtxIdent(&identity);
+    for (i = 0; i < ARRAYCOUNT(expected_identity); i++) {
+      if (words[i] != expected_identity[i]) {
+        emu_log("PHASE6_MATRIX_FAILED word=%d got=%08x expected=%08x", i,
+                words[i], expected_identity[i]);
+        passed = FALSE;
+      }
+    }
+
+    __ull_divremi(&quotient, &remainder, 0x0000000100000005ULL, 10);
+    signed_division = lldiv(-9, 2);
+    if (quotient != 0x000000001999999aULL || remainder != 1 ||
+        __ll_div(-9, 2) != -4 || __ll_rem(-9, 2) != 1 ||
+        __ll_mod(-9, 2) != 1 || __f_to_ll(-1.75f) != -1 ||
+        __ll_to_d(-123456789LL) != -123456789.0 ||
+        signed_division.quot != -4 || signed_division.rem != -1) {
+      emu_log("PHASE6_64BIT_HELPERS_FAILED");
+      passed = FALSE;
+    }
+
+    emu_log(passed ? "TEST_COMPLETE" : "TEST_FAILED");
+    break;
+  }
+
   case LEVEL_RESTART_HOTKEY: {
     if (g_LevelRestartTestPhase == 0 && after_frames(30)) {
       bool handled;

@@ -272,6 +272,24 @@
  * eg
  * #define SETUPSUBROUTINES(ID) (ID == ACTIVATE_OBJECT) |\
  */
+#ifdef __GNUC__
+#ifdef SETUPSUBROUTINES
+#define isSubroutine(ID) ((ID == GAILIST_PLAY_IDLE_ANIMATION) |\
+                            (ID == GAILIST_BASH_KEYBOARD) | \
+                            (ID == GAILIST_ATTACK_BOND) | \
+                            (ID == GAILIST_RUN_TO_BOND) | \
+                            (ID == GAILIST_STARTLE_AND_RUN_TO_BOND) | \
+                            (ID == GAILIST_WAIT_ONE_SECOND) | \
+                            SETUPSUBROUTINES(ID))
+#else
+#define isSubroutine(ID) ((ID == GAILIST_PLAY_IDLE_ANIMATION) |\
+                            (ID == GAILIST_BASH_KEYBOARD) | \
+                            (ID == GAILIST_ATTACK_BOND) | \
+                            (ID == GAILIST_RUN_TO_BOND) | \
+                            (ID == GAILIST_STARTLE_AND_RUN_TO_BOND) | \
+                            (ID == GAILIST_WAIT_ONE_SECOND))
+#endif
+#else
 #define isSubroutine(ID) ((ID == GAILIST_PLAY_IDLE_ANIMATION) |\
                             (ID == GAILIST_BASH_KEYBOARD) | \
                             (ID == GAILIST_ATTACK_BOND) | \
@@ -282,6 +300,8 @@
                             (\
                                 | SETUPSUBROUTINES(ID)\
                             ))\
+
+#endif
 
 
 typedef enum GAILISTID
@@ -615,6 +635,20 @@ IF_VA(NOT(IS_EMPTY(CASE_VAL1)))(IF_VA(NOT(IS_EMPTY(CASE_VAL2)))(BREAK(FAIL_LBL) 
 IF_VA(NOT(IS_EMPTY(CASE_VAL0)))(IF_VA(NOT(IS_EMPTY(CASE_VAL1)))(BREAK(FAIL_LBL) Label(lblNext))                           )
 
 #include "aicommands2.h"
+
+/*
+ * The generated CALL macro uses the command builder's DEFINED/IF_ELSE
+ * preprocessor machinery to diagnose a missing THIS definition. IDO accepts
+ * that expansion, but GCC leaves an invalid comma expression behind. CALL's
+ * documented contract already requires THIS, so use the equivalent direct
+ * expansion when compiling with GCC.
+ */
+#ifdef __GNUC__
+#undef CALL
+#define CALL(AI_LIST_ID) \
+    SetReturnAiList(THIS) \
+    SetChrAiList(CHR_SELF, (!isBGAIListID(AI_LIST_ID) && isSubroutine(AI_LIST_ID) ? AI_LIST_ID : AI_ERR_NOTSUB))
+#endif
 
 #if 1
 

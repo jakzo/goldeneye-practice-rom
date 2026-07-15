@@ -3,7 +3,7 @@
 
 StandTile tile_0;
 
-StandFileHeader Tbg_test_all_p_stanZ = {
+StandFileHeader Tbg_test_all_p_stanZ STAN_HEADER = {
     NULL,
     &tile_0,
     {0x00, 0x00, 0x00, 0x00},

@@ -18,7 +18,7 @@ waypoint pathwaypoints[];
 PathRecord patrolpaths[];
 AIListRecord ailists[];
 
-stagesetup UsetupjunZ = {
+stagesetup UsetupjunZ STAGESETUP_HEADER = {
     &pathwaypoints,
     &pathsets,
     &intro,

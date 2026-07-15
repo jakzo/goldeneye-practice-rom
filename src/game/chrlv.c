@@ -2648,7 +2648,11 @@ bool handles_shot_actors(ChrRecord *self, s32 hitpart, coord3d *vector, s32 weap
         }
         else //steel helmate - ricochet
         {
+#ifdef __GNUC__
+            s16 mrs[3] = {metal_ricochet_SFX[0], metal_ricochet_SFX[1], metal_ricochet_SFX[2]};
+#else
             s16 mrs[3] = metal_ricochet_SFX;
+#endif
             ALSoundState * p = sndPlaySfx((struct ALBankAlt_s *)g_musicSfxBufferPtr, mrs[randomGetNext() % 3U], NULL);
             chrobjSndCreatePostEventDefault(p, &self->prop->pos);
         }

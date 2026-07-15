@@ -27,8 +27,13 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
 {
     f32 scale;
     f32 pov;
+#ifdef __GNUC__
+    ModelNode *opcode;
+    union ModelRwData *node;
+#else
     s32 opcode;
     struct ModelRoData_HeaderRecord *node;
+#endif
 
     scale = c_item_entries[body].scale * 0.10000001f;
     opcode = 0;
@@ -54,7 +59,11 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
 
     if ((c_item_entries[body].hasHead == 0) && (head >= 0))
     {
+#ifdef __GNUC__
+        opcode = (ModelNode *)&bodyHeader->Switches[4]->Opcode;
+#else
         opcode = &bodyHeader->Switches[4]->Opcode;
+#endif
         if (opcode != 0)
         {
             if (headHeader->RootNode == 0)
@@ -105,7 +114,11 @@ struct Model *makeonebody(s32 body, s32 head, struct ModelFileHeader *bodyHeader
                 if (headHeader->Switches[0] != 0)
                 {
                     node = modelGetNodeRwData(model, headHeader->Switches[0]);
+#ifdef __GNUC__
+                    node->Raw.unk00 = 0;
+#else
                     node->ModelType = 0;
+#endif
                 }
             }
         }

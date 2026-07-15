@@ -1224,7 +1224,7 @@ void autoadvance_on_deplete_all_ammo(void)
     likely_change_weapon_in_hand(GUNLEFT, dupeleft, 1);
 }
 
-s32 currentPlayerEquipWeaponWrapper(GUNHAND hand, s32 next_weapon) {
+void currentPlayerEquipWeaponWrapper(GUNHAND hand, s32 next_weapon) {
     g_CurrentPlayer->hands[hand].weapon_current_animation = 5;
     g_CurrentPlayer->hands[hand].weapon_next_weapon = next_weapon;
     g_CurrentPlayer->hands[hand].weapon_animation_trigger = 0;

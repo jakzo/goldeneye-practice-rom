@@ -1,5 +1,6 @@
 #include <ultra64.h>
 #include <PR/os.h>
+#include <PR/os_internal.h>
 #include <bondgame.h>
 #include "fr.h"
 #include "tlb_manage.h"
@@ -734,7 +735,7 @@ s32 crashIndyScanLoadResourceIdFromBuffer(u32 arg0)
 	u32 prev = 0x00e00004;
 
 	while (TRUE) {
-		u32 next = crashIndyFileGetAddressSubsequentData(this);
+		u32 next = (u32)crashIndyFileGetAddressSubsequentData((u8 *)this);
 
 		if (arg0 >= (u32)g_indyCurrentReadBufferResourceId) {
 			prev = this;
@@ -749,7 +750,7 @@ s32 crashIndyScanLoadResourceIdFromBuffer(u32 arg0)
 		}
 	}
 
-	crashIndyFileGetAddressSubsequentData(prev);
+	crashIndyFileGetAddressSubsequentData((u8 *)prev);
 
 	return TRUE;
 }
@@ -852,8 +853,13 @@ u32 * crashIndyGetReadBufferResourceId(void)
  */
 void * crashGetStackEnd(u32 sp, u32 tid)
 {
+#ifdef __GNUC__
+    void **localStackPointers1 = g_StackPtrs1;
+    void **localStackPointers2 = g_StackPtrs2;
+#else
     void *localStackPointers1[STACK_POINTER_COUNT] = g_StackPtrs1;
     void *localStackPointers2[STACK_POINTER_COUNT] = g_StackPtrs2;
+#endif
     void *p2;
     void *p1;
 
@@ -890,7 +896,11 @@ void * crashGetStackEnd(u32 sp, u32 tid)
  */
 void * crashGetStackStart(u32 sp, u32 tid)
 {
+#ifdef __GNUC__
+    void **localStackPointers3 = g_StackPtrs3;
+#else
     void *localStackPointers3[STACK_POINTER_COUNT] = g_StackPtrs3;
+#endif
     void *p;
 
     if ((s32)tid <= (s32)0 || (u32)tid > (u32)STACK_POINTER_COUNT)
@@ -1127,7 +1137,11 @@ void crashSetBuffers(u16 *buffer1, u16 *buffer2)
  */
 void crashInitBuffers(void)
 {
+#ifdef __GNUC__
+    crashSetBuffers((u16 *)cfb_16[0], (u16 *)cfb_16[1]);
+#else
     crashSetBuffers(&cfb_16[0], &cfb_16[1]);
+#endif
 }
 
 /**

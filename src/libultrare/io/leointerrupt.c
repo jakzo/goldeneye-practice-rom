@@ -11,6 +11,9 @@ u8 leoDiskStack[10];
 
 s32 __osLeoInterrupt()
 {
+#ifdef PRACTICE_ROM
+    return 0;
+#endif
 }
 #else
 //TODO: so many magic constants :'(

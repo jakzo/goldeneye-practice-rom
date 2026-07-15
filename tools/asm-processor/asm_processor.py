@@ -870,7 +870,7 @@ float_regexpr = re.compile(r"[-+]?[0-9]*\.?[0-9]+([eE][-+]?[0-9]+)?f")
 def repl_float_hex(m):
     return str(struct.unpack(">I", struct.pack(">f", float(m.group(0).strip().rstrip("f"))))[0])
 
-Opts = namedtuple('Opts', ['opt', 'framepointer', 'mips1', 'kpic', 'pascal', 'input_enc', 'output_enc', 'encode_cutscene_data_floats'])
+Opts = namedtuple('Opts', ['opt', 'framepointer', 'mips1', 'kpic', 'pascal', 'input_enc', 'output_enc', 'encode_cutscene_data_floats', 'no_jtbl_rodata'])
 
 def parse_source(f, opts, out_dependencies, print_source=None):
     if opts.opt in ['O1', 'O2']:
@@ -914,7 +914,7 @@ def parse_source(f, opts, out_dependencies, print_source=None):
             skip_instr_count += 3
 
     use_jtbl_for_rodata = False
-    if opts.opt in ['O2', 'g3'] and not opts.framepointer and not opts.kpic:
+    if opts.opt in ['O2', 'g3'] and not opts.framepointer and not opts.kpic and not opts.no_jtbl_rodata:
         use_jtbl_for_rodata = True
 
     state = GlobalState(min_instr_count, skip_instr_count, use_jtbl_for_rodata, prelude_if_late_rodata, opts.mips1, opts.pascal)
@@ -1052,7 +1052,7 @@ def parse_source(f, opts, out_dependencies, print_source=None):
 
     return asm_functions
 
-def fixup_objfile(objfile_name, functions, asm_prelude, assembler, output_enc, drop_mdebug_gptab, convert_statics):
+def fixup_objfile(objfile_name, functions, asm_prelude, assembler, output_enc, drop_mdebug_gptab, convert_statics, unordered_late_rodata):
     SECTIONS = ['.data', '.text', '.rodata', '.bss']
 
     with open(objfile_name, 'rb') as f:
@@ -1219,7 +1219,14 @@ def fixup_objfile(objfile_name, functions, asm_prelude, assembler, output_enc, d
                 for index, dummy_bytes in enumerate(dummy_bytes_list):
                     if not fmt.is_big_endian:
                         dummy_bytes = dummy_bytes[::-1]
-                    pos = target.data.index(dummy_bytes, last_rodata_pos)
+                    search_start = 0 if unordered_late_rodata else last_rodata_pos
+                    try:
+                        pos = target.data.index(dummy_bytes, search_start)
+                    except ValueError:
+                        raise Failure(
+                            "late_rodata sentinel {} not found after rodata offset {:#x}"
+                            .format(dummy_bytes.hex(), last_rodata_pos)
+                        )
                     # This check is nice, but makes time complexity worse for large files:
                     if SLOW_CHECKS and target.data.find(dummy_bytes, pos + 4) != -1:
                         raise Failure("multiple occurrences of late_rodata hex magic. Change asm-processor to use something better than 0xE0123456!")
@@ -1478,6 +1485,8 @@ def run_wrapped(argv, outfile, functions):
     parser.add_argument('--keep-preprocessed', dest='keep_output_dir', type=Path, help="emit temporary files to this directory (build.py only)")
     parser.add_argument('--no-dep-file', action='store_true', help="don't generate a .d make dependency file (build.py only)")
     parser.add_argument('--encode-cutscene-data-floats', dest='encode_cutscene_data_floats', action='store_true', default=False, help="Replace floats with their encoded hexadecimal representation in CutsceneData data")
+    parser.add_argument('--no-jtbl-rodata', dest='no_jtbl_rodata', action='store_true', help="use individual late-rodata sentinels instead of compiler-generated jump tables")
+    parser.add_argument('--unordered-late-rodata', dest='unordered_late_rodata', action='store_true', help="find late-rodata sentinels independent of compiler constant-pool order")
     parser.add_argument('-framepointer', dest='framepointer', action='store_true')
     parser.add_argument('-mips1', dest='mips1', action='store_true')
     parser.add_argument('-g3', dest='g3', action='store_true')
@@ -1498,7 +1507,7 @@ def run_wrapped(argv, outfile, functions):
         raise Failure("-mips1 is only supported together with -O1 or -O2")
     if pascal and opt not in ('O1', 'O2', 'g3'):
         raise Failure("Pascal is only supported together with -O1, -O2 or -O2 -g3")
-    opts = Opts(opt, args.framepointer, args.mips1, args.kpic, pascal, args.input_enc, args.output_enc, args.encode_cutscene_data_floats)
+    opts = Opts(opt, args.framepointer, args.mips1, args.kpic, pascal, args.input_enc, args.output_enc, args.encode_cutscene_data_floats, args.no_jtbl_rodata)
 
     if args.objfile is None:
         with open(args.filename, encoding=args.input_enc) as f:
@@ -1517,7 +1526,7 @@ def run_wrapped(argv, outfile, functions):
         if args.asm_prelude:
             with open(args.asm_prelude, 'rb') as f:
                 asm_prelude = f.read()
-        fixup_objfile(args.objfile, functions, asm_prelude, args.assembler, args.output_enc, args.drop_mdebug_gptab, args.convert_statics)
+        fixup_objfile(args.objfile, functions, asm_prelude, args.assembler, args.output_enc, args.drop_mdebug_gptab, args.convert_statics, args.unordered_late_rodata)
 
 def run(argv, outfile=sys.stdout.buffer, functions=None):
     try:

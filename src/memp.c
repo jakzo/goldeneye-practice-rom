@@ -35,6 +35,50 @@ void mempInit(void)
     debTryAdd(&ptr_memp_c_debug_debug_notice_list, "memp_c_debug");
 }
 
+#ifdef __GNUC__
+/*
+ * GCC's o32 ABI lowers a signed 64-bit division to __divdi3. The ROM linker
+ * cannot safely place a lazily extracted libgcc text section in the fixed
+ * segment layout, so divide the unsigned 64-bit product by its 32-bit divisor
+ * explicitly. Memory-pool sizes are nonnegative and the quotient fits in u32.
+ */
+static u32 mempDivideProduct(u32 factor1, u32 factor2, u32 divisor)
+{
+    u64 product = (u64)factor1 * factor2;
+    u32 high = (u32)(product >> 32);
+    u32 low = (u32)product;
+    u32 remainder = 0;
+    u32 quotient = 0;
+    s32 bit;
+
+    for (bit = 63; bit >= 0; bit--)
+    {
+        remainder <<= 1;
+
+        if (bit >= 32)
+        {
+            remainder |= (high >> (bit - 32)) & 1;
+        }
+        else
+        {
+            remainder |= (low >> bit) & 1;
+        }
+
+        if (remainder >= divisor)
+        {
+            remainder -= divisor;
+
+            if (bit < 32)
+            {
+                quotient |= 1U << bit;
+            }
+        }
+    }
+
+    return quotient;
+}
+#endif
+
 const char *tokenFind(s32 arg0, const char *arg1);
 long int strtol(const char *str, char **endptr, int base);
 void mempCheckMemflagTokens(s32 poolAreaStart, s32 poolAreaSize)
@@ -104,7 +148,11 @@ void mempSetBankStarts(s32 poolSizes[MEMPOOL_COUNT+1])
     //spread each bank evenly
     for (i = MEMPOOL_TOTAL; i < MEMPOOL_COUNT; i++)
     {
+#ifdef __GNUC__
+        bankstarts[i] = mempDivideProduct(bankstarts[i], mempLen, mempRequested);
+#else
         bankstarts[i] = ((s64)bankstarts[i] * mempLen) / mempRequested;
+#endif
     }
     // {0,0,0,0,poolAreaSize - 303104, poolAreaSize - 303104, poolAreaSize}
 
@@ -409,7 +457,11 @@ s32 mempGetBankSizeLeft(u8 bank) {
 
 // Last three bits contains the bank, the rest contains the size.
 u32 mempAllocPackedBytesInBank(u32 sizeandbank) {
+#ifdef __GNUC__
+    return (u32)mempAllocBytesInBank((sizeandbank >> 3), (sizeandbank & 7));
+#else
     return mempAllocBytesInBank((sizeandbank >> 3), (sizeandbank & 7));
+#endif
 }
 
 void mempResetBank(u8 bank) {

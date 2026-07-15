@@ -137,7 +137,11 @@ glabel decompressdata
 
 
 s32 rzipGetSomething(void) {
+#ifdef __GNUC__
+    return (s32)(rz_inbuf + rz_inptr);
+#else
     return (rz_inbuf + rz_inptr);
+#endif
 }
 
 

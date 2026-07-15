@@ -50,7 +50,6 @@ You can configure Makefile behavior by passing the following flags (e.g., `make 
 - `DEV`: `1` (disable optimizations, add dev code), `0` (prod build, default)
 - `VERSION`: `US` (default), `JP`, `EU`
 - `COMPARE`: `1` (compare ROM checksum against targets), `0` (disable comparison for custom builds, default)
-- `IDO_RECOMP`: `YES` (default, uses fast natively compiled IDO C compiler), `NO` (uses QEMU to emulate the original IRIX binary)
 - `FINAL`: `YES` (default), `NO` (builds non-working debug version of the decomp)
 - `VERBOSE`: `0` (quiet, default), `1` (prints full command lines)
 
@@ -134,6 +133,5 @@ The codebase heavily utilizes standard decompilation patterns to bridge C with y
     - If you do run the emulator in the background remember to kill it later
 3. If needed use the GDB MCP tools to connect
     - See the settings in `.vscode/launch.json` for how to connect
-    - Note that the IDO compiler is old and does NOT produce debug symbols so only function breakpoints (not lines) work
-    - You will also not be able to see variables and must look at the memory address pointed to by pointer arguments in the CPU registers if debugging game (not practice) code
-    - However some code like that in the src/practice files is compiled using GCC and DO have proper debug symbols so breaking and viewing variables there does work
+    - `DEV=1` GCC C objects include debug information, so source breakpoints and variables work for decompiled game and practice C
+    - `GLOBAL_ASM` functions remain assembly-only; use function breakpoints and inspect argument registers/memory when debugging them

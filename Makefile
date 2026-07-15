@@ -7,8 +7,6 @@ default: all
 # Version of the game to build
 FINAL := YES
 VERSION := US
-IDO_RECOMP := YES
-ORIGINAL_CC := mixed
 VERBOSE := 2
 # If DEV is set (e.g. DEV=1), -DDEV is added to enable code with #ifdef DEV
 DEV := 0
@@ -29,17 +27,6 @@ else ifeq ($(shell type mips64-linux-gnu-ld >/dev/null 2>/dev/null; echo $$?), 0
   TOOLCHAIN := mips64-linux-gnu-
 else
   TOOLCHAIN := mips64-elf-
-endif
-
-# Use IDO Recomp UNLESS specified otherwise
-ifeq ($(IDO_RECOMP), NO)
-  QEMU_IRIX := $(shell which qemu-irix 2>/dev/null)
-  ifeq (, $(QEMU_IRIX))
-    $(error Using the IDO compiler requires qemu-irix. Please install qemu-irix package or set the QEMU_IRIX environment variable to the full qemu-irix binary path)
-  endif
-  IRIX_ROOT := tools/irix/root
-else
-  IRIX_ROOT := tools/ido5.3_recomp
 endif
 
 # other tools
@@ -65,15 +52,11 @@ ConvertAIPRINT = sed -E -e ':loop s/PRINT\("(..*?)(.)"/PRINT\("\1",\x27\2\x27/g;
 ifeq ($(FINAL), YES)
  GCC_OPTIMIZATION := -Os
  GCC_DEBUG_FLAGS :=
- OPTIMIZATION := -O2
  LCDEFS :=
- CFLAGWARNING :=
 else
  GCC_OPTIMIZATION := -Os
  GCC_DEBUG_FLAGS := -g
- OPTIMIZATION := -g
  LCDEFS := -DDEBUG
- CFLAGWARNING :=-fullwarn -wlint
 endif
 
 ifeq ($(VERSION), US)
@@ -126,7 +109,6 @@ endif
 ifeq ($(DEV), 1)
  GCC_DEBUG_FLAGS := -g
  LCDEFS += -DDEV
- CFLAGWARNING := -fullwarn -wlint
  ASMDEFS += --defsym DEV=1
 endif
 
@@ -148,7 +130,7 @@ LDFILEOPTS += -Dbuild=$(BUILD_DIR_BASE)
 # this file references variables defined above: BUILD_DIR, RZ_COMP
 # this file defines and builds $(MUSIC_RZ_FILES)
 include assets/Makefile.obseg
-# this file references variables defined above: BUILD_DIR, RZ_COMP, COUNTRYCODE, LD, CC, CFLAGS, OBJCOPY, ConvertAIPRINT, OPTIMIZATION
+# this file references variables defined above: BUILD_DIR, RZ_COMP, COUNTRYCODE, LD, OBJCOPY, ConvertAIPRINT
 # this file defines and builds OBSEGMENT, BG_SEG_FILES, BRIEF_RZ_FILES, CHR_RZ_FILES, GUN_RZ_FILES, PROP_RZ_FILES, ,SETUP_BUILD_FILES, STAN_BUILD_FILES, TEXT_RZ_FILES
 include assets/Makefile.music
 
@@ -170,6 +152,8 @@ CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 PRACTICEFILES_C := $(sort $(shell find src/practice -type f -name '*.c'))
 PRACTICEOBJECTS := $(foreach file,$(PRACTICEFILES_C),$(BUILD_DIR)/$(file:.c=.o))
 PRACTICE_LINK_OBJECT := $(BUILD_DIR)/src/practice.o
+OBSEG_C_SOURCE_FILES := $(sort $(shell find assets/obseg -type f -name '*.c' \
+	! -name '*.inc.c' ! -path 'assets/obseg/prop/*/Model.c'))
 
 GAMEFILES_C := $(foreach dir,src/game,$(wildcard $(dir)/*.c))
 GAMEFILES_S := $(foreach dir,src/game,$(wildcard $(dir)/*.s))
@@ -209,40 +193,27 @@ OBJECTS := $(RSPOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(OBSEGMENT)
 
 ## Command Line args for builders ##
 
-MIPSISET := -mips2 -32
-
 INCLUDE := -I . -I include -I include/ultra64 -I include/PR -I src -I src/game -I src/inflate -I src/practice -I src/practice/state
-
-# ignore warnings:
-# 609 : The number of arguments in the macro invocation does not match the definition - disabled because CPPLib uses "VarArgs" which wasnt invented till c99
-# 649 : Missing member name in structure / union                                      - used for "Inheritance"
-# 709 : Incompatible pointer type assignment                                          - could be fixed by casting, but implicit is fine.
-# 712 : illegal combination of pointer and integer                                    - could be fixed by casting, but implicit is fine.
-# 807 : member cannot be of function or incomplete type                               - Variable length structs
-# 838 : Microsoft extension (unnamed structs)                                         - used for "Inheritance" and member/array call swapping
-# 763 : Max Float
-WOFF :=  -woff 609,649,709,712,807,838,763
-
-ifeq ($(IDO_RECOMP), NO)
-  CC := $(QEMU_IRIX) -silent -L $(IRIX_ROOT) $(IRIX_ROOT)/usr/bin/cc
-else
-  CC := $(IRIX_ROOT)/cc
-endif
-
-CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM
 
 CC_GCC := $(TOOLCHAIN)gcc
 GCC_ABI_FLAGS := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -G 0
 GCC_COMPAT_FLAGS := -std=gnu90 -fms-extensions -fno-stack-protector \
-	-fno-strict-aliasing -fcommon -funsigned-char -fno-short-enums \
+	-fno-strict-aliasing -fno-common -funsigned-char -fno-short-enums \
 	-ffreestanding -fno-builtin -mfix4300
-GCC_COMMON_FLAGS := $(GCC_ABI_FLAGS) $(GCC_COMPAT_FLAGS) \
+GCC_ERROR_FLAGS := -Werror=return-type
+GCC_COMMON_FLAGS := $(GCC_ABI_FLAGS) $(GCC_COMPAT_FLAGS) $(GCC_ERROR_FLAGS) \
 	$(GCC_DEBUG_FLAGS) $(GCC_OPTIMIZATION) $(LCDEFS) -DTARGET_N64 -DPRACTICE_ROM
-# Practice and migrated original code deliberately have separate variables so
-# migration-only compatibility flags can be tightened without changing practice code.
+# Practice and original game code deliberately have separate variables so
+# original-code compatibility flags can be tightened without changing practice code.
 CFLAGS_GCC_PRACTICE := $(GCC_COMMON_FLAGS) $(INCLUDE)
-CFLAGS_GCC_ORIGINAL := $(GCC_COMMON_FLAGS) $(INCLUDE)
-CFLAGS_GCC_ORIGINAL_LIBULTRA = $(GCC_COMMON_FLAGS) $(LIBULTRA_INCLUDE) $(ASSERT_FLAG)
+GCC_ORIGINAL_SECTION_FLAGS := -fno-merge-constants -fno-zero-initialized-in-bss -fno-delete-null-pointer-checks -fno-ipa-icf \
+	-fno-toplevel-reorder
+CFLAGS_GCC_ORIGINAL := $(GCC_COMMON_FLAGS) $(GCC_ORIGINAL_SECTION_FLAGS) $(INCLUDE)
+CFLAGS_GCC_ORIGINAL_LIBULTRA = $(GCC_COMMON_FLAGS) $(GCC_ORIGINAL_SECTION_FLAGS) $(LIBULTRA_INCLUDE) $(ASSERT_FLAG)
+# Asset sub-makefiles use the traditional generic variable names.
+CC := $(CC_GCC)
+CFLAGS := $(CFLAGS_GCC_ORIGINAL)
+OPTIMIZATION := $(GCC_OPTIMIZATION)
 LIBGCC := $(shell $(CC_GCC) -print-libgcc-file-name)
 CC_GCC_VERSION := $(shell $(CC_GCC) --version 2>/dev/null | head -n 1)
 
@@ -272,8 +243,7 @@ BUILD_CONFIG_STAMP := $(BUILD_DIR)/.build_config
 BUILD_CONFIG_TMP := $(BUILD_CONFIG_STAMP).tmp
 OBJECT_CONFIG_STAMP := $(BUILD_DIR)/.object_build_config
 OBJECT_CONFIG_TMP := $(OBJECT_CONFIG_STAMP).tmp
-COMPILER_MANIFEST := $(BUILD_DIR)/migration/compiler-manifest.json
-GCC_MIGRATION_MANIFEST := config/gcc_migrated_sources.txt
+COMPILER_MANIFEST := $(BUILD_DIR)/metadata/compiler-manifest.json
 
 ## Build Recipes ##
 
@@ -290,44 +260,24 @@ GCC_MIGRATION_MANIFEST := config/gcc_migrated_sources.txt
 .NOTPARALLEL: print_info create_directories $(APPROM) checksum
 
 # Phony Recipes - These targets are not files, Get Make to do something
-.PHONY: FORCE print_info create_directories build_tools prerequisites runtime_config checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test context extractassets textures compile-file compile-cohort gcc-global-asm-proof abi-check migration-report compiler-manifest
+.PHONY: FORCE print_info create_directories build_tools prerequisites runtime_config checksum all_p1 all default commonclean setupclean stanclean dataclean libultraclean codeclean clean nuke help cmdbuidler test context extractassets textures compile-file compile-cohort gcc-global-asm-proof abi-check compiler-manifest
 
 
-# this file references variables defined above: BUILD_DIR, CFLAGWARNING, INCLUDE, LCDEFS
+# this file references variables defined above: BUILD_DIR, INCLUDE, LCDEFS
 # this file defines and builds $(ULTRAOBJECTS)
 include src/libultrare/Makefile.libultrare
 
-ALLOWED_ORIGINAL_CC := ido gcc mixed
-ifeq ($(filter $(ORIGINAL_CC),$(ALLOWED_ORIGINAL_CC)),)
-$(error ORIGINAL_CC "$(ORIGINAL_CC)" not supported; choose one of $(ALLOWED_ORIGINAL_CC))
-endif
-
-GCC_MIGRATED_C_FILES := $(shell sed -e 's/[[:space:]]*\#.*//' -e '/^[[:space:]]*$$/d' $(GCC_MIGRATION_MANIFEST) 2>/dev/null)
 ORIGINAL_C_FILES := $(sort $(CODEFILES) $(GAMEFILES_C) $(RZ_SOURCE_FILES) \
 	$(ASSET_DATAFILES) $(FONTFILES_C) $(LIBULTRA_C_SOURCE_FILES))
 ORIGINAL_C_OBJECTS := $(foreach file,$(ORIGINAL_C_FILES),$(BUILD_DIR)/$(file:.c=.o))
-
-UNKNOWN_GCC_MIGRATED_C_FILES := $(filter-out $(ORIGINAL_C_FILES),$(GCC_MIGRATED_C_FILES))
-ifneq ($(strip $(UNKNOWN_GCC_MIGRATED_C_FILES)),)
-$(error Unknown or non-original source(s) in $(GCC_MIGRATION_MANIFEST): $(UNKNOWN_GCC_MIGRATED_C_FILES))
-endif
-
-ifeq ($(ORIGINAL_CC),gcc)
-GCC_SELECTED_C_FILES := $(ORIGINAL_C_FILES)
-else ifeq ($(ORIGINAL_CC),mixed)
-GCC_SELECTED_C_FILES := $(GCC_MIGRATED_C_FILES)
-else
-GCC_SELECTED_C_FILES :=
-endif
-
-IDO_SELECTED_C_FILES := $(filter-out $(GCC_SELECTED_C_FILES),$(ORIGINAL_C_FILES))
 ALL_LINKED_C_FILES := $(sort $(ORIGINAL_C_FILES) $(PRACTICEFILES_C))
 
-original-cc = $(if $(filter $(1),$(GCC_SELECTED_C_FILES)),$(CC_GCC),$(CC))
-original-flags = $(if $(filter $(1),$(GCC_SELECTED_C_FILES)),$(CFLAGS_GCC_ORIGINAL),$(CFLAGS))
-original-libultra-flags = $(if $(filter $(1),$(GCC_SELECTED_C_FILES)),$(CFLAGS_GCC_ORIGINAL_LIBULTRA),$(CFLAGS_LIBULTRA))
-original-optimization = $(if $(filter $(1),$(GCC_SELECTED_C_FILES)),$(GCC_OPTIMIZATION),$(OPTIMIZATION))
-original-asm-processor-optimization = $(if $(filter $(1),$(GCC_SELECTED_C_FILES)),-O2,$(OPTIMIZATION))
+original-cc = $(CC_GCC)
+original-flags = $(CFLAGS_GCC_ORIGINAL)
+original-libultra-flags = $(CFLAGS_GCC_ORIGINAL_LIBULTRA)
+original-optimization = $(GCC_OPTIMIZATION)
+original-asm-processor-optimization = -O2
+original-asm-processor-flags = --no-jtbl-rodata --unordered-late-rodata
 
 CONFIG_SENSITIVE_OBJECTS := \
 	$(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) \
@@ -339,15 +289,14 @@ NON_ORIGINAL_CONFIG_SENSITIVE_OBJECTS := $(filter-out $(ORIGINAL_C_OBJECTS),$(CO
 $(NON_ORIGINAL_CONFIG_SENSITIVE_OBJECTS): $(OBJECT_CONFIG_STAMP)
 $(APPELF): $(BUILD_CONFIG_STAMP) $(COMPILER_MANIFEST)
 
-# A per-source compiler stamp means editing the mixed manifest rebuilds only
-# translation units whose compiler classification actually changed.
+# Per-source stamps track the effective GCC command for each translation unit.
 $(ORIGINAL_C_OBJECTS): $(BUILD_DIR)/%.o: $(BUILD_DIR)/.compiler/%.stamp
 
 $(BUILD_DIR)/.compiler/%.stamp: %.c FORCE
 	@mkdir -p $(@D)
 	@{ \
 		printf '%s\n' 'source=$<'; \
-		printf '%s\n' 'compiler=$(if $(filter $<,$(GCC_SELECTED_C_FILES)),gcc,ido)'; \
+		printf '%s\n' 'compiler=gcc'; \
 		printf '%s\n' 'command=$(call original-cc,$<)'; \
 		printf '%s\n' 'flags=$(call original-flags,$<)'; \
 		printf '%s\n' 'libultra_flags=$(call original-libultra-flags,$<)'; \
@@ -363,22 +312,14 @@ $(BUILD_CONFIG_STAMP): FORCE
 	@{ \
 		printf '%s\n' 'FINAL=$(FINAL)'; \
 		printf '%s\n' 'VERSION=$(VERSION)'; \
-		printf '%s\n' 'IDO_RECOMP=$(IDO_RECOMP)'; \
-		printf '%s\n' 'ORIGINAL_CC=$(ORIGINAL_CC)'; \
-		printf '%s\n' 'GCC_MIGRATION_MANIFEST=$(GCC_MIGRATION_MANIFEST)'; \
-		printf '%s\n' 'GCC_MIGRATED_C_FILES=$(GCC_MIGRATED_C_FILES)'; \
 		printf '%s\n' 'CC_GCC_VERSION=$(CC_GCC_VERSION)'; \
 		printf '%s\n' 'DEV=$(DEV)'; \
 		printf '%s\n' 'PROFILE_PRACTICE=$(PROFILE_PRACTICE)'; \
 		printf '%s\n' 'GCC_OPTIMIZATION=$(GCC_OPTIMIZATION)'; \
-		printf '%s\n' 'OPTIMIZATION=$(OPTIMIZATION)'; \
 		printf '%s\n' 'LCDEFS=$(LCDEFS)'; \
-		printf '%s\n' 'CFLAGWARNING=$(CFLAGWARNING)'; \
-		printf '%s\n' 'CFLAGS=$(CFLAGS)'; \
 		printf '%s\n' 'CFLAGS_GCC_PRACTICE=$(CFLAGS_GCC_PRACTICE)'; \
 		printf '%s\n' 'CFLAGS_GCC_ORIGINAL=$(CFLAGS_GCC_ORIGINAL)'; \
 		printf '%s\n' 'CFLAGS_GCC_ORIGINAL_LIBULTRA=$(CFLAGS_GCC_ORIGINAL_LIBULTRA)'; \
-		printf '%s\n' 'CFLAGS_LIBULTRA=$(CFLAGS_LIBULTRA)'; \
 		printf '%s\n' 'ASFLAGS=$(ASFLAGS)'; \
 		printf '%s\n' 'ASFLAGS_LIBULTRA=$(ASFLAGS_LIBULTRA)'; \
 		printf '%s\n' 'LDFILEOPTS=$(LDFILEOPTS)'; \
@@ -395,11 +336,9 @@ $(OBJECT_CONFIG_STAMP): FORCE
 	@{ \
 		printf '%s\n' 'FINAL=$(FINAL)'; \
 		printf '%s\n' 'VERSION=$(VERSION)'; \
-		printf '%s\n' 'IDO_RECOMP=$(IDO_RECOMP)'; \
 		printf '%s\n' 'DEV=$(DEV)'; \
 		printf '%s\n' 'PROFILE_PRACTICE=$(PROFILE_PRACTICE)'; \
 		printf '%s\n' 'CC_GCC_VERSION=$(CC_GCC_VERSION)'; \
-		printf '%s\n' 'CFLAGS=$(CFLAGS)'; \
 		printf '%s\n' 'CFLAGS_GCC_PRACTICE=$(CFLAGS_GCC_PRACTICE)'; \
 		printf '%s\n' 'ASFLAGS=$(ASFLAGS)'; \
 		printf '%s\n' 'ASFLAGS_LIBULTRA=$(ASFLAGS_LIBULTRA)'; \
@@ -407,19 +346,18 @@ $(OBJECT_CONFIG_STAMP): FORCE
 	} > $(OBJECT_CONFIG_TMP)
 	@if ! cmp -s $(OBJECT_CONFIG_TMP) $@; then mv $(OBJECT_CONFIG_TMP) $@; else rm $(OBJECT_CONFIG_TMP); fi
 
-$(COMPILER_MANIFEST): FORCE $(GCC_MIGRATION_MANIFEST) scripts/migration/compiler_manifest.py
+$(COMPILER_MANIFEST): FORCE scripts/build/compiler_manifest.py
 	@mkdir -p $(@D)
-	@python3 scripts/migration/compiler_manifest.py \
+	@python3 scripts/build/compiler_manifest.py \
 		--output $@ \
-		--mode $(ORIGINAL_CC) \
 		--build-dir $(BUILD_DIR) \
 		--gcc-version '$(CC_GCC_VERSION)' \
 		--gcc-practice-flags '$(CFLAGS_GCC_PRACTICE)' \
 		--gcc-original-flags '$(CFLAGS_GCC_ORIGINAL)' \
-		--ido-flags '$(CFLAGS) $(OPTIMIZATION)' \
 		--original $(ORIGINAL_C_FILES) \
 		--practice $(PRACTICEFILES_C) \
-		--selected-gcc $(GCC_SELECTED_C_FILES)
+		--generated-assets $(OBSEG_C_SOURCE_FILES) \
+		--region-code $(COUNTRYCODE)
 
 compiler-manifest: $(COMPILER_MANIFEST)
 	@echo "Compiler manifest: $(COMPILER_MANIFEST)"
@@ -456,10 +394,9 @@ $(BUILD_DIR)/src/practice/%.o: src/practice/%.c
 $(PRACTICE_LINK_OBJECT): $(PRACTICEOBJECTS)
 	$(LD) -r -o $@ $^
 
-MIGRATION_PROOF_DIR := $(BUILD_DIR)/migration/proof
-GLOBAL_ASM_PROOF_OBJECT := $(MIGRATION_PROOF_DIR)/tlb_random.gcc.o
-ABI_IDO_OBJECT := $(MIGRATION_PROOF_DIR)/abi_checks.ido.o
-ABI_GCC_OBJECT := $(MIGRATION_PROOF_DIR)/abi_checks.gcc.o
+BUILD_CHECK_DIR := $(BUILD_DIR)/checks
+GLOBAL_ASM_PROOF_OBJECT := $(BUILD_CHECK_DIR)/tlb_random.gcc.o
+ABI_GCC_OBJECT := $(BUILD_CHECK_DIR)/abi_checks.gcc.o
 
 $(GLOBAL_ASM_PROOF_OBJECT): src/tlb_random.c $(OBJECT_CONFIG_STAMP)
 	@mkdir -p $(@D)
@@ -470,16 +407,12 @@ $(GLOBAL_ASM_PROOF_OBJECT): src/tlb_random.c $(OBJECT_CONFIG_STAMP)
 gcc-global-asm-proof: $(GLOBAL_ASM_PROOF_OBJECT)
 	@echo "GCC GLOBAL_ASM proof passed: $(GLOBAL_ASM_PROOF_OBJECT)"
 
-$(ABI_IDO_OBJECT): scripts/migration/abi_checks.c $(OBJECT_CONFIG_STAMP)
-	@mkdir -p $(@D)
-	$(CC) -c $(CFLAGS) $(OPTIMIZATION) -o $@ $<
-
-$(ABI_GCC_OBJECT): scripts/migration/abi_checks.c $(OBJECT_CONFIG_STAMP)
+$(ABI_GCC_OBJECT): scripts/checks/abi_checks.c $(OBJECT_CONFIG_STAMP)
 	@mkdir -p $(@D)
 	$(CC_GCC) -c $(CFLAGS_GCC_ORIGINAL) -o $@ $<
 
-abi-check: $(ABI_IDO_OBJECT) $(ABI_GCC_OBJECT)
-	@echo "IDO/GCC ABI assertions passed."
+abi-check: $(ABI_GCC_OBJECT)
+	@echo "GCC ABI assertions passed."
 
 compile-file:
 	@test -n "$(FILE)" || { echo 'Set FILE to one classified C source.' >&2; exit 2; }
@@ -491,28 +424,13 @@ compile-cohort:
 	@test -n "$(COHORT_SOURCES)" || { echo 'Set FILES or COHORT_FILE.' >&2; exit 2; }
 	@$(MAKE) $(foreach file,$(COHORT_SOURCES),$(BUILD_DIR)/$(patsubst %.c,%.o,$(file)))
 
-BASELINE_BUILD_DIR ?= build/ido/$(OUTCODE)
-BASELINE_ELF ?= $(BASELINE_BUILD_DIR)/ge007.$(OUTCODE).elf
-BASELINE_MAP ?= $(BASELINE_BUILD_DIR)/ge007.$(OUTCODE).map
-MIGRATION_REPORT_JSON ?= $(BUILD_DIR)/migration/ido-vs-$(ORIGINAL_CC).json
-MIGRATION_REPORT_MD ?= $(BUILD_DIR)/migration/ido-vs-$(ORIGINAL_CC).md
-
-migration-report: $(APPELF)
-	@python3 scripts/migration/compare_builds.py \
-		--baseline-elf $(BASELINE_ELF) --baseline-map $(BASELINE_MAP) \
-		--candidate-elf $(APPELF) --candidate-map $(BUILD_DIR)/ge007.$(OUTCODE).map \
-		--tool-prefix $(TOOLCHAIN) --json $(MIGRATION_REPORT_JSON) \
-		--markdown $(MIGRATION_REPORT_MD)
-	@echo "Migration reports: $(MIGRATION_REPORT_JSON) $(MIGRATION_REPORT_MD)"
-
-
 #Build C files in src/
 # convert AI_PRINT commands from readable to byte-array
 $(BUILD_DIR)/src/%.o: src/%.c
 	@mkdir -p $(@D)
 	@if grep -q 'GLOBAL_ASM(' $<; then \
-		$(ASM_PREPROC) $(call original-asm-processor-optimization,$<) $< | $(call original-cc,$<) -c $(call original-flags,$<) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(call original-optimization,$<); \
-		$(ASM_PREPROC) $(call original-asm-processor-optimization,$<) $< --post-process $@ --assembler "$(AS) $(ASFLAGS)" --asm-prelude $(ASM_PROCESSOR_DIR)/prelude.inc; \
+		$(ASM_PREPROC) $(call original-asm-processor-optimization,$<) $(call original-asm-processor-flags,$<) $< | $(call original-cc,$<) -c $(call original-flags,$<) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(call original-optimization,$<); \
+		$(ASM_PREPROC) $(call original-asm-processor-optimization,$<) $(call original-asm-processor-flags,$<) $< --post-process $@ --assembler "$(AS) $(ASFLAGS)" --asm-prelude $(ASM_PROCESSOR_DIR)/prelude.inc; \
 	elif [ "$$(basename $<)" = "chraidata.c" ]; then \
 		$(ConvertAIPRINT) $< | $(call original-cc,$<) -c $(call original-flags,$<) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(call original-optimization,$<); \
 	else \
@@ -545,11 +463,9 @@ else
 	$(call original-cc,$<) -c $(call original-flags,$<) -o $@ $(call original-optimization,$<) $<
 endif
 
-#$(BUILD_DIR)/src/random.o: OPTIMIZATION := -O3
 #$(BUILD_DIR)/src/random.o: INCLUDE := -I . -I include -I include/PR
-#$(BUILD_DIR)/src/random.o: MIPSISET := -mips3 -o32
 #$(BUILD_DIR)/src/random.o: src/random.c
-#	$(CC) -c -Wab,-r4300_mul -non_shared -G 0 -Xcpluscomm $(CFLAGWARNING) -woff 819,820,852,821,838,649 -signed $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64 $(OPTIMIZATION) -o $@ $<
+#	$(CC_GCC) -c $(CFLAGS_GCC_ORIGINAL) -o $@ $<
 
 #Link Files
 $(APPELF): $(RSPOBJECTS) $(ULTRAOBJECTS) $(HEADEROBJECTS) $(OBSEG_RZ) $(BUILD_DIR)/$(OBSEGMENT) $(MUSIC_RZ_FILES) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) $(PRACTICE_LINK_OBJECT) ge007.ld
@@ -643,15 +559,13 @@ help:
 	@echo "    compile-file FILE=path.c        Compile one classified C translation unit"
 	@echo "    compile-cohort FILES='...'      Compile a source cohort"
 	@echo "    gcc-global-asm-proof            Compile a tiny GLOBAL_ASM source with GCC"
-	@echo "    abi-check                       Compile ABI assertions with IDO and GCC"
-	@echo "    migration-report                Compare BASELINE_BUILD_DIR with this build"
+	@echo "    abi-check                       Compile GCC ABI assertions"
 	@echo ""
 	@echo ""
 	@echo "  options:"
 	@echo ""
 	@echo "    VERSION=v                       Region version. (US is default)"
 	@echo "                                    Supported values: ${ALLOWED_VERSIONS}\n"
-	@echo "    ORIGINAL_CC=ido|mixed|gcc       Select original-code compiler mode"
 
 include include/make/cmd.make
 

@@ -213,49 +213,28 @@ jobs:
             ./scripts/extract_diff.j.sh
           fi
 
-      - name: Build IDO reference ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
+      - name: Build GCC practice ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
         run: >-
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
           make -j$(nproc)
-          IDO_RECOMP=YES
-          ORIGINAL_CC=ido
-          BUILD_DIR_BASE=build/ido
           VERSION=${{ matrix.region.version }}
           DEV=${{ matrix.build.dev }}
 
-      - name: Build mixed practice ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
-        run: >-
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
-          make -j$(nproc)
-          IDO_RECOMP=YES
-          ORIGINAL_CC=mixed
-          VERSION=${{ matrix.region.version }}
-          DEV=${{ matrix.build.dev }}
-
-      - name: Verify migration harness
+      - name: Verify GCC build invariants
         if: matrix.build.mode == 'release' && matrix.region.version == 'US'
         run: |
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye make abi-check ORIGINAL_CC=mixed
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye make gcc-global-asm-proof ORIGINAL_CC=mixed
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye make abi-check
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye make gcc-global-asm-proof
 
-      - name: Compare IDO and mixed artifacts
-        run: >-
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
-          make migration-report
-          ORIGINAL_CC=mixed
-          VERSION=${{ matrix.region.version }}
-          DEV=${{ matrix.build.dev }}
-
-      - name: Upload migration manifests and reports
+      - name: Upload build metadata and checks
         uses: actions/upload-artifact@v6
         with:
-          name: migration-report-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
           path: |
             build/${{ matrix.region.code }}/.build_config
             build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.map
-            build/${{ matrix.region.code }}/migration/
-            build/ido/${{ matrix.region.code }}/.build_config
-            build/ido/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.map
+            build/${{ matrix.region.code }}/metadata/
+            build/${{ matrix.region.code }}/checks/
           if-no-files-found: error
 
       - name: Generate xdelta patch
@@ -355,7 +334,7 @@ jobs:
           fi
           set +e
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye \
-            python3 scripts/migration/profile_summary.py \
+            python3 scripts/performance/profile_summary.py \
             --elf "build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf" \
             --csv "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives-001-game-frames.csv" \
             --phase "Tested ${{ matrix.build.mode }} ${{ matrix.region.version }}" \
@@ -437,7 +416,7 @@ jobs:
       - name: Update checked-in performance stats
         run: |
           mapfile -t stats < <(find "$RUNNER_TEMP/performance" -type f -name 'stats-*.json' | sort)
-          ./scripts/migration/update_performance_baselines.py \
+          ./scripts/performance/update_performance_baselines.py \
             --baseline src/practice/docs/performance_baselines.json \
             "${stats[@]}"
 

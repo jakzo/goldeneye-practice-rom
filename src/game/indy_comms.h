@@ -2,7 +2,11 @@
 #define _INDY_COMMS_H_
 #include <ultra64.h>
 
+#ifdef PRACTICE_ROM
+void indycommInit(void);
+#else
 s32 indycommInit(void);
+#endif
 void indycommHostinit(void);
 void indycommHostLoadFile(char *filename, u8 *targetloc);
 void indycommHostSendDump(char *filename, u8 *data, u32 size);

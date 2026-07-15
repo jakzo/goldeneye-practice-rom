@@ -32731,7 +32731,11 @@ void sub_GAME_7F04F244(PropRecord* prop, rect4f** arg1, s32* arg2, f32* arg3, f3
 }
 
 
+#ifdef __GNUC__
+void append_text_picked_up(u8 *buffer, AMMOTYPE param2, u32 param3)
+#else
 void append_text_picked_up(u8 *buffer,u8 * param2,u8 * param3)
+#endif
 {
   u8 *str;
 

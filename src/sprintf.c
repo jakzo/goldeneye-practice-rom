@@ -12,7 +12,8 @@ int sprintf(char *dst, const char *fmt, ...) {
     s32 written;
     va_list args;
     va_start(args, fmt);
-    written = _Printf(proutSprintf, dst, fmt, args);
+    written = _Printf((u8 *(*)(u8 *, const u8 *, size_t))proutSprintf,
+                      (u8 *)dst, (const u8 *)fmt, args);
     if (written >= 0) {
         dst[written] = 0;
     }

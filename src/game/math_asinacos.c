@@ -43,21 +43,33 @@ static s32 sub_GAME_7F05AB70(s32 arg0)
     {
         mask = 7;
         shift = 3;
+#ifdef __GNUC__
+        table = table_3;
+#else
         table = &table_3;
+#endif
         arg0 = arg0 - 0x7FE0;
     }
     else if (arg0 >= 0x7800)
     {
         mask = 0x1F;
         shift = 5;
+#ifdef __GNUC__
+        table = table_2;
+#else
         table = &table_2;
+#endif
         arg0 = arg0 - 0x7800;
     }
     else
     {
         mask = 0x1FF;
         shift = 9;
+#ifdef __GNUC__
+        table = table_1;
+#else
         table = &table_1;
+#endif
     }
 
     first = table[arg0 >> shift];

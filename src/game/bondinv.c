@@ -1473,7 +1473,11 @@ void bondinvIncrementHeldTime(s32 weapon1, s32 weapon2)
     }
 }
 
+#ifdef PRACTICE_ROM
+void bondinvGetWeaponOfChoice(s32 *weapon1, s32 *weapon2)
+#else
 s32 bondinvGetWeaponOfChoice(s32 *weapon1, s32 *weapon2)
+#endif
 {
     s32 mosttime = -1;
     s32 i;

@@ -403,7 +403,12 @@ static char usb_timeout_check(u32 start_ticks, u32 duration)
 {
 #ifndef LIBDRAGON
     u64 current_ticks = (u64)osGetCount();
+#ifdef __GNUC__
+    /* duration is milliseconds; the configured clock rate is divisible by 1000. */
+    u64 timeout_ticks = (u64)duration * ((u32)osClockRate / 1000);
+#else
     u64 timeout_ticks = OS_USEC_TO_CYCLES((u64)duration * 1000);
+#endif
 #else
     u64 current_ticks = (u64)get_ticks();
     u64 timeout_ticks = (u64)TICKS_FROM_MS(duration);

@@ -1,5 +1,11 @@
 #ifndef _STAN_H_
 #define _STAN_H_
+
+#ifdef __GNUC__
+#define STAN_HEADER __attribute__((section(".data.stan")))
+#else
+#define STAN_HEADER
+#endif
 #include <ultra64.h>
 
 #include <bondtypes.h>

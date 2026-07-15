@@ -124,7 +124,11 @@ void CheckDisplayErrorBuffer(u32 *buffer)
 {
 	if ((stderr_permitted && stderr_active) || stderr_enabled )
     {
-		crashRenderFrame(buffer);
+#ifdef __GNUC__
+  crashRenderFrame((u16 *)buffer);
+#else
+  crashRenderFrame(buffer);
+#endif
 		currentcount = osGetCount();
 	}
 }
@@ -183,7 +187,11 @@ void osCreateScheduler (OSSched * sc, void * stack, u8 mode, u32 numFields)
     osSetEventMesg(OS_EVENT_PRENMI, &sc->interruptQ, (OSMesg)PRE_NMI_MSG);
     osViSetEvent(&sc->interruptQ, (OSMesg)VIDEO_MSG, numFields);
     osCreateLog();
+#ifdef __GNUC__
+    osCreateThread(sc->thread, SCHED_THREAD_ID, &__scMain, sc, setSPToEnd(sp_shed, sizeof(sp_shed)), SCHED_THREAD_PRIORITY);
+#else
     osCreateThread(sc->thread, SCHED_THREAD_ID, &__scMain, sc, setSPToEnd(&sp_shed, sizeof(sp_shed)), SCHED_THREAD_PRIORITY);
+#endif
     osStartThread(sc->thread);
 }
 

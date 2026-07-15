@@ -75,4 +75,7 @@ s32 __osPackEepReadData(u8 address) {
 #ifdef AVOID_UB
     return 0;
 #endif
+#if defined(PRACTICE_ROM) && !defined(AVOID_UB)
+    return 0;
+#endif
 }

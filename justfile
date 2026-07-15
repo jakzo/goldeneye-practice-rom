@@ -82,14 +82,14 @@ profile-ares ARES ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="bu
     ARES_N64_PROFILE_SYMBOLS="$(pwd)/{{ ELF }}" ARES_N64_PROFILE_OUTPUT="$(pwd)/{{ OUTPUT }}" "{{ ARES }}" --no-file-prompt "$(pwd)/{{ ROM }}"
 
 # Build and profile the release US ROM running the deterministic Archives replay.
-profile-release-us ARES="ares/build_macos/desktop-ui/Release/ares.app/Contents/MacOS/ares" OUTPUT="build/profile/archives-release-us" MIGRATION_POINT="Current release US":
+profile-release-us ARES="ares/build_macos/desktop-ui/Release/ares.app/Contents/MacOS/ares" OUTPUT="build/profile/archives-release-us" LABEL="Current release US":
     DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --build ares/build_macos --config Release --parallel {{ num_cpus() }}
     if test -z "$(docker images -q {{ image }})"; then just setup; fi
     docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=0 VERSION=US COMPARE=0 TEST_CASE=REPLAY_ARCHIVES
     cp tests/replays/archives.ram build/u/ge007.u.ram
     ARES_N64_PROFILE_REPLAY=1 just profile-ares "{{ ARES }}" build/u/ge007.u.z64 build/u/ge007.u.elf "{{ OUTPUT }}"
     just profile-ares-flamegraph "{{ OUTPUT }}-001.folded" "{{ OUTPUT }}-001.html"
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/migration/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ MIGRATION_POINT }}" --build-mode release --region US --baseline src/practice/docs/performance_baselines.json --output "{{ OUTPUT }}-performance.json"
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/performance/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ LABEL }}" --build-mode release --region US --baseline src/practice/docs/performance_baselines.json --output "{{ OUTPUT }}-performance.json"
 
 # Render one profiler .folded capture as an interactive HTML flame graph.
 profile-ares-flamegraph INPUT OUTPUT="":

@@ -1,6 +1,10 @@
 #include <string.h>
 
+#ifdef __GNUC__
+char *strchr(const char *s, int c)
+#else
 unsigned char *strchr(const unsigned char *s, int c)
+#endif
 {
     const unsigned char ch = c;
     while (*s != ch)
@@ -9,12 +13,24 @@ unsigned char *strchr(const unsigned char *s, int c)
             return NULL;
         s++;
     }
+#ifdef __GNUC__
+    return (char *)s;
+#else
     return (unsigned char *)s;
+#endif
 }
 
+#ifdef __GNUC__
+size_t strlen(const char *s)
+#else
 size_t strlen(const unsigned char *s)
+#endif
 {
+#ifdef __GNUC__
+    const char *sc = s;
+#else
     const unsigned char *sc = s;
+#endif
     while (*sc)
         sc++;
     return sc - s;

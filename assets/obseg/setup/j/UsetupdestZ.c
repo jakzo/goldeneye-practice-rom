@@ -20,7 +20,7 @@ char *padnames[];
 PathRecord patrolpaths[];
 AIListRecord ailists[];
 
-stagesetup UsetupdestZ = {
+stagesetup UsetupdestZ STAGESETUP_HEADER = {
     &pathwaypoints,
     &pathsets,
     &intro,

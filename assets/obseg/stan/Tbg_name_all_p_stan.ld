@@ -6,6 +6,7 @@ SECTIONS
     _UstanDataStart = ADDR(.data);
     _UstanDataRomStart = 0x0000;
     .data 0x00000000 : AT(0x0000) {
+        * (.data.stan);
         * (.data);
     }
     _UstanDataEnd = ADDR(.data) + SIZEOF(.data);

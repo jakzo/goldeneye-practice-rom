@@ -109,10 +109,10 @@ void init(void)
     s32 *stack_pointer;
     u8 *dataziprom;
 
-    csegmentSegmentVaddrStart = get_csegmentSegmentStart();
-    cdataSegmentRomStart = get_cdataSegmentRomStart();
+    csegmentSegmentVaddrStart = (u8 *)get_csegmentSegmentStart();
+    cdataSegmentRomStart = (u8 *)get_cdataSegmentRomStart();
     cdataSegmentRomSize = (u8 *) get_cdataSegmentRomEnd() - cdataSegmentRomStart;
-    inflateSegmentRomStart = get_inflateSegmentRomStart();
+    inflateSegmentRomStart = (u8 *)get_inflateSegmentRomStart();
     inflateromSize = (u8 *) get_inflateSegmentRomEnd() - inflateSegmentRomStart;
     copylen = cdataSegmentRomSize + inflateromSize;
     datazipram = (u8 *) (RZIPLOADADDR - cdataSegmentRomSize);
@@ -123,13 +123,13 @@ void init(void)
         datazipram[j] = dataziprom[j];
     }
 
-    decompress_result = jump_decompressfile(datazipram, csegmentSegmentVaddrStart, RZIPBUFADDR);
+    decompress_result = jump_decompressfile((u32)datazipram, (u32)csegmentSegmentVaddrStart, RZIPBUFADDR);
     if (decompress_result);
 
     inflate_code_size = (s32) ((u32) &_inflateSegmentRomStart - (u32) &_codeSegmentRomStart);
     if (inflate_code_size > MAXCODESIZE)
     {
-        osPiRawStartDma(OS_READ, &_alt_startSegmentRomStart, &_alt_startSegmentStart, inflate_code_size - MAXCODESIZE);
+        osPiRawStartDma(OS_READ, (u32)&_alt_startSegmentRomStart, &_alt_startSegmentStart, inflate_code_size - MAXCODESIZE);
         while ((osPiGetStatus() & PI_STATUS_DMA_BUSY))
         {
         }
@@ -141,7 +141,7 @@ void init(void)
     initTLBPrepareContext();
 
     // Copy the TLB miss handler to proper place
-    src = &resolve_TLBaddress_for_InvalidHit;
+    src = (s32 *)&resolve_TLBaddress_for_InvalidHit;
     dest = (s32 *) K0BASE;
     while (dest < (s32 *) XUT_VEC)
     {
@@ -212,7 +212,7 @@ void idleproc(void *arg)
  */
 void idleCreateThread(void)
 {
-    osCreateThread(&idleThread, IDLE_THREAD_ID, idleproc, NULL, setSPToEnd(&sp_idle, sizeof(sp_idle)), IDLE_THREAD_PRIORITY);
+    osCreateThread(&idleThread, IDLE_THREAD_ID, idleproc, NULL, setSPToEnd(sp_idle, sizeof(sp_idle)), IDLE_THREAD_PRIORITY);
     osStartThread(&idleThread);
 }
 
@@ -223,7 +223,7 @@ void idleCreateThread(void)
  */
 void rmonCreateThread(void)
 {
-    osCreateThread(&rmonThread, RMON_THREAD_ID, rmonMain, NULL, setSPToEnd(&sp_rmon, sizeof(sp_rmon)), RMON_THREAD_PRIORITY);
+    osCreateThread(&rmonThread, RMON_THREAD_ID, (void (*)(void *))rmonMain, NULL, setSPToEnd(sp_rmon, sizeof(sp_rmon)), RMON_THREAD_PRIORITY);
     osStartThread(&rmonThread);
 }
 
@@ -233,7 +233,7 @@ void rmonCreateThread(void)
  */
 void schedulerInitThread(void)
 {
-    osCreateMesgQueue(&gfxFrameMsgQ, &gfxFrameMsgBuf, 32);
+    osCreateMesgQueue(&gfxFrameMsgQ, gfxFrameMsgBuf, 32);
     if (osTvType == OS_TV_MPAL)
     {
         osCreateScheduler(&os_scheduler, &shedThread, OS_VI_MPAL_LAN1, NUM_FIELDS);
@@ -243,7 +243,7 @@ void schedulerInitThread(void)
         osCreateScheduler(&os_scheduler, &shedThread, OS_VI_NTSC_LAN1, NUM_FIELDS);
     }
 
-    osScAddClient(&os_scheduler, &gfxClient, &gfxFrameMsgQ, NULL);
+    osScAddClient(&os_scheduler, gfxClient, &gfxFrameMsgQ, NULL);
     sched_cmdQ = osScGetCmdQ(&os_scheduler);
 }
 

@@ -10,7 +10,7 @@ waypoint pathwaypoints[];
 PathRecord patrolpaths[];
 AIListRecord ailists[];
 
-stagesetup UsetuptestZ = {
+stagesetup UsetuptestZ STAGESETUP_HEADER = {
     &pathwaypoints,
     &pathsets,
     &intro,

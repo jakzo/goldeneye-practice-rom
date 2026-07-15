@@ -24,6 +24,7 @@
 
 
 u8 fileGetBondForFolder(u32 folder);
+save_data *fileGetSaveForFoldernum(u32 folder);
 void fileValidateSaves(void);
 bool fileGetIsCheatUnlocked(save_data *save, s32 cheat);
 STAGESTATUS fileIsStageUnlockedAtDifficulty(s32 foldernum, LEVEL_SOLO_SEQUENCE levelid, DIFFICULTY difficulty);

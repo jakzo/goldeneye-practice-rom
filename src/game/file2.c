@@ -17,10 +17,18 @@
 //CODE.bss:80069A40
 //CODE.bss:80069AA0
 //CODE.bss:80069B00
+#ifdef __GNUC__
+save_data saves[SAVESLOTMAX] __attribute__((section(".bss")));
+#else
 save_data saves[SAVESLOTMAX];
+#endif
 
 //CODE.bss:80069B60
+#ifdef __GNUC__
+u32 dword_CODE_bss_80069B60 __attribute__((section(".bss")));
+#else
 u32 dword_CODE_bss_80069B60;
+#endif
 
 //data
 //D:8002C510
@@ -846,8 +854,13 @@ void fileSaveFolderUnlockCheat(s32 foldernum, s32 cheat)
 void fileGetHighestStageDifficultyCompletedForFolder(s32 foldernum, LEVEL_SOLO_SEQUENCE *levelid, DIFFICULTY *difficulty)
 {
     save_data *folder;
+#ifdef __GNUC__
+    s32 stageid;
+    s32 difficultyid;
+#else
     LEVEL_SOLO_SEQUENCE stageid;
     DIFFICULTY difficultyid;
+#endif
 
     folder = fileGetSaveForFoldernum(foldernum);
 
@@ -878,7 +891,11 @@ void fileGetHighestStageDifficultyCompletedForFolder(s32 foldernum, LEVEL_SOLO_S
  */
 LEVEL_SOLO_SEQUENCE fileGetHighestStageUnlockedForFolder(s32 foldernum)
 {
+#ifdef __GNUC__
+    s32 levelid;
+#else
     LEVEL_SOLO_SEQUENCE levelid;
+#endif
     DIFFICULTY difficulty;
 
     if ( fileGetSaveForFoldernum(foldernum) != NULL)

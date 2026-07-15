@@ -56,6 +56,8 @@
 #define MUSIC_SFX_SEQ_CONFIG_MAX_EVENTS             0x40
 #define MUSIC_SFX_SEQ_MAYBE_MAX_SOUNDS                 8
 
+#define MUSIC_DECOMPRESS_SCRATCH_SIZE 8438
+
 // 
 // carnivorous shared default midi allocations from editor:
 // main address: 80710800
@@ -74,9 +76,24 @@
 // but the only thing used is the seqData pointer, the large array
 // seems unused.
 struct music_struct_b {
-    u8 data[8438];
+    u8 data[MUSIC_DECOMPRESS_SCRATCH_SIZE];
     u8 *seqData;
 };
+
+#ifdef __GNUC__
+/*
+ * decompressdata uses the huft pointer as the start of an arena, rather than
+ * as a single struct huft. IDO happened to place music_struct_b immediately
+ * after hlist, but GCC removes music_struct_b.data because C never reads it.
+ * Describe the arena explicitly so optimized builds retain the required space.
+ * This replaces, rather than accompanies, the IDO-only music_struct_b and
+ * hlist locals in each playback function, so it does not increase stack use.
+ */
+struct music_decompress_workspace {
+    struct huft hlist;
+    u8 data[MUSIC_DECOMPRESS_SCRATCH_SIZE];
+};
+#endif
 
 s32 g_musicUnused = 0;
 
@@ -792,11 +809,18 @@ void musicSeqPlayerInit(void)
 void musicTrack1Play(s32 track)
 {
     u32 trackSizeBytes;
+#ifdef __GNUC__
+    struct music_decompress_workspace workspace;
+    u8 *seqData;
+#else
     struct music_struct_b thing;
+#endif
     u8 *temp_a0;
     void *romAddress;
     u32 t3;
+#ifndef __GNUC__
     struct huft hlist;
+#endif
 
     if (g_sndBootswitchSound)
     {
@@ -825,11 +849,21 @@ void musicTrack1Play(s32 track)
 
     t3 = ALIGN16_a(g_musicTrackLength[g_musicXTrack1CurrentTrackNum]) + ALIGN16_a(NUM_MUSIC_TRACKS);
     trackSizeBytes = ALIGN16_a(g_musicTrackCompressedLength[g_musicXTrack1CurrentTrackNum]);
+#ifdef __GNUC__
+    seqData = g_musicXTrack1SeqData;
+    temp_a0 = (u8*)((t3 + (s32)seqData) - trackSizeBytes);
+#else
     thing.seqData = g_musicXTrack1SeqData;
     temp_a0 = (u8*)((t3 + (s32)thing.seqData) - trackSizeBytes);
+#endif
 
     romCopy(temp_a0, romAddress, trackSizeBytes);
+#ifdef __GNUC__
+    decompressdata(temp_a0, seqData, &workspace.hlist);
+    __asm__ volatile ("" : : "r"(&workspace) : "memory");
+#else
     decompressdata(temp_a0, thing.seqData, &hlist);
+#endif
 
     alCSeqNew(&g_musicXTrack1Seq, g_musicXTrack1SeqData);
     alCSPSetSeq(g_musicXTrack1SeqPlayer, &g_musicXTrack1Seq);
@@ -981,11 +1015,18 @@ void musicTrack1FadeIn(f32 fadeTime, u16 volume)
 void musicTrack2Play(s32 track)
 {
     u32 trackSizeBytes;
+#ifdef __GNUC__
+    struct music_decompress_workspace workspace;
+    u8 *seqData;
+#else
     struct music_struct_b thing;
+#endif
     u8 *temp_a0;
     void *romAddress;
     u32 t3;
+#ifndef __GNUC__
     struct huft hlist;
+#endif
 
     if (g_sndBootswitchSound)
     {
@@ -1014,11 +1055,21 @@ void musicTrack2Play(s32 track)
 
     t3 = ALIGN16_a(g_musicTrackLength[g_musicXTrack2CurrentTrackNum]) + ALIGN16_a(NUM_MUSIC_TRACKS);
     trackSizeBytes = ALIGN16_a(g_musicTrackCompressedLength[g_musicXTrack2CurrentTrackNum]);
+#ifdef __GNUC__
+    seqData = g_musicXTrack2SeqData;
+    temp_a0 = (u8*)((t3 + (s32)seqData) - trackSizeBytes);
+#else
     thing.seqData = g_musicXTrack2SeqData;
     temp_a0 = (u8*)((t3 + (s32)thing.seqData) - trackSizeBytes);
+#endif
 
     romCopy(temp_a0, romAddress, trackSizeBytes);
+#ifdef __GNUC__
+    decompressdata(temp_a0, seqData, &workspace.hlist);
+    __asm__ volatile ("" : : "r"(&workspace) : "memory");
+#else
     decompressdata(temp_a0, thing.seqData, &hlist);
+#endif
 
     alCSeqNew(&g_musicXTrack2Seq, g_musicXTrack2SeqData);
     alCSPSetSeq(g_musicXTrack2SeqPlayer, &g_musicXTrack2Seq);
@@ -1170,11 +1221,18 @@ void musicTrack2FadeIn(f32 fadeTime, u16 volume)
 void musicTrack3Play(s32 track)
 {
     u32 trackSizeBytes;
+#ifdef __GNUC__
+    struct music_decompress_workspace workspace;
+    u8 *seqData;
+#else
     struct music_struct_b thing;
+#endif
     u8 *temp_a0;
     void *romAddress;
     u32 t3;
+#ifndef __GNUC__
     struct huft hlist;
+#endif
 
     if (g_sndBootswitchSound)
     {
@@ -1203,11 +1261,21 @@ void musicTrack3Play(s32 track)
 
     t3 = ALIGN16_a(g_musicTrackLength[g_musicXTrack3CurrentTrackNum]) + ALIGN16_a(NUM_MUSIC_TRACKS);
     trackSizeBytes = ALIGN16_a(g_musicTrackCompressedLength[g_musicXTrack3CurrentTrackNum]);
+#ifdef __GNUC__
+    seqData = g_musicXTrack3SeqData;
+    temp_a0 = (u8*)((t3 + (s32)seqData) - trackSizeBytes);
+#else
     thing.seqData = g_musicXTrack3SeqData;
     temp_a0 = (u8*)((t3 + (s32)thing.seqData) - trackSizeBytes);
+#endif
 
     romCopy(temp_a0, romAddress, trackSizeBytes);
+#ifdef __GNUC__
+    decompressdata(temp_a0, seqData, &workspace.hlist);
+    __asm__ volatile ("" : : "r"(&workspace) : "memory");
+#else
     decompressdata(temp_a0, thing.seqData, &hlist);
+#endif
 
     alCSeqNew(&g_musicXTrack3Seq, g_musicXTrack3SeqData);
     alCSPSetSeq(g_musicXTrack3SeqPlayer, &g_musicXTrack3Seq);

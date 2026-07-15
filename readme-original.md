@@ -44,12 +44,6 @@ If you don't have host development tools already installed then you will also ne
 sudo apt-get install build-essential
 ```
 
-Additionally [qemu-irix](https://github.com/n64decomp/qemu-irix/releases) is needed. Download the package to a desired location and install with:
-
-```bash
-sudo dpkg -i qemu-irix-2.11.0-2169-g32ab296eef_amd64.deb
-```
-
 #### Step 2: Clone the repository
 
 Clone this repository where you wish to have the project, with a command such as:
@@ -58,15 +52,7 @@ Clone this repository where you wish to have the project, with a command such as
 git clone https://github.com/kholdfuzion/goldeneye_src
 ```
 
-#### Step 3: Recompile IDO
-
-Recompile IDO for your platform for increased compile speed
-```bash
-cd tools/ido5.3_recomp 
-make
-```
-
-#### Step 4: Prepare baserom(s) for asset extraction
+#### Step 3: Prepare baserom(s) for asset extraction
 
 Place an unmodified copy of your existing NTSC (US) ROM inside the root of this repository with the name `baserom.u.z64`.
 
@@ -148,8 +134,7 @@ The full list of configurable variables are listed below, with the default being
 
 * ``VERSION``: ``US``, ``JP``, ``EU``
 * ``COMPARE``: ``1`` (compare ROM hash), ``0`` (do not compare ROM hash)
-* ``IDO_RECOMP``: ``YES`` (build with IDO recomp), ``NO`` (build using [qemu-irix](https://github.com/n64decomp/qemu-irix/releases))
-* ``FINAL``: ``YES`` (builds final version with -O2 optimization), ``NO`` (debug)
+* ``FINAL``: ``YES`` (builds the optimized version), ``NO`` (debug)
 * ``VERBOSE``: ``0`` (quiet), ``1``
 
 Additional documentation of the build process can be found [here](readme-build.md).

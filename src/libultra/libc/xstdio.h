@@ -39,7 +39,11 @@ typedef struct
 
 typedef u8 *outfun(u8*,const u8*,size_t);
 
+#ifdef __GNUC__
+int _Printf(outfun prout, char *arg, const char *fmt, va_list args);
+#else
 int _Printf(outfun prout, u8 *arg, const u8 *fmt, va_list args);
+#endif
 void _Litob(printf_struct *args, u8 type);
 void _Ldtob(printf_struct *args, u8 type);
 

@@ -20,7 +20,7 @@ char *padnames[];
 PathRecord patrolpaths[];
 AIListRecord ailists[];
 
-stagesetup Ump_setupsevbZ = {
+stagesetup Ump_setupsevbZ STAGESETUP_HEADER = {
     &pathwaypoints,
     &pathsets,
     &intro,

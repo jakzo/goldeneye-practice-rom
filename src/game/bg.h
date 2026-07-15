@@ -131,7 +131,11 @@ void load_bg_file(LEVEL_INDEX stagenum);
 
 s32 bgDebugRemoved7F0B9DE4(s32 arg0, s32 arg1, s32 arg2);
 void bgRemoved7F0B9DF4(s32 arg0);
+#ifdef PRACTICE_ROM
+void bgSwapConnectedRooms(s32 index);
+#else
 s8 bgSwapConnectedRooms(s32 index);
+#endif
 s32 bgGetDataPortalsControlBytes1Bit1(s32 index);
 void bgToggleDataPortalsContrlBytes1Bit1(s32 index, s32 toggle);
 s32 bgGetDataPortalsControlBytes1Bit2(s32 arg0);

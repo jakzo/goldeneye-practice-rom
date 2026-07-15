@@ -8,7 +8,11 @@
 
 // bss
 //CODE.bss:80075DA0
+#ifdef __GNUC__
+f32 flt_CODE_bss_80075DA0 __attribute__((section(".bss")));
+#else
 f32 flt_CODE_bss_80075DA0;
+#endif
 
 
 // data
@@ -38,8 +42,13 @@ void matrix_4x4_copy_homogeneous_eu(f32 src[3][3], f32 dst[3][3])
 void matrix_4x4_multiply_homogeneous_in_place_eu (f32 lhs[3][3], f32 rhs[3][3])
 {
     f32 result[3][3];
+#ifdef __GNUC__
+    matrix_4x4_multiply_homogeneous_eu(lhs, rhs, result);
+    matrix_4x4_copy_homogeneous_eu(result, rhs);
+#else
     matrix_4x4_multiply_homogeneous_eu(lhs, rhs, &result);
     matrix_4x4_copy_homogeneous_eu(&result, rhs);
+#endif
 }
 #endif
 

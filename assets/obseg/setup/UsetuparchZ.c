@@ -8,6 +8,9 @@
 #include "ultra64.h"
 #include "bondtypes.h"
 #include "bondconstants.h"
+#ifdef __GNUC__
+#define SETUPSUBROUTINES(ID) (getChrAIListID(ID) == 8)
+#endif
 #include <bondaicommands.h>
 
 // forward declarations
@@ -125,7 +128,7 @@ enum AiLabels
     lbl99
 };
 
-stagesetup UsetuparchZ = {
+stagesetup UsetuparchZ STAGESETUP_HEADER = {
     &pathwaypoints,
     &pathsets,
     &intro,
@@ -2230,7 +2233,10 @@ enum chrAIListIDs
     chrai_17,
     chrai_18
 };
+#ifndef __GNUC__
 #define SETUPSUBROUTINES(ID) (getChrAIListID(ID) == 8) \
+
+#endif
 
 u8 chrAI_0[] = {
 #define THIS chrai_0

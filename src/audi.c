@@ -215,6 +215,49 @@ u64 g_DeltaAverage;
  */
 u64 g_DeltaTimeSum;
 
+#ifdef __GNUC__
+/* Avoid an o32 __udivdi3 dependency, whose lazy libgcc section is orphaned. */
+static u64 audiDivideU64ByU32(u64 dividend, u32 divisor)
+{
+    u32 dividendHigh = (u32)(dividend >> 32);
+    u32 dividendLow = (u32)dividend;
+    u32 quotientHigh = 0;
+    u32 quotientLow = 0;
+    u32 remainder = 0;
+    s32 bit;
+
+    for (bit = 63; bit >= 0; bit--)
+    {
+        remainder <<= 1;
+
+        if (bit >= 32)
+        {
+            remainder |= (dividendHigh >> (bit - 32)) & 1;
+        }
+        else
+        {
+            remainder |= (dividendLow >> bit) & 1;
+        }
+
+        if (remainder >= divisor)
+        {
+            remainder -= divisor;
+
+            if (bit >= 32)
+            {
+                quotientHigh |= 1U << (bit - 32);
+            }
+            else
+            {
+                quotientLow |= 1U << bit;
+            }
+        }
+    }
+
+    return ((u64)quotientHigh << 32) | quotientLow;
+}
+#endif
+
 /**
  * Address 8005E4D8.
  * (type is u64)
@@ -359,7 +402,16 @@ void amCreateAudioManager(ALSynConfig* alconf)
     
     if (alconf->fxType == AL_FX_CUSTOM)
     {
+#ifdef __GNUC__
+        s32 sp48[CUSTOM_FX_SECTION_COUNT * CUSTOM_FX_SECTION_SIZE + 2];
+
+        for (j = 0; j < CUSTOM_FX_SECTION_COUNT * CUSTOM_FX_SECTION_SIZE + 2; j++)
+        {
+            sp48[j] = CUSTOM_FX_PARAMS_N[j];
+        }
+#else
         s32 sp48[CUSTOM_FX_SECTION_COUNT * CUSTOM_FX_SECTION_SIZE + 2] = CUSTOM_FX_PARAMS_N;
+#endif
         alconf->params = sp48;
         alInit(&g_AudioManager.g, alconf);
     }
@@ -424,7 +476,11 @@ void amMain(void* arg)
 	s16 *msg = NULL;
 	AudioInfo *info = NULL;
 
+#ifdef __GNUC__
+	osScAddClient(&os_scheduler, &g_AudioClient[0], &g_AudioManager.frameMessageQueue, (OSScClient *)1);
+#else
 	osScAddClient(&os_scheduler, &g_AudioClient[0], &g_AudioManager.frameMessageQueue, 1);
+#endif
 
 	while (!done) {
 		osRecvMesg(&g_AudioManager.frameMessageQueue, (OSMesg *) &msg, OS_MESG_BLOCK);
@@ -441,7 +497,11 @@ void amMain(void* arg)
 			g_DeltaTime = g_EndTime - g_StartTime;
 
 			if (count % AUDIO_MANAGER_COUNT_INTERVAL == 0) {
+#ifdef __GNUC__
+				g_DeltaAverage = audiDivideU64ByU32(g_DeltaTimeSum, AUDIO_MANAGER_COUNT_INTERVAL);
+#else
 				g_DeltaAverage = g_DeltaTimeSum / AUDIO_MANAGER_COUNT_INTERVAL;
+#endif
 				
                 // comma is required to continue into next statement, or will fail to match.
                 // Or can have two statements on the same line.

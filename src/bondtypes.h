@@ -486,6 +486,10 @@ typedef union
         s32  count;
         s32  bufMax;
         s32  nearEdgeCount;
+#ifdef __GNUC__
+        /* stanTileDistanceRelated clears 16 words through this record. */
+        s32  scratch[12];
+#endif
     };
 
     typedef struct StandFileFooter
@@ -3876,6 +3880,12 @@ struct SetupIntroCredits
 #pragma endregion Player
 
 #pragma region stagesetup.h
+
+#ifdef __GNUC__
+#define STAGESETUP_HEADER __attribute__((section(".data.setup")))
+#else
+#define STAGESETUP_HEADER
+#endif
     struct pname {
         union {
             char *p;

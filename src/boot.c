@@ -59,7 +59,11 @@ glabel boot
  */
 u32 get_csegmentSegmentStart(void)
 {
+#ifdef __GNUC__
+	return (u32)&_csegmentSegmentStart;
+#else
 	return &_csegmentSegmentStart;
+#endif
 }
 
 /**
@@ -67,7 +71,11 @@ u32 get_csegmentSegmentStart(void)
  */
 u32 get_cdataSegmentRomStart(void)
 {
+#ifdef __GNUC__
+	return (u32)&_cdataSegmentRomStart;
+#else
 	return &_cdataSegmentRomStart;
+#endif
 }
 
 /**
@@ -75,7 +83,11 @@ u32 get_cdataSegmentRomStart(void)
  */
 u32 get_cdataSegmentRomEnd(void)
 {
+#ifdef __GNUC__
+	return (u32)&_cdataSegmentRomEnd;
+#else
 	return &_cdataSegmentRomEnd;
+#endif
 }
 
 /**
@@ -83,7 +95,11 @@ u32 get_cdataSegmentRomEnd(void)
  */
 u32 get_inflateSegmentRomStart(void)
 {
+#ifdef __GNUC__
+	return (u32)&_inflateSegmentRomStart;
+#else
 	return &_inflateSegmentRomStart;
+#endif
 }
 
 /**
@@ -91,7 +107,11 @@ u32 get_inflateSegmentRomStart(void)
  */
 u32 get_inflateSegmentRomEnd(void)
 {
+#ifdef __GNUC__
+	return (u32)&_inflateSegmentRomEnd;
+#else
 	return &_inflateSegmentRomEnd;
+#endif
 }
 
 /**

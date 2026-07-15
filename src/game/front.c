@@ -2342,7 +2342,11 @@ void toggle_deletion_menu_for_folder(int index)
 
 
 // address 0x7F00BBCC NTSC
+#ifdef PRACTICE_ROM
+void interface_menu05_fileselect(void)
+#else
 s32 interface_menu05_fileselect(void)
+#endif
 {
     s32 i1;
     s32 i2;
@@ -3486,6 +3490,9 @@ Gfx *constructor_menu07_missionsel(Gfx *DL)
 
     DL = frontAddPreviousTabText(DL);
     DL = frontDrawCursor(DL);
+#ifdef PRACTICE_ROM
+    return DL;
+#endif
 }
 
 
@@ -8320,6 +8327,9 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     DL = frontAddNextTabText(DL);
     DL = frontAddPreviousTabText(DL);
     DL = frontDrawCursor(DL);
+#ifdef PRACTICE_ROM
+    return DL;
+#endif
 }
 
 

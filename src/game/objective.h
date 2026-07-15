@@ -3,6 +3,7 @@
 #include <ultra64.h>
 
 void something_with_stage_objectives(void);
+void add_ptr_to_objective(struct objective_entry *objective);
 
 void set_parent_cur_tag_entry(struct TagObjectRecord *arg0);
 void setup_briefing_text_entry_parent(struct setup_objective_text *arg0);

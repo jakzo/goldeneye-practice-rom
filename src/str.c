@@ -94,12 +94,20 @@ int isspace(unsigned char c) {
 #define	ULONG_MAX ((unsigned long)(~0L)) /* 0xFFFFFFFF */
 long int strtol(const char *str, char **endptr, int base) {
     int neg;
+#ifdef __GNUC__
+    const unsigned char *ptr;
+#else
     unsigned char *ptr;
+#endif
     unsigned int cutoff;
     unsigned int cutlim;
     unsigned int accum;
     unsigned char c;
+#ifdef __GNUC__
+    const unsigned char *before;
+#else
     unsigned char *before;
+#endif
     int overflow;
     if ((base < 0) || (base == 1) || (base > 36)) {
         base = 10;
@@ -158,7 +166,11 @@ long int strtol(const char *str, char **endptr, int base) {
         }
         if (ptr != before) {
             if (endptr != NULL) {
+#ifdef __GNUC__
+                *endptr = (char *)ptr;
+#else
                 *endptr = ptr;
+#endif
             }
             if (overflow) {
                 return -1;
@@ -167,7 +179,11 @@ long int strtol(const char *str, char **endptr, int base) {
         }
     }
     if (endptr != NULL) {
+#ifdef __GNUC__
+        *endptr = (char *)str;
+#else
         *endptr = str;
+#endif
     }
     return 0;
 }

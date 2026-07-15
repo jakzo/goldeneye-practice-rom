@@ -11,7 +11,7 @@
 // forward declarations
 BetaStandTile tile_0;
 
-StandFileHeader Tbg_cat_all_p_stanZ = {
+StandFileHeader Tbg_cat_all_p_stanZ STAN_HEADER = {
     NULL,
     &tile_0,
     {0x00, 0x00, 0x00, 0x00}

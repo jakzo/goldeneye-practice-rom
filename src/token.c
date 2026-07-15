@@ -39,8 +39,13 @@ unsigned char *tokenSplit(unsigned char *str)
 
 // Sets a new token string.
 void tokenSetString(const char *str) {
+#ifdef __GNUC__
+    strcpy((char *)g_TokenString, str);
+    tokenSplit((unsigned char *)g_TokenString);
+#else
     strcpy(g_TokenString, str);
     tokenSplit(g_TokenString);
+#endif
 }
 
 // Reads a new token string from the PI device at address 0xFFB000. Also handles the 
@@ -60,7 +65,11 @@ s32 tokenReadIo(void)
             address += sizeof(u32);
         }
     }
+#ifdef __GNUC__
+    tokenSplit((unsigned char *)g_TokenString);
+#else
     tokenSplit(g_TokenString);
+#endif
     if (tokenFind(1, "-d") != NULL) {
         debug = TRUE;
     }

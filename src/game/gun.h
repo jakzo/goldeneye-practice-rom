@@ -297,7 +297,7 @@ void gunDrawSight(s32 *gdl);
 WeaponStats *get_ptr_item_statistics(ITEM_IDS item);
 
 ITEM_IDS getCurrentPlayerWeaponId(GUNHAND hand);
-s32 currentPlayerEquipWeaponWrapper(GUNHAND hand, s32 next_weapon);
+void currentPlayerEquipWeaponWrapper(GUNHAND hand, s32 next_weapon);
 void update_bullet_casings(void);
 void attempt_reload_item_in_hand(GUNHAND hand);
 void set_max_ammo_for_cur_player(void);

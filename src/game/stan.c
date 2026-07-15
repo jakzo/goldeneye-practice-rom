@@ -8,6 +8,13 @@
 #include "unk_0B3200.h"
 #include "assert.h"
 
+#ifdef __GNUC__
+/* Use the game's existing IDO ABI helpers. The toolchain libgcc is built as
+ * PIC/abicalls and cannot be linked into this non-PIC N64 image. */
+extern long long __f_to_ll(float value);
+extern double __ll_to_d(long long value);
+#endif
+
 // bss
 struct StanPrefixRecord {
     //CODE.bss:8007B120
@@ -5107,9 +5114,15 @@ f32 stanGetPositionYValue(StandTile *tile, f32 p_x, f32 p_z)
 
     // implicit call to __f_to_ll
     // This is the cross product, a x b
+#ifdef __GNUC__
+    cp[0] = __f_to_ll((a[1] * b[2]) - (a[2] * b[1]));
+    cp[1] = __f_to_ll((a[2] * b[0]) - (a[0] * b[2]));
+    cp[2] = __f_to_ll((a[0] * b[1]) - (a[1] * b[0]));
+#else
     cp[0] = (s64)((a[1] * b[2]) - (a[2] * b[1]));
     cp[1] = (s64)((a[2] * b[0]) - (a[0] * b[2]));
     cp[2] = (s64)((a[0] * b[1]) - (a[1] * b[0]));
+#endif
 
     // implicit call to __ll_mul
     rsum = ((s64)cp[0] * (s64)tile->points[temp_t6].x)
@@ -5122,7 +5135,11 @@ f32 stanGetPositionYValue(StandTile *tile, f32 p_x, f32 p_z)
         return (f32) tile->points[temp_t6].y * inv_level_scale;
     }
 
+#ifdef __GNUC__
+    return (f32) (((__ll_to_d(rsum) - ((f64) p_x * __ll_to_d(cp[0]))) - ((f64) p_z * __ll_to_d(cp[2]))) / __ll_to_d(cp[1])) * inv_level_scale;
+#else
     return (f32) ((((f64)(rsum) - ((f64) p_x * (f64)cp[0])) - ((f64) p_z * (f64)cp[2])) / (f64)(cp[1])) * inv_level_scale;
+#endif
 }
 
 
