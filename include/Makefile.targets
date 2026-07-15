@@ -17,7 +17,6 @@ ifeq ($(filter clean nuke dataclean help codeclean context cmdbuilder test stanc
 		$(error VERSION "$(VERSION)" not supported")
     endif
     # Make tools if out of date
-    $(info Building tools...)
     DUMMY != make -s -C tools >&2 || echo FAIL
     ifeq ($(DUMMY),FAIL)
 		$(error Failed to build tools)

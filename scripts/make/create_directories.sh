@@ -3,8 +3,6 @@
 # $1: BUILD_DIR
 # $2: country code
 
-echo "creating required build directories"
-
 BUILD_DIR=$1
 COUNTRYCODE=$2
 

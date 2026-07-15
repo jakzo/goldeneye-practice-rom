@@ -39,6 +39,7 @@ ifeq ($(VERBOSE), 1)
  SHA1SUM = sha1sum
 else
  SHA1SUM = sha1sum --quiet
+.SILENT:
 endif
 
 # Convert AI Print commands from readable strings to byte arrays automatically.
@@ -272,7 +273,7 @@ ORIGINAL_C_FILES := $(sort $(CODEFILES) $(GAMEFILES_C) $(RZ_SOURCE_FILES) \
 ORIGINAL_C_OBJECTS := $(foreach file,$(ORIGINAL_C_FILES),$(BUILD_DIR)/$(file:.c=.o))
 ALL_LINKED_C_FILES := $(sort $(ORIGINAL_C_FILES) $(PRACTICEFILES_C))
 
-original-cc = $(CC_GCC)
+original-cc = sh scripts/build/quiet_on_success.sh $(CC_GCC)
 original-flags = $(CFLAGS_GCC_ORIGINAL)
 original-libultra-flags = $(CFLAGS_GCC_ORIGINAL_LIBULTRA)
 original-optimization = $(GCC_OPTIMIZATION)
@@ -290,7 +291,7 @@ $(NON_ORIGINAL_CONFIG_SENSITIVE_OBJECTS): $(OBJECT_CONFIG_STAMP)
 $(APPELF): $(BUILD_CONFIG_STAMP) $(COMPILER_MANIFEST)
 
 # Per-source stamps track the effective GCC command for each translation unit.
-$(ORIGINAL_C_OBJECTS): $(BUILD_DIR)/%.o: $(BUILD_DIR)/.compiler/%.stamp
+$(ORIGINAL_C_OBJECTS): $(BUILD_DIR)/%.o: $(BUILD_DIR)/.compiler/%.stamp scripts/build/quiet_on_success.sh
 
 $(BUILD_DIR)/.compiler/%.stamp: %.c FORCE
 	@mkdir -p $(@D)
@@ -498,7 +499,6 @@ create_directories:
 	scripts/make/create_directories.sh "$(BUILD_DIR)" "$(COUNTRYCODE)"
 
 build_tools:
-	$(info Building tools...)
 	scripts/make/build_tools.sh "$(MAKE)"
 
 prerequisites: print_info create_directories build_tools extractassets
@@ -602,8 +602,6 @@ extract_u:
 		else \
 			echo "Error: baserom.u.z64 not found."; \
 		fi \
-	else \
-		echo "Assets for u already extracted."; \
 	fi
 
 extract_e:
@@ -614,8 +612,6 @@ extract_e:
 		else \
 			echo "Error: baserom.e.z64 not found."; \
 		fi \
-	else \
-		echo "Assets for e already extracted."; \
 	fi
 
 extract_j:
@@ -626,8 +622,6 @@ extract_j:
 		else \
 			echo "Error: baserom.j.z64 not found."; \
 		fi \
-	else \
-		echo "Assets for j already extracted."; \
 	fi
 
 extract_rsp:
@@ -638,8 +632,6 @@ extract_rsp:
 		else \
 			echo "Error: baserom.u.z64 not found."; \
 		fi \
-	else \
-		echo "RSP assets for already extracted."; \
 	fi
 
 textures: tools/mktex/build/tex2png
