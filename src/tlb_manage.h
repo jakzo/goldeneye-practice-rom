@@ -11,9 +11,5 @@ void tlbmanageEstablishManagementTable(void);
 void tlbmanageResetCurrentEntriesCount(void);
 void tlbmanageTranslateLoadRomFromTlbAddress(u32 address);
 u8 (*tlbmanageGetTlbAllocatedBlock(void))[TLB_BLOCK_SIZE];
-#ifdef PROFILE_PRACTICE
-void tlbmanageGetProfileTotals(u32 *loads, u32 *total_cycles,
-                               u32 *dma_cycles, u32 *icache_cycles);
-#endif
 
 #endif

@@ -13,8 +13,8 @@ just setup
 just sc64
 ```
 
-Run `just profile-archives` to capture the deterministic Archives replay's CPU
-timings. See the [profiling methodology and baseline](src/practice/docs/PROFILING.md).
+Run `just profile-release-us` to profile the deterministic Archives replay in
+ares. See the [performance workflow](readme-build.md#performance-summary).
 
 ## Development
 

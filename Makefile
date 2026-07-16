@@ -10,8 +10,6 @@ VERSION := US
 VERBOSE := 2
 # If DEV is set (e.g. DEV=1), -DDEV is added to enable code with #ifdef DEV
 DEV := 0
-# Compile diagnostic CPU/TLB profiling into the practice ROM.
-PROFILE_PRACTICE := 0
 # If COMPARE is 1, check the output sha1sum when building 'all', and if fail to match
 # then compare ELF sections to known md5 checksums.
 COMPARE := 0
@@ -111,11 +109,6 @@ ifeq ($(DEV), 1)
  GCC_DEBUG_FLAGS := -g
  LCDEFS += -DDEV
  ASMDEFS += --defsym DEV=1
-endif
-
-ifeq ($(PROFILE_PRACTICE), 1)
- LCDEFS += -DPROFILE_PRACTICE
- ASMDEFS += --defsym PROFILE_PRACTICE=1
 endif
 
 ALLOWED_VERSIONS := US EU JP DEBUG USB
@@ -315,7 +308,6 @@ $(BUILD_CONFIG_STAMP): FORCE
 		printf '%s\n' 'VERSION=$(VERSION)'; \
 		printf '%s\n' 'CC_GCC_VERSION=$(CC_GCC_VERSION)'; \
 		printf '%s\n' 'DEV=$(DEV)'; \
-		printf '%s\n' 'PROFILE_PRACTICE=$(PROFILE_PRACTICE)'; \
 		printf '%s\n' 'GCC_OPTIMIZATION=$(GCC_OPTIMIZATION)'; \
 		printf '%s\n' 'LCDEFS=$(LCDEFS)'; \
 		printf '%s\n' 'CFLAGS_GCC_PRACTICE=$(CFLAGS_GCC_PRACTICE)'; \
@@ -338,7 +330,6 @@ $(OBJECT_CONFIG_STAMP): FORCE
 		printf '%s\n' 'FINAL=$(FINAL)'; \
 		printf '%s\n' 'VERSION=$(VERSION)'; \
 		printf '%s\n' 'DEV=$(DEV)'; \
-		printf '%s\n' 'PROFILE_PRACTICE=$(PROFILE_PRACTICE)'; \
 		printf '%s\n' 'CC_GCC_VERSION=$(CC_GCC_VERSION)'; \
 		printf '%s\n' 'CFLAGS_GCC_PRACTICE=$(CFLAGS_GCC_PRACTICE)'; \
 		printf '%s\n' 'ASFLAGS=$(ASFLAGS)'; \

@@ -41,8 +41,6 @@
 #include "PR/R4300.h"
 #include "practice/practice_config.h"
 #include "practice/practice_hotkeys.h"
-#include "practice/practice_debug.h"
-#include "practice/practice_profile.h"
 #include "practice/practice_replay.h"
 #include "practice/practice_timescale.h"
 #include "practice/practice_ui.h"
@@ -455,9 +453,6 @@ void bossMainloop(void)
         }
 
         memaReset(mempAllocBytesInBank(g_CurentMaMallocValue, MEMPOOL_STAGE), g_CurentMaMallocValue);
-#ifdef PRACTICE_ROM
-        practice_memory_profile_reset();
-#endif
         reset_play_data_ptrs();
 
         localSelectedNumPlayers = 0;
@@ -573,10 +568,6 @@ void bossMainloop(void)
 #endif
 
                             gdl = firstGdl = dynGetMasterDisplayList();
-#ifdef PRACTICE_ROM
-                            practice_profile_begin(PRACTICE_PROFILE_TICK);
-#endif
-
 #ifdef DEBUGMENU
                             //ported from pd beta, official way to open debug menu
 			                // If menu is open (?) or player has pressed C down + C up
@@ -631,13 +622,7 @@ void bossMainloop(void)
                                     localPlayer = g_CurrentPlayer;
                                     viSetViewPosition(localPlayer->viewleft, localPlayer->viewtop);
 
-#ifdef PRACTICE_ROM
-                                    practice_profile_begin(PRACTICE_PROFILE_PHYSICS);
-#endif
                                     lvlViewMoveTick();
-#ifdef PRACTICE_ROM
-                                    practice_profile_end(PRACTICE_PROFILE_PHYSICS);
-#endif
                                 }
                             }
 
@@ -662,9 +647,7 @@ void bossMainloop(void)
 #endif
 #ifdef PRACTICE_ROM
                             {
-                                practice_profile_begin(PRACTICE_PROFILE_RENDER);
                                 gdl = lvlRender(gdl);
-                                practice_profile_end(PRACTICE_PROFILE_RENDER);
                             }
 #else
                             gdl = lvlRender(gdl);
@@ -684,10 +667,6 @@ void bossMainloop(void)
                             }
 
                             gdl = debmenuDraw(gdl);
-#ifdef PRACTICE_ROM
-                            practice_profile_end(PRACTICE_PROFILE_TICK);
-                            practice_profile_frame_end(gdl);
-#endif
 
                             if (get_memusage_display_flag())
                             {

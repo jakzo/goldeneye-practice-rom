@@ -11,8 +11,5 @@ void memaFree(void *addr, s32 size);
 void memaDumpPrePostMerge(void);
 s32 memaGetLongestFree(void);
 s32 memaRealloc(s32 addr, u32 newsize, u32 oldsize);
-#ifdef PROFILE_PRACTICE
-void memaGetFreeStats(u32 *totalfree, u32 *largestfree);
-#endif
 
 #endif

@@ -50,7 +50,6 @@
 #include "practice/practice_splits.h"
 #include "practice/practice_ui.h"
 #include "practice/practice_lag.h"
-#include "practice/practice_profile.h"
 #include "practice/state/practice_states_utils.h"
 
 #ifdef VERSION_EU
@@ -11646,7 +11645,6 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     f32 faspect;
 #endif
 
-    practice_profile_begin(PRACTICE_PROFILE_PHYSICS_SETUP);
     set_cur_player_fovy(FOV_Y_F);
 
     // This call doesn't do anything, the call viSetFovY(g_CurrentPlayer->fovy); in lvlRender
@@ -11743,16 +11741,11 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     if (1);
 #endif
 
-    practice_profile_end(PRACTICE_PROFILE_PHYSICS_SETUP);
-
 #if PRACTICE_ROM
-    practice_profile_begin(PRACTICE_PROFILE_PHYSICS_PRACTICE);
     if (!practice_check_hotkeys()) {
         practice_tests_tick();
-    practice_profile_end(PRACTICE_PROFILE_PHYSICS_PRACTICE);
 #endif
 
-    practice_profile_begin(PRACTICE_PROFILE_PHYSICS_CORE);
     if ((g_CameraMode == CAMERAMODE_NONE) || ((g_CameraMode == CAMERAMODE_FP) && (is_timer_active != 0)) || (g_CameraMode == CAMERAMODE_FADE_TO_TITLE))
     {
         if (get_cur_playernum() == 0)
@@ -11766,14 +11759,11 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
     {
         bondviewFrozenMoveBond(stick_x, stick_y, buttons, (u16) g_CurrentPlayer->buttons_pressed);
     }
-    practice_profile_end(PRACTICE_PROFILE_PHYSICS_CORE);
 
 #if PRACTICE_ROM
-        practice_profile_begin(PRACTICE_PROFILE_PHYSICS_PRACTICE);
         practice_lag_tick();
     }
     splits_tick();
-    practice_profile_end(PRACTICE_PROFILE_PHYSICS_PRACTICE);
 #endif
 
 #if defined(BUGFIX_R1)

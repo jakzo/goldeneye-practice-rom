@@ -42,7 +42,6 @@
 #include "practice/practice_splits.h"
 #include "practice/practice_replay.h"
 #include "practice/practice_lag.h"
-#include "practice/practice_profile.h"
 #include "bg.h"
 #include "objective.h"
 #include "mp_watch.h"
@@ -959,7 +958,6 @@ glabel lvlPortalDebug7F0BDF10
 
 Gfx* lvlRender(Gfx* DL)
 {
-    practice_profile_begin(PRACTICE_PROFILE_RENDER_SETUP);
     gSPSegment(DL++, SPSEGMENT_PHYSICAL, NULL);
     gSPSegment(DL++, SPSEGMENT_UNKNOWN, osVirtualToPhysical(ptr_font_DL));
 
@@ -1011,8 +1009,6 @@ Gfx* lvlRender(Gfx* DL)
 
             DL = viSetupScreensForNumPlayers(DL);
             DL = skyRender(DL);
-            practice_profile_end(PRACTICE_PROFILE_RENDER_SETUP);
-            practice_profile_begin(PRACTICE_PROFILE_RENDER_VISIBILITY);
             bgRoomVisibilityRelated();
             determing_type_of_object_and_detection();
             chraiUpdateOnscreenPropCount();
@@ -1026,11 +1022,7 @@ Gfx* lvlRender(Gfx* DL)
             }
 
             sub_GAME_7F03D0D4();
-            practice_profile_end(PRACTICE_PROFILE_RENDER_VISIBILITY);
-            practice_profile_begin(PRACTICE_PROFILE_RENDER_BG);
             DL = bgLevelRender(DL);
-            practice_profile_end(PRACTICE_PROFILE_RENDER_BG);
-            practice_profile_begin(PRACTICE_PROFILE_RENDER_ACTORS);
 
             if (get_debug_portal_flag())
             {
@@ -1094,8 +1086,6 @@ Gfx* lvlRender(Gfx* DL)
 #endif
             DL = sub_GAME_7F0A2C44(DL);
             DL = explosionRenderFlyingParticles(DL);
-            practice_profile_end(PRACTICE_PROFILE_RENDER_ACTORS);
-            practice_profile_begin(PRACTICE_PROFILE_RENDER_HUD);
 
             if (
 
@@ -1123,20 +1113,15 @@ Gfx* lvlRender(Gfx* DL)
             }
 
             DL = mp_watch_menu_display(DL);
-            practice_profile_end(PRACTICE_PROFILE_RENDER_HUD);
         }
 
 #ifdef PRACTICE_ROM
-        practice_profile_begin(PRACTICE_PROFILE_RENDER_PRACTICE);
         practice_external_camera_begin_frame();
         practice_dam_guard_cam_tick();
         practice_frigate_hostage_cam_tick();
         practice_grenade_cam_tick();
         DL = practice_external_camera_render(DL);
-        practice_profile_begin(PRACTICE_PROFILE_UI);
         DL = practice_ui_render(DL);
-        practice_profile_end(PRACTICE_PROFILE_UI);
-        practice_profile_end(PRACTICE_PROFILE_RENDER_PRACTICE);
 #endif
 
     }

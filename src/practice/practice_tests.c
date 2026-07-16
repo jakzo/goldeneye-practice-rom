@@ -26,8 +26,6 @@
 #include "player.h"
 #include "practice_config.h"
 #include "practice_hotkeys.h"
-#include "practice_debug.h"
-#include "practice_profile.h"
 #include "practice_replay.h"
 #include "practice_timescale.h"
 #include "quaternion.h"
@@ -131,9 +129,6 @@ void practice_tests_set_case(s32 test_case) {
   g_ReplayTestHotkeyFrame = 0;
   g_LevelRestartTestPhase = 0;
   g_LevelRestartTimer = 0;
-  practice_profile_set_enabled(test_case == REPLAY_RUNWAY ||
-                               test_case == REPLAY_ARCHIVES);
-
   if (test_case == REPLAY_GRENADE_CAM) {
     practice.grenade_cam = TRUE;
   }
@@ -282,7 +277,6 @@ void practice_tests_tick() {
   if (g_save_test_timer == -1 && g_CameraMode == CAMERAMODE_FP) {
     g_save_test_timer = 0;
     emu_log("TEST_STARTED");
-    practice_log_memory_usage();
   }
 
   if (g_save_test_timer < 0)

@@ -113,9 +113,7 @@ a substitute for the ROM DMA lock.
 
 - [ ] Evaluate GCC `-Os` for normal practice code. A Runway experiment reduced
   `practice.o` text from 130,940 bytes (`-O2`) to 99,460 bytes, page loads from
-  6.61 to 4.85 per frame, and tick time from 1.784M to 1.603M cycles. Fix or
-  avoid the profiler reset-loop optimization issue observed in the diagnostic
-  `-Os` build before adopting it generally.
+  6.61 to 4.85 per frame, and tick time from 1.784M to 1.603M cycles.
 
 - [ ] Consider pinning a small number of proven-hot pages in existing physical
   slots. Start with 4-8 pages and measure. Pinning consumes no additional page

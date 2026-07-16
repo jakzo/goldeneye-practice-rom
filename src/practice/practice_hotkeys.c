@@ -2,7 +2,6 @@
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
-#include "practice_debug.h"
 #include "practice_replay.h"
 #include "practice_splits.h"
 #include "practice_timescale.h"
@@ -87,13 +86,6 @@ bool practice_check_hotkeys(void) {
     practiceLogInfo("Level restarted");
     return TRUE;
   }
-
-#ifdef PROFILE_PRACTICE
-  if (jgbptf & R_CBUTTONS) {
-    practice_log_memory_usage();
-    return TRUE;
-  }
-#endif
 
 #if DEV
   // Log the room the player is currently in (useful for finding room IDs).

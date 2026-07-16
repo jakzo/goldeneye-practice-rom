@@ -75,11 +75,6 @@ test TEST_CASE:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test "{{ TEST_CASE }}"
 
-# Profile the deterministic Archives replay and save per-frame CPU timings.
-profile-archives OUTPUT="src/practice/docs/profile_archives_practice.csv":
-    if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
-    docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test REPLAY_ARCHIVES --timeout 480 --profile-csv "{{ OUTPUT }}"
-
 # Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
 profile-ares ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007": build-ares
     test -x "{{ ares_bin }}"
