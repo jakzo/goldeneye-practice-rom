@@ -254,6 +254,17 @@ Add any general advice helpful for future agents working on this feature here. B
   reset animation state and the plane can disappear or desynchronize. Clear
   `AircraftRecord::Sound`/`VehichleRecord::Sound` on load because those
   `ALSoundState` handles are dynamic and all SFX are stopped before restoring.
+- **Texture Inflation Must Fit the Main-Thread Stack**: Save-state model
+  recreation calls the texture loader from a much deeper stack than normal
+  level setup. `texLoad` and `texInflateNonZlib` already use about 16 KiB of
+  local buffers; the original `texInflateHuffman` adds another fixed 12 KiB
+  even when its alphabet has only 16 entries. The full GCC migration changed
+  `image.c` from IDO to GCC, so stack-frame behavior here must be audited rather
+  than assumed equivalent. In practice builds, size the Huffman frequency/tree
+  arrays from the actual `chansize`. Otherwise the 32 KiB main-thread stack can
+  grow below `sp_main`; initializing the overflowing node table to `-1` then
+  fills the adjacent scheduler stack with `0xffffffff`, making thread 2 return
+  to that address.
 
 ## Struct Analysis
 

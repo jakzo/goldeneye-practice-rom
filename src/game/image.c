@@ -1727,8 +1727,18 @@ s32 texShrinkNonPaletted(u8 *src, u8 *dst, s32 srcwidth, s32 srcheight, s32 form
  */
 void texInflateHuffman(u8 *dst, s32 numiterations, s32 chansize)
 {
+#ifdef PRACTICE_ROM
+	/*
+	 * Save-state loading can recreate models from a deep call chain. Size this
+	 * workspace for the actual alphabet (normally 16-256 entries) instead of
+	 * unconditionally consuming 12 KiB of the 32 KiB main-thread stack.
+	 */
+	u16 frequencies[chansize];
+	s16 nodes[chansize][2];
+#else
 	u16 frequencies[2048];
 	s16 nodes[2048][2];
+#endif
 	s32 i;
 	s32 rootindex;
 	s32 sum;
@@ -1744,7 +1754,11 @@ void texInflateHuffman(u8 *dst, s32 numiterations, s32 chansize)
 	}
 
 	// Initialise the tree
+#ifdef PRACTICE_ROM
+	for (i = 0; i < chansize; i++) {
+#else
 	for (i = 0; i < 2048; i++) {
+#endif
 		nodes[i][0] = -1;
 		nodes[i][1] = -1;
 	}

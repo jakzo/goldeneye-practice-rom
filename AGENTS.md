@@ -140,4 +140,5 @@ The codebase heavily utilizes standard decompilation patterns to bridge C with y
 
 ## General
 
-Don't use agents unless asked.
+- Don't use agents unless asked
+- When debugging memory issues, there was a GCC migration recently in commit c6da0283310ec75a7c2e58267615ed74ac2d4e33 which changed a lot of memory layout with some fields looking unused and optimized away but actually being used

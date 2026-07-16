@@ -1,5 +1,7 @@
 ### Unreleased
 
+- Fixed crash when loading state
+
 # 0.6.1
 
 ## External cameras
