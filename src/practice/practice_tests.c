@@ -24,6 +24,7 @@
 #include "objective.h"
 #include "objective_status.h"
 #include "player.h"
+#include "practice_config.h"
 #include "practice_hotkeys.h"
 #include "practice_debug.h"
 #include "practice_profile.h"
@@ -93,6 +94,7 @@ extern void __ull_divremi(unsigned long long *quotient,
 #define MIGRATION_PHASE4 24
 #define MIGRATION_PHASE6 25
 #define REPLAY_DAM 26
+#define REPLAY_GRENADE_CAM 27
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -132,9 +134,14 @@ void practice_tests_set_case(s32 test_case) {
   practice_profile_set_enabled(test_case == REPLAY_RUNWAY ||
                                test_case == REPLAY_ARCHIVES);
 
+  if (test_case == REPLAY_GRENADE_CAM) {
+    practice.grenade_cam = TRUE;
+  }
+
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
   } else if (test_case == REPLAY_DAM || test_case == REPLAY_RUNWAY ||
+             test_case == REPLAY_GRENADE_CAM ||
              test_case == REPLAY_ARCHIVES ||
              test_case == REPLAY_ARCHIVES_04X ||
              test_case == REPLAY_ARCHIVES_HOTKEYS) {
@@ -158,6 +165,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case MIGRATION_PHASE4:
   case CRASH:
   case REPLAY_RUNWAY:
+  case REPLAY_GRENADE_CAM:
     return LEVELID_RUNWAY;
   case STATE_BUNKER:
   case REPLAY:
@@ -189,6 +197,7 @@ s32 practice_tests_boot_level(s32 test_case) {
 
 s32 practice_tests_should_disable_intro(s32 test_case) {
   return test_case != REPLAY_DAM && test_case != REPLAY_RUNWAY &&
+         test_case != REPLAY_GRENADE_CAM &&
          test_case != REPLAY_ARCHIVES &&
          test_case != REPLAY_ARCHIVES_04X &&
          test_case != REPLAY_ARCHIVES_HOTKEYS;
@@ -1826,6 +1835,7 @@ void practice_tests_frame() {
 
   if (g_practice_test_case == REPLAY_DAM ||
       g_practice_test_case == REPLAY_RUNWAY ||
+      g_practice_test_case == REPLAY_GRENADE_CAM ||
       g_practice_test_case == REPLAY_ARCHIVES ||
       g_practice_test_case == REPLAY_ARCHIVES_04X ||
       g_practice_test_case == REPLAY_ARCHIVES_HOTKEYS) {

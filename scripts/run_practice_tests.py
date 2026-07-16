@@ -36,6 +36,7 @@ PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 REPLAY_FIXTURES = {
     "REPLAY_DAM": ROOT / "tests/replays/dam.ram",
     "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
+    "REPLAY_GRENADE_CAM": ROOT / "tests/replays/runway_agent_grenade.ram",
     "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
     "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
     "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives.ram",
