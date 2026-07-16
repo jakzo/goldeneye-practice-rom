@@ -129,6 +129,7 @@
 #endif
 
 
+
 #define SCREEN_WIDTH      SCREEN_WIDTH_320
 
 #define XSCALE_MAX      0x400
@@ -187,9 +188,6 @@ s16 viGetViewTop(void);
 s16 viGetViewWidth(void);
 s16 viGetViewHeight(void);
 u8 *viGetFrameBuf2(void);
-#ifdef PRACTICE_ROM
-u8 *viGetFrameBuf1(void);
-#endif
 void viSetFrameBuf2(u8 *buf);
 void viSetFovY(f32 fovy);
 f32 viGetFovY(void);
@@ -222,5 +220,3 @@ Gfx *viClearZBufCurrentPlayer(Gfx *gdl);
 Gfx *video_related_F(Gfx *gdl);
 void viGetZRange(f32 *zrange);
 #endif
-
-

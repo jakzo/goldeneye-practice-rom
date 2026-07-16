@@ -477,7 +477,7 @@ void practice_replay_on_stage_load(void) {
     joySetRecordFunc(practice_replay_record_callback);
     practiceLogInfo("Replay: Recording started%s",
                     g_ActiveReplayHeader.flags & REPLAY_FLAG_FRAME_SEEDS
-                        ? "(with seeds)"
+                        ? " (with seeds)"
                         : "");
   } else if (g_ReplayIsPlaying) {
     if (!load_playback_frame()) {
@@ -617,14 +617,15 @@ void practice_replay_on_frame_start(void) {
     if (!g_ReplayDivergenceLogged) {
       char timestamp[16];
       format_timestamp(g_ReplayTimestamp, timestamp);
-      practiceLogError(
-          "Replay diverged at %s: rng %08x%08x/%08x%08x chr %08x%08x/%08x%08x",
-          timestamp, (u32)(g_randomSeed >> 32), (u32)g_randomSeed,
-          (u32)(g_PlaybackFrame.random_seed >> 32),
-          (u32)g_PlaybackFrame.random_seed, (u32)(g_chrObjRandomSeed >> 32),
-          (u32)g_chrObjRandomSeed,
-          (u32)(g_PlaybackFrame.chr_obj_random_seed >> 32),
-          (u32)g_PlaybackFrame.chr_obj_random_seed);
+      practiceLogError("Replay diverged at %s", timestamp,
+                       (u32)(g_randomSeed >> 32));
+      practiceLogDebug("rng %08x%08x/%08x%08x chr %08x%08x/%08x%08x",
+                       (u32)g_randomSeed,
+                       (u32)(g_PlaybackFrame.random_seed >> 32),
+                       (u32)g_PlaybackFrame.random_seed,
+                       (u32)(g_chrObjRandomSeed >> 32), (u32)g_chrObjRandomSeed,
+                       (u32)(g_PlaybackFrame.chr_obj_random_seed >> 32),
+                       (u32)g_PlaybackFrame.chr_obj_random_seed);
       g_ReplayDivergenceLogged = TRUE;
     }
   }

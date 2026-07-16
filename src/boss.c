@@ -43,7 +43,6 @@
 #include "practice/practice_hotkeys.h"
 #include "practice/practice_replay.h"
 #include "practice/practice_timescale.h"
-#include "practice/practice_ui.h"
 #include "practice/practice_unlock.h"
 #include "practice/state/practice_states.h"
 
@@ -144,10 +143,6 @@ OSScMsg g_bossGfxDoneMsg = { OS_SC_DONE_MSG };
 
 // extern declarations
 extern struct player *g_CurrentPlayer;
-#ifdef PRACTICE_ROM
-extern s32 g_schedViCurrentFrameBuffer;
-extern u8 *g_GfxMemPos;
-#endif
 
 /**
  * 6930    70005D30
@@ -335,11 +330,6 @@ void bossMainloop(void)
     s32 rspReplyMsg;
 #ifdef PRACTICE_ROM
     s32 practiceHotkeysChecked;
-    s32 practicePausedGfxPending;
-    s32 practicePausedSchedViBuffer;
-    struct GfxInfo_s *practicePausedGfxTaskSettings;
-    u8 *practicePausedGfxMemPos;
-    u8 *practicePausedFrameBuffer;
 #endif
 
     u32 unused_stackpadding_[56];
@@ -389,14 +379,6 @@ void bossMainloop(void)
         localGfxDoneMsg = g_bossGfxDoneMsg;
         toggleFlag = 0;
         pendingGfx = 0;
-#ifdef PRACTICE_ROM
-        practicePausedGfxPending = FALSE;
-        practicePausedSchedViBuffer = 0;
-        practicePausedGfxTaskSettings = NULL;
-        practicePausedGfxMemPos = NULL;
-        practicePausedFrameBuffer = NULL;
-#endif
-
         test_if_recording_demos_this_stage_load(g_StageNum, lvlGetSelectedDifficulty());
         if (g_DebugAndUpdateStageFlag)
         {
@@ -493,17 +475,6 @@ void bossMainloop(void)
             {
                 case (OS_SC_RETRACE_MSG):
                 {
-#ifdef PRACTICE_ROM
-                    // The paused overlay reuses the current dynamic buffers.
-                    // Wait for it to finish before building another task.
-                    if (practicePausedGfxPending && pendingGfx != 0)
-                        break;
-
-                    // Resume normal double-buffering only after the VI has
-                    // returned to the clean framebuffer held during pause.
-                    if (!practice_ui_wait_for_paused_frame_resume())
-                        break;
-#endif
 #ifdef DEBUG
     /* debug logging from simple.c, I think this requires #include <ultralog.h>
     * //    if (logging)
@@ -550,20 +521,7 @@ void bossMainloop(void)
                                 }
 
                                 if (!g_IsTimePaused)
-                                {
-                                    practice_ui_resume_paused_frame();
                                     break;
-                                }
-
-                                if (pendingGfx != 0)
-                                    break;
-
-                                practicePausedFrameBuffer =
-                                    practice_ui_prepare_paused_frame();
-                                if (practicePausedFrameBuffer == NULL)
-                                    break;
-
-                                practicePausedGfxMemPos = g_GfxMemPos;
                             }
 #endif
 
@@ -595,7 +553,7 @@ void bossMainloop(void)
                             {
                                 // Zero-delta frames must not enter the level
                                 // simulation, but display-list TLB tracking is
-                                // still reset for the practice UI render.
+                                // still reset for the render pass.
                                 tlbmanageResetCurrentEntriesCount();
                                 g_ClockTimer = 0;
                                 g_GlobalTimerDelta = 0.0f;
@@ -628,30 +586,8 @@ void bossMainloop(void)
 
 #ifdef PRACTICE_ROM
                             }
-
-                            if (speedgraphframes == 0)
-                            {
-                                // Compose practice overlays in a non-displayed
-                                // framebuffer without entering lvlRender,
-                                // whose render path also mutates gameplay. The
-                                // scheduler presents it only after completion.
-                                gDPPipeSync(gdl++);
-                                gDPSetColorImage(
-                                    gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b,
-                                    viGetX(),
-                                    OS_K0_TO_PHYSICAL(
-                                        practicePausedFrameBuffer));
-                                gdl = practice_ui_render(gdl);
-                            }
-                            else
 #endif
-#ifdef PRACTICE_ROM
-                            {
-                                gdl = lvlRender(gdl);
-                            }
-#else
                             gdl = lvlRender(gdl);
-#endif
 
                             // Lets Visualise the Coverage Value used for Scilohete Anti-Ailising (edges)
                             // (done on the VI), also produces a cool looking linemode - providing AA is working.
@@ -701,24 +637,8 @@ void bossMainloop(void)
                             }
 
                             freeGfx = dynGetFreeGfx2(gdl);
-#ifdef PRACTICE_ROM
-                            if (speedgraphframes == 0)
-                            {
-                                g_gfxTaskSettingsList->cfb =
-                                    (u32)practicePausedFrameBuffer;
-                                practicePausedGfxTaskSettings =
-                                    g_gfxTaskSettingsList;
-                                practicePausedSchedViBuffer =
-                                    g_schedViCurrentFrameBuffer;
-                            }
-                            else
-                            {
-#endif
                             dynSwapBuffers();
                             video_related_8();
-#ifdef PRACTICE_ROM
-                            }
-#endif
 
                             if ((get_debug_taskgrab_val())
                                 && (joyGetButtonsPressedThisFrame(0, (A_BUTTON | B_BUTTON)))
@@ -748,22 +668,11 @@ void bossMainloop(void)
                             rspGfxTaskStart(firstGdl, gdl, 0, (s32*)rspReplyMsg);
 
                             pendingGfx++;
-#ifdef PRACTICE_ROM
-                            if (speedgraphframes == 0)
-                            {
-                                practicePausedGfxPending = TRUE;
-                            }
-                            else
-                            {
-#endif
                             memaSingleDefragPass();
 #ifdef VERSION_EU
                             eu_sub_7f0c00a4();
 #endif
                             toggleFlag ^= 1;
-#ifdef PRACTICE_ROM
-                            }
-#endif
 
                             speedgraphMarkerHandler(0x10000);
                             if(1);
@@ -774,17 +683,6 @@ void bossMainloop(void)
 
                 case (OS_SC_DONE_MSG):
                     pendingGfx--;
-#ifdef PRACTICE_ROM
-                    if (practicePausedGfxPending && pendingGfx == 0)
-                    {
-                        g_gfxTaskSettingsList =
-                            practicePausedGfxTaskSettings;
-                        g_schedViCurrentFrameBuffer =
-                            practicePausedSchedViBuffer;
-                        g_GfxMemPos = practicePausedGfxMemPos;
-                        practicePausedGfxPending = FALSE;
-                    }
-#endif
                     break;
 
                 case OS_SC_PRE_NMI_MSG:
