@@ -19,6 +19,9 @@
       build/OUTCODE/src/getra.o (.bss);
       build/OUTCODE/src/ramrom.o (.bss);
       build/OUTCODE/src/boss.o (.bss);
+#ifdef REPLAY_RECORD
+      build/OUTCODE/src/replay.o (.bss);
+#endif
       build/OUTCODE/src/music.o (.bss);
       build/OUTCODE/src/snd.o (.bss);
       build/OUTCODE/src/memp.o (.bss);

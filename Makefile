@@ -9,6 +9,7 @@ FINAL := YES
 VERSION := US
 IDO_RECOMP := YES
 VERBOSE := 2
+REPLAY_RECORD := 0
 # If COMPARE is 1, check the output sha1sum when building 'all', and if fail to match
 # then compare ELF sections to known md5 checksums.
 COMPARE := 1
@@ -141,6 +142,9 @@ RSPCODE := $(foreach dir,rsp,$(wildcard $(dir)/*.s))
 RSPOBJECTS := $(foreach file,$(RSPCODE),$(BUILD_DIR)/$(file:.s=.bin))
 
 CODEFILES := $(foreach dir,src,$(wildcard $(dir)/*.c))
+ifeq ($(REPLAY_RECORD), 0)
+ CODEFILES := $(filter-out src/replay.c,$(CODEFILES))
+endif
 CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 
 GAMEFILES_C := $(foreach dir,src/game,$(wildcard $(dir)/*.c))
@@ -201,6 +205,12 @@ else
 endif
 
 CFLAGS := -Wab,-r4300_mul -non_shared -Olimit 2000 -G 0 -Xcpluscomm $(CFLAGWARNING) $(WOFF) $(INCLUDE) $(MIPSISET) $(LCDEFS) -DTARGET_N64
+
+ifeq ($(REPLAY_RECORD), 1)
+ CFLAGS += -DREPLAY_RECORD
+ LDFILEOPTS += -DREPLAY_RECORD
+ ASMDEFS += --defsym REPLAY_RECORD=1
+endif
 
 LD := $(TOOLCHAIN)ld
 LD_SCRIPT := $(BUILD_DIR)/ge007.$(OUTCODE).ld

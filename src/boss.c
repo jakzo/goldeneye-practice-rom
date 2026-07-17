@@ -39,6 +39,9 @@
 #include "game/player.h"
 #include "game/unk_0C0A70.h"
 #include "PR/R4300.h"
+#ifdef REPLAY_RECORD
+#include "replay.h"
+#endif
 
 /**
  * @file boss.c
@@ -165,6 +168,9 @@ void bossInitMainthreadData(void)
     rspInit();
     dynInit();
     joyInit();
+#ifdef REPLAY_RECORD
+    replay_init();
+#endif
     osCreateMesgQueue(&bossmq, &bossmsg, 1);
 
     for (i = 0; i != MAXCONTROLLERS; i++)

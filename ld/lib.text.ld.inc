@@ -20,6 +20,9 @@
       build/OUTCODE/src/getra.o (.text);
       build/OUTCODE/src/ramrom.o (.text);
       build/OUTCODE/src/boss.o (.text);
+#ifdef REPLAY_RECORD
+      build/OUTCODE/src/replay.o (.text);
+#endif
       build/OUTCODE/src/music.o (.text);
       build/OUTCODE/src/snd.o (.text);
       build/OUTCODE/src/memp.o (.text);

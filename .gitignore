@@ -110,3 +110,6 @@ assets/obseg/em/data/under.seg
 
 scripts/local/
 scripts/make/local/
+
+.cache
+*.pyc

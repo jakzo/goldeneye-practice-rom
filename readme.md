@@ -1,5 +1,30 @@
 # Goldeneye 007
 
+## Record a replay
+
+Build the US recording ROM and run it in ares:
+
+```bash
+# Copy base rom into baserom.u.z64
+docker run --rm -v "$(pwd):/home/dev" goldeneye ./scripts/extract_baserom.u.sh
+docker run --rm -v "$(pwd):/home/dev" goldeneye make -j8 REPLAY_RECORD=1 COMPARE=0 VERSION=US
+
+ares --no-file-prompt build/u/ge007.u.z64
+# OR
+sc64deployer upload build/u/ge007.u.z64 && sc64deployer debug
+```
+
+Every non-title level starts a new recording. Play the attempt, then return to
+the title screen so the recording is finalized before quitting ares. The replay
+is written to `build/u/ge007.u.ram`; copy that file before starting another
+level, which replaces the previous recording. The JP and EU builds work the
+same way with `VERSION=JP`/`build/j/ge007.j.ram` and
+`VERSION=EU`/`build/e/ge007.e.ram`.
+
+On first startup, folder 1 gets every level, difficulty, cheat, and multiplayer
+unlock. Its initial controls are 1.2, upright aim, look-ahead off, and the
+remaining default options. Later settings changes are saved in the `.ram` file.
+
 [![NTSC-Status][NTCS-badge]][NTCS-link]
 [![JP-Status][JP-badge]][JP-link]
 [![PAL-Status][PAL-badge]][PAL-link]
