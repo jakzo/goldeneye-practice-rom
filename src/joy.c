@@ -428,6 +428,31 @@ void joyConsumeSamplesWrapper(void)
     }
 }
 
+#ifdef PRACTICE_ROM
+void joyConsumeRegularSamples(void)
+{
+    joyConsumeSamples(&g_ContData[CONTDATA_REGULAR]);
+    joyUpdateSimulatedButtons();
+}
+
+void joyConsumePlaybackSamples(void)
+{
+    if (g_ContPlaybackFunc)
+    {
+        g_ContData[CONTDATA_PLAYBACK].nextlast = g_ContPlaybackFunc(g_ContData[CONTDATA_PLAYBACK].samples, g_ContData[CONTDATA_PLAYBACK].curlast);
+        joyConsumeSamples(&g_ContData[CONTDATA_PLAYBACK]);
+    }
+}
+
+void joyRecordSamples(void)
+{
+    if (g_ContRecordFunc)
+    {
+        g_ContRecordFunc(g_ContData[CONTDATA_REGULAR].samples, g_ContData[CONTDATA_REGULAR].curstart, g_ContData[CONTDATA_REGULAR].curlast);
+    }
+}
+#endif
+
 #ifdef NONMATCHING
 // Stack + Regalloc
 // https://decomp.me/scratch/IOID3 97.27%

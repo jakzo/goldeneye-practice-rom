@@ -24,6 +24,7 @@ ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
 MINIMUM_TEST_TIMEOUT_SECONDS = {
     "REPLAY_DAM": 300,
+    "REPLAY_FRIGATE": 360,
 }
 SRAM_SIZE_BYTES = 128 * 1024
 REPLAY_HEADER_OFFSET = 0x600
@@ -36,6 +37,7 @@ PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 REPLAY_FIXTURES = {
     "REPLAY_DAM": ROOT / "tests/replays/dam.ram",
     "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
+    "REPLAY_FRIGATE": ROOT / "tests/replays/frigate_00.ram",
     "REPLAY_GRENADE_CAM": ROOT / "tests/replays/runway_agent_grenade.ram",
     "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
     "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
@@ -68,6 +70,7 @@ TEST_COLOR_CODES = (
 )
 TEST_COLORS = {}
 COLOR_OUTPUT = False
+PREFIX_OUTPUT = True
 
 
 @dataclass
@@ -181,7 +184,9 @@ def default_test_job_count():
 
 
 def configure_test_colors(test_cases, color_mode):
-    global COLOR_OUTPUT, TEST_COLORS
+    global COLOR_OUTPUT, PREFIX_OUTPUT, TEST_COLORS
+
+    PREFIX_OUTPUT = len(test_cases) > 1
 
     if color_mode == "always":
         COLOR_OUTPUT = True
@@ -276,6 +281,11 @@ def build_tests(build_mode, version):
 
 
 def print_test_line(test_case, line, *, file=sys.stdout):
+    if not PREFIX_OUTPUT:
+        with PRINT_LOCK:
+            print(line, file=file, flush=True)
+        return
+
     prefix = f"[{test_case}]"
     if COLOR_OUTPUT:
         color = TEST_COLORS[test_case]

@@ -45,7 +45,6 @@
 #include "os_extension.h"
 #include "unk_0B3200.h"
 #include "practice/practice_timescale.h"
-#include "practice/practice_hotkeys.h"
 #include "practice/practice_dialog.h"
 #include "practice/practice_splits.h"
 #include "practice/practice_ui.h"
@@ -11742,7 +11741,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
 #endif
 
 #if PRACTICE_ROM
-    if (!practice_check_hotkeys()) {
+    if (!g_IsTimePaused) {
         practice_tests_tick();
 #endif
 

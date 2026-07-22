@@ -1,4 +1,5 @@
 #include "practice_tests.h"
+#include "assets/obseg/text/LmiscE.h"
 #include "bg.h"
 #include "bondview.h"
 #include "boss.h"
@@ -8,8 +9,8 @@
 #include "chrobjhandler.h"
 #include "emu_log.h"
 #include "gun.h"
-#include "initanitable.h"
 #include "init.h"
+#include "initanitable.h"
 #include "joy.h"
 #include "lvl.h"
 #include "lvl_text.h"
@@ -30,13 +31,12 @@
 #include "practice_timescale.h"
 #include "quaternion.h"
 #include "random.h"
-#include "str.h"
-#include "tlb_random.h"
 #include "state/practice_states.h"
 #include "state/practice_states_utils.h"
-#include "watch.h"
+#include "str.h"
+#include "tlb_random.h"
 #include "viewport.h"
-#include "assets/obseg/text/LmiscE.h"
+#include "watch.h"
 #include <bondgame.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,8 +62,8 @@ extern long long __ll_mod(long long dividend, long long divisor);
 extern long long __f_to_ll(float value);
 extern double __ll_to_d(long long value);
 extern void __ull_divremi(unsigned long long *quotient,
-                         unsigned long long *remainder,
-                         unsigned long long dividend, unsigned short divisor);
+                          unsigned long long *remainder,
+                          unsigned long long dividend, unsigned short divisor);
 
 // --- start test cases ---
 #define STATE_DOOR 1
@@ -93,6 +93,7 @@ extern void __ull_divremi(unsigned long long *quotient,
 #define MIGRATION_PHASE6 25
 #define REPLAY_DAM 26
 #define REPLAY_GRENADE_CAM 27
+#define REPLAY_FRIGATE 28
 // --- end test cases ---
 
 // Left out of test cases since it cannot assert
@@ -129,16 +130,14 @@ void practice_tests_set_case(s32 test_case) {
   g_ReplayTestHotkeyFrame = 0;
   g_LevelRestartTestPhase = 0;
   g_LevelRestartTimer = 0;
-  if (test_case == REPLAY_GRENADE_CAM) {
-    practice.grenade_cam = TRUE;
-  }
+
+  practice.grenade_cam = test_case == REPLAY_GRENADE_CAM;
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
   } else if (test_case == REPLAY_DAM || test_case == REPLAY_RUNWAY ||
-             test_case == REPLAY_GRENADE_CAM ||
-             test_case == REPLAY_ARCHIVES ||
-             test_case == REPLAY_ARCHIVES_04X ||
+             test_case == REPLAY_FRIGATE || test_case == REPLAY_GRENADE_CAM ||
+             test_case == REPLAY_ARCHIVES || test_case == REPLAY_ARCHIVES_04X ||
              test_case == REPLAY_ARCHIVES_HOTKEYS) {
     set_time_scale(test_case == REPLAY_ARCHIVES_04X ? 0.4f : 1.0f);
     practice_replay_request_playback();
@@ -181,6 +180,8 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_TINTED_GLASS_PORTAL:
   case STATE_CONTROL:
     return LEVELID_CONTROL;
+  case REPLAY_FRIGATE:
+    return LEVELID_FRIGATE;
   case TEST_MOVE_SPEED:
   case MIGRATION_MATH:
   case MIGRATION_PHASE6:
@@ -192,9 +193,8 @@ s32 practice_tests_boot_level(s32 test_case) {
 
 s32 practice_tests_should_disable_intro(s32 test_case) {
   return test_case != REPLAY_DAM && test_case != REPLAY_RUNWAY &&
-         test_case != REPLAY_GRENADE_CAM &&
-         test_case != REPLAY_ARCHIVES &&
-         test_case != REPLAY_ARCHIVES_04X &&
+         test_case != REPLAY_FRIGATE && test_case != REPLAY_GRENADE_CAM &&
+         test_case != REPLAY_ARCHIVES && test_case != REPLAY_ARCHIVES_04X &&
          test_case != REPLAY_ARCHIVES_HOTKEYS;
 }
 
@@ -287,8 +287,8 @@ void practice_tests_tick() {
 
   switch (g_practice_test_case) {
   case MIGRATION_PHASE4: {
-    static const u32 expected_random[] = {
-        0x780b1177, 0x0d12f86a, 0xa90fd6a5, 0xa9edb1cc};
+    static const u32 expected_random[] = {0x780b1177, 0x0d12f86a, 0xa90fd6a5,
+                                          0xa9edb1cc};
     char formatted[64];
     char *end;
     u8 stack[32];
@@ -308,8 +308,8 @@ void practice_tests_tick() {
     for (i = 0; i < ARRAYCOUNT(expected_random); i++) {
       u32 actual = randomGetNext();
       if (actual != expected_random[i]) {
-        emu_log("PHASE4_RNG_FAILED index=%d got=%08x expected=%08x", i,
-                actual, expected_random[i]);
+        emu_log("PHASE4_RNG_FAILED index=%d got=%08x expected=%08x", i, actual,
+                expected_random[i]);
         passed = FALSE;
       }
     }
@@ -487,15 +487,15 @@ void practice_tests_tick() {
       break;
     }
 
-#define CHECK_FLOAT_BITS(expression, expected)                                  \
-    do {                                                                        \
-      value.f = (expression);                                                   \
-      if (value.u != (expected)) {                                              \
-        emu_log("MATH_BITS_FAILED %s got=%08x expected=%08x", #expression,    \
-                value.u, (u32)(expected));                                      \
-        passed = FALSE;                                                         \
-      }                                                                         \
-    } while (0)
+#define CHECK_FLOAT_BITS(expression, expected)                                 \
+  do {                                                                         \
+    value.f = (expression);                                                    \
+    if (value.u != (expected)) {                                               \
+      emu_log("MATH_BITS_FAILED %s got=%08x expected=%08x", #expression,       \
+              value.u, (u32)(expected));                                       \
+      passed = FALSE;                                                          \
+    }                                                                          \
+  } while (0)
 
     CHECK_FLOAT_BITS(ceilFloat(-1.25f), 0xbf800000);
     CHECK_FLOAT_BITS(ceilFloat(-0.0f), 0x00000000);
@@ -547,9 +547,8 @@ void practice_tests_tick() {
 
   case MIGRATION_PHASE6: {
     static const u32 expected_identity[16] = {
-        0x00010000, 0x00000000, 0x00000001, 0x00000000,
-        0x00000000, 0x00010000, 0x00000000, 0x00000001,
-        0x00000000, 0x00000000, 0x00000000, 0x00000000,
+        0x00010000, 0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00010000,
+        0x00000000, 0x00000001, 0x00000000, 0x00000000, 0x00000000, 0x00000000,
         0x00000000, 0x00000000, 0x00000000, 0x00000000,
     };
     Mtx identity;
@@ -576,9 +575,8 @@ void practice_tests_tick() {
     __ull_divremi(&quotient, &remainder, 0x0000000100000005ULL, 10);
     signed_division = lldiv(-9, 2);
     if (quotient != 0x000000001999999aULL || remainder != 1 ||
-        __ll_div(-9, 2) != -4 || __ll_rem(-9, 2) != 1 ||
-        __ll_mod(-9, 2) != 1 || __f_to_ll(-1.75f) != -1 ||
-        __ll_to_d(-123456789LL) != -123456789.0 ||
+        __ll_div(-9, 2) != -4 || __ll_rem(-9, 2) != 1 || __ll_mod(-9, 2) != 1 ||
+        __f_to_ll(-1.75f) != -1 || __ll_to_d(-123456789LL) != -123456789.0 ||
         signed_division.quot != -4 || signed_division.rem != -1) {
       emu_log("PHASE6_64BIT_HELPERS_FAILED");
       passed = FALSE;
@@ -590,20 +588,14 @@ void practice_tests_tick() {
 
   case LEVEL_RESTART_HOTKEY: {
     if (g_LevelRestartTestPhase == 0 && after_frames(30)) {
-      bool handled;
-
       emu_log("TRIGGER_LEVEL_RESTART_HOTKEY");
       g_LevelRestartTimer = g_GlobalTimer;
       g_LevelRestartTestPhase = 1;
       g_SimulatedButtons = L_TRIG;
       g_SimulatedButtonsPressed = START_BUTTON;
-      handled = practice_check_hotkeys();
+      practice_check_hotkeys();
       g_SimulatedButtons = 0;
       g_SimulatedButtonsPressed = 0;
-
-      if (!handled) {
-        emu_log("TEST_FAILED hotkey was not handled");
-      }
     } else if (g_LevelRestartTestPhase == 1 &&
                g_GlobalTimer < g_LevelRestartTimer) {
       emu_log("LEVEL_RESTARTED timer=%d->%d", g_LevelRestartTimer,
@@ -1800,6 +1792,17 @@ void practice_tests_frame() {
   const s32 LOG_FRAMES = 30;
   const s32 NUM_ITERATIONS = 10;
 
+  // TODO: DELETE ME
+  u16 trigger = hotkey_trigger();
+  if (g_ReplayTestHotkeyFrame++ & 1) {
+    // g_SimulatedButtons |= trigger;
+  } else {
+    g_SimulatedButtons &= ~trigger;
+  }
+  if (g_ReplayTestHotkeyFrame == 1) {
+    // set_time_scale(0.5f);
+  }
+
   if (g_practice_test_case == REPLAY ||
       g_practice_test_case == REPLAY_ARCHIVES_HOTKEYS) {
     u16 trigger = hotkey_trigger();
@@ -1829,6 +1832,7 @@ void practice_tests_frame() {
 
   if (g_practice_test_case == REPLAY_DAM ||
       g_practice_test_case == REPLAY_RUNWAY ||
+      g_practice_test_case == REPLAY_FRIGATE ||
       g_practice_test_case == REPLAY_GRENADE_CAM ||
       g_practice_test_case == REPLAY_ARCHIVES ||
       g_practice_test_case == REPLAY_ARCHIVES_04X ||

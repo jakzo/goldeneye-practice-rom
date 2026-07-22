@@ -23,6 +23,11 @@ u8 joyGetConnectedControllers(void);
 void joySetPlaybackFunc(contplaybackfunc func, s32 controllercount);
 void joySetRecordFunc(contrecordfunc func);
 void joyConsumeSamplesWrapper(void);
+#ifdef PRACTICE_ROM
+void joyConsumeRegularSamples(void);
+void joyConsumePlaybackSamples(void);
+void joyRecordSamples(void);
+#endif
 void joyPoll(void);
 s8 joyGetStickX(s8 contpadnum);
 s8 joy7000C174(s8 contpadnum);

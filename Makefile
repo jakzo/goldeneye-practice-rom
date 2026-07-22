@@ -421,7 +421,7 @@ compile-cohort:
 $(BUILD_DIR)/src/%.o: src/%.c
 	@mkdir -p $(@D)
 	@if grep -q 'GLOBAL_ASM(' $<; then \
-		$(ASM_PREPROC) $(call original-asm-processor-optimization,$<) $(call original-asm-processor-flags,$<) $< | $(call original-cc,$<) -c $(call original-flags,$<) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(call original-optimization,$<); \
+		$(ASM_PREPROC) $(call original-asm-processor-optimization,$<) $(call original-asm-processor-flags,$<) $< | $(call original-cc,$<) -c $(call original-flags,$<) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(call original-optimization,$<) && \
 		$(ASM_PREPROC) $(call original-asm-processor-optimization,$<) $(call original-asm-processor-flags,$<) $< --post-process $@ --assembler "$(AS) $(ASFLAGS)" --asm-prelude $(ASM_PROCESSOR_DIR)/prelude.inc; \
 	elif [ "$$(basename $<)" = "chraidata.c" ]; then \
 		$(ConvertAIPRINT) $< | $(call original-cc,$<) -c $(call original-flags,$<) $(ASM_PROCESSOR_DIR)/include-stdin.c -o $@ $(call original-optimization,$<); \

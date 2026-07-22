@@ -602,9 +602,7 @@ s32 practice_replay_override_delta(s32 delta_frames) {
   return g_PlaybackFrame.delta_frames;
 }
 
-s32 practice_replay_is_paused_frame(void) {
-  return g_ReplayIsPlaying && !g_PlaybackAdvanceFrame;
-}
+u32 frame_counter = 0;
 
 void practice_replay_on_frame_start(void) {
   if (!g_ReplayIsPlaying || !g_PlaybackFrameLoaded)
@@ -617,15 +615,16 @@ void practice_replay_on_frame_start(void) {
     if (!g_ReplayDivergenceLogged) {
       char timestamp[16];
       format_timestamp(g_ReplayTimestamp, timestamp);
+      practiceLogDebug(
+          "Divergence: frame %d rng %08x%08x/%08x%08x chr %08x%08x/%08x%08x",
+          frame_counter, (u32)g_randomSeed,
+          (u32)(g_PlaybackFrame.random_seed >> 32),
+          (u32)g_PlaybackFrame.random_seed, (u32)(g_chrObjRandomSeed >> 32),
+          (u32)g_chrObjRandomSeed,
+          (u32)(g_PlaybackFrame.chr_obj_random_seed >> 32),
+          (u32)g_PlaybackFrame.chr_obj_random_seed);
       practiceLogError("Replay diverged at %s", timestamp,
                        (u32)(g_randomSeed >> 32));
-      practiceLogDebug("rng %08x%08x/%08x%08x chr %08x%08x/%08x%08x",
-                       (u32)g_randomSeed,
-                       (u32)(g_PlaybackFrame.random_seed >> 32),
-                       (u32)g_PlaybackFrame.random_seed,
-                       (u32)(g_chrObjRandomSeed >> 32), (u32)g_chrObjRandomSeed,
-                       (u32)(g_PlaybackFrame.chr_obj_random_seed >> 32),
-                       (u32)g_PlaybackFrame.chr_obj_random_seed);
       g_ReplayDivergenceLogged = TRUE;
     }
   }
@@ -703,7 +702,7 @@ static s32 practice_replay_playback_callback(struct contsample *samples,
     return last_idx;
   }
 
-  if (!g_PlaybackAdvanceFrame)
+  if (g_IsTimePaused || !g_PlaybackAdvanceFrame)
     return last_idx;
 
   if (!g_ReplayIsPlaying || !g_PlaybackFrameLoaded)

@@ -1,12 +1,9 @@
 --target=mips-linux-gnu
+-mips3
 -mabi=32
 -std=gnu89
 -include
-.vscode/clangd_pre_helper.h
--include
 src/bondtypes.h
--include
-.vscode/clangd_post_helper.h
 -I.
 -Iinclude
 -Iinclude/ultra64
@@ -24,7 +21,12 @@ src/bondtypes.h
 -DLEFTOVERSPECTRUM
 -DBUGFIX_R0
 -DBYTEMATCH
+-DENABLE_USB
 -D_LANGUAGE_C
 -DTARGET_N64
 -DPRACTICE_ROM
 -fms-extensions
+-ffreestanding
+-fno-builtin
+-funsigned-char
+-fno-short-enums

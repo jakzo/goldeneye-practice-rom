@@ -1010,8 +1010,14 @@ Gfx* lvlRender(Gfx* DL)
             DL = viSetupScreensForNumPlayers(DL);
             DL = skyRender(DL);
             bgRoomVisibilityRelated();
+#if PRACTICE_ROM
+            if (speedgraphframes != 0)
+#endif
             determing_type_of_object_and_detection();
             chraiUpdateOnscreenPropCount();
+#if PRACTICE_ROM
+            if (speedgraphframes != 0) {
+#endif
             chrpropUpdateAutoaimTarget();
             chraiCheckUseHeldItems();
 
@@ -1022,7 +1028,14 @@ Gfx* lvlRender(Gfx* DL)
             }
 
             sub_GAME_7F03D0D4();
+#if PRACTICE_ROM
+            }
+#endif
             DL = bgLevelRender(DL);
+#if PRACTICE_ROM
+            // TODO: Remove once render is idempotent
+            if (speedgraphframes == 0) continue;
+#endif
 
             if (get_debug_portal_flag())
             {
@@ -1088,6 +1101,9 @@ Gfx* lvlRender(Gfx* DL)
             DL = explosionRenderFlyingParticles(DL);
 
             if (
+#if PRACTICE_ROM
+                g_ClockTimer != 0 &&
+#endif
 
 #if defined(BUGFIX_R1)
                 cheatIsActive(CHEAT_INFINITE_AMMO) != 0
@@ -1116,11 +1132,14 @@ Gfx* lvlRender(Gfx* DL)
         }
 
 #ifdef PRACTICE_ROM
-        practice_external_camera_begin_frame();
-        practice_dam_guard_cam_tick();
-        practice_frigate_hostage_cam_tick();
-        practice_grenade_cam_tick();
-        DL = practice_external_camera_render(DL);
+        if (speedgraphframes != 0)
+        {
+            practice_external_camera_begin_frame();
+            practice_dam_guard_cam_tick();
+            practice_frigate_hostage_cam_tick();
+            practice_grenade_cam_tick();
+            DL = practice_external_camera_render(DL);
+        }
         DL = practice_ui_render(DL);
 #endif
 
@@ -4637,4 +4656,3 @@ f32 lvlGetPowerOnTimeSec(void)
 {
     return g_PowerOnTimeSec;
 }
-

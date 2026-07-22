@@ -81,7 +81,6 @@ u32 practice_replay_get_timestamp(void);
 u32 practice_replay_get_duration(void);
 
 s32 practice_replay_override_delta(s32 delta_frames);
-s32 practice_replay_is_paused_frame(void);
 void practice_replay_on_frame_start(void);
 
 #endif /* PRACTICE_REPLAY_H */

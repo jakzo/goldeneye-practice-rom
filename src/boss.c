@@ -328,9 +328,6 @@ void bossMainloop(void)
     s32 freeGfx;
     s32 mainTickElapsed;
     s32 rspReplyMsg;
-#ifdef PRACTICE_ROM
-    s32 practiceHotkeysChecked;
-#endif
 
     u32 unused_stackpadding_[56];
 
@@ -491,6 +488,12 @@ void bossMainloop(void)
                     {
                         if (g_MainStageNum < 0 && pendingGfx < 2U)
                         {
+#ifdef PRACTICE_ROM
+                            joyConsumeRegularSamples();
+                            if (g_StageNum != LEVELID_TITLE)
+                                practice_check_hotkeys();
+#endif
+
                             if (get_is_ramrom_flag())
                             {
                                 iterate_ramrom_entries_handle_camera_out();
@@ -503,27 +506,13 @@ void bossMainloop(void)
                             speedgraphRenderGraph();
                             speedgraphMarkerCommit();
                             speedgraphMarkerHandler(0x20000);
-                            joyConsumeSamplesWrapper();
-                            permit_stderr(0);
-
 #ifdef PRACTICE_ROM
-                            practiceHotkeysChecked = FALSE;
-
-                            // Automatic replay and time-scale waits hold the
-                            // completed image. A deliberate hotkey pause keeps
-                            // rendering, but never enters the simulation.
-                            if (speedgraphframes == 0)
-                            {
-                                if (g_StageNum != LEVELID_TITLE)
-                                {
-                                    practice_check_hotkeys();
-                                    practiceHotkeysChecked = TRUE;
-                                }
-
-                                if (!g_IsTimePaused)
-                                    break;
-                            }
+                            joyConsumePlaybackSamples();
+                            joyRecordSamples();
+#else
+                            joyConsumeSamplesWrapper();
 #endif
+                            permit_stderr(0);
 
                             gdl = firstGdl = dynGetMasterDisplayList();
 #ifdef DEBUGMENU
@@ -558,9 +547,6 @@ void bossMainloop(void)
                                 g_ClockTimer = 0;
                                 g_GlobalTimerDelta = 0.0f;
 
-                                if (g_StageNum != LEVELID_TITLE &&
-                                    !practiceHotkeysChecked)
-                                    practice_check_hotkeys();
                             }
                             else
                             {

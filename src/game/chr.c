@@ -13,20 +13,41 @@
 #include "chrlv.h"
 #include "chrobjdata.h"
 #include "chrobjhandler.h"
+#include "debugmenu_handler.h"
+#include "dyn.h"
 #include "explosions.h"
 #include "file.h"
 #include "gun.h"
 #include "initanitable.h"
+#include "joy.h"
 #include "lvl.h"
 #include "lvl_text.h"
+#include "matrixmath.h"
 #include "objecthandler.h"
 #include "player.h"
+#include "player_2.h"
 #include "stan.h"
 
 // forward declarations
 
 void chrUpdateAimProperties( ChrRecord *arg0);
 void chrPositionRelated7F020E40( ChrRecord *chr, s32 arg1);
+
+#ifdef PRACTICE_ROM
+extern u32 D_80036090;
+extern u32 dword_CODE_bss_80069B60;
+extern struct headHat headHat_array_8003E464[];
+extern s32 speedgraphframes;
+
+void sub_GAME_7F06B29C(void *arg0);
+void *sub_GAME_7F06BB28(void *arg0);
+void update_color_shading(rgba_u8 *dest, rgba_u8 *src);
+f32 sub_GAME_7F06C768(Model *model);
+HATTYPE get_hat_model(PropRecord *prop);
+s32 objDrop(PropRecord *prop);
+void modelSetDistanceScale(f32 scale);
+void sub_GAME_7F02083C(void);
+#endif
 
 // end forward declarations
 
@@ -91,6 +112,49 @@ s32 g_NumChrSlots = 0;
 s32 D_8002CCAC = 0;
 s32 D_8002CCB0 = 0;
 s32 D_8002CCB4 = 0;
+
+#if PRACTICE_ROM
+/* These constants normally live in the GLOBAL_ASM blocks below. */
+#ifdef VERSION_EU
+const f32 D_80051D30 = 1.0471976f;
+const f32 D_80051D34 = -0.87266463f;
+const f32 D_80051D38 = 0.87266463f;
+const f32 D_80051D3C = 1.0471976f;
+const f32 D_80051D40 = -0.87266463f;
+const f32 D_80051D44 = 6.2831855f;
+const f32 D_80051D48 = 6.2831855f;
+const f32 D_80051D4C = 6.2831855f;
+const f32 D_80051D50 = 6.2831855f;
+const f32 D_80051D54 = 6.2831855f;
+const f32 D_80051D58 = 0.02f;
+const f32 D_80051D5C = 0.02f;
+const f32 D_80051D60 = 0.02f;
+const f32 D_80051D64 = 0.02f;
+const f32 D_80051D68 = 0.02f;
+const f32 D_80051D6C = 0.02f;
+const f32 D_80051D70 = 0.995f;
+const f32 D_80051D74 = 1.005f;
+const f32 D_80051D78 = 0.995f;
+const f32 D_80051D7C = 1.005f;
+const f32 D_80051D80 = 0.995f;
+const f32 D_80051D84 = 1.005f;
+const f32 D_80051D88 = 21.3f;
+#else
+extern f32 D_80051D58;
+extern f32 D_80051D5C;
+extern f32 D_80051D60;
+extern f32 D_80051D64;
+extern f32 D_80051D68;
+extern f32 D_80051D6C;
+extern f32 D_80051D70;
+extern f32 D_80051D74;
+extern f32 D_80051D78;
+extern f32 D_80051D7C;
+extern f32 D_80051D80;
+extern f32 D_80051D84;
+extern f32 D_80051D88;
+#endif
+#endif
 
  rgba_u8 gBloodColour = { 0x5a, 0, 0, 0};
 
@@ -2613,19 +2677,19 @@ PropRecord *init_GUARDdata_with_set_values(PropRecord *arg0, Model *arg1, struct
             break;
         }
     }
-    
+
     arg0->type = PROP_TYPE_CHR;
     arg0->chr = var_s0;
     arg0->pos.f[0] = arg2->f[0];
     arg0->pos.f[1] = arg2->f[1];
     arg0->pos.f[2] = arg2->f[2];
     arg0->stan = arg4;
-    
+
     sub_GAME_7F06FF5C(arg1, (s32) sub_GAME_7F01FC10);
-    
+
     arg1->unk00 = 0xA;
     arg1->chr = var_s0;
-    
+
     setsuboffset(arg1, arg2);
     setsubroty(arg1, arg3);
 
@@ -2634,7 +2698,7 @@ PropRecord *init_GUARDdata_with_set_values(PropRecord *arg0, Model *arg1, struct
     #else
     modelSetAnimPlaySpeed(arg1, animation_rate, 0.0f);
     #endif
-    
+
     var_s0->chrnum = (s16) player1_guardID;
     player1_guardID += 1;
     var_s0->headnum = 0;
@@ -2658,10 +2722,10 @@ PropRecord *init_GUARDdata_with_set_values(PropRecord *arg0, Model *arg1, struct
     var_s0->damage = 0.0f;
     var_s0->visionrange = 250.0f;
     var_s0->hearingscale = 1.0f;
-    
+
     var_s0->maxdamage = get_007_health_mod() * 4.0f;
     set_color_shading_from_tile(arg0, &var_s0->nextcol);
-    
+
     var_s0->shadecol.rgba[0] = var_s0->nextcol.rgba[0];
     var_s0->shadecol.rgba[1] = var_s0->nextcol.rgba[1];
     var_s0->shadecol.rgba[2] = var_s0->nextcol.rgba[2];
@@ -2721,10 +2785,10 @@ PropRecord *init_GUARDdata_with_set_values(PropRecord *arg0, Model *arg1, struct
     var_s0->handle_positiondata_hat = NULL;
     var_s0->chrwidth = 20.0f;
     var_s0->chrheight = 185.0f;
-    
+
     sub_GAME_7F01FC10(arg1, &arg0->pos, &arg0->pos, &var_s0->ground);
     chrPositionRelated7F020D94(var_s0);
-    
+
     return arg0;
 }
 
@@ -4038,10 +4102,599 @@ void chrPositionRelated7F020E40(ChrRecord *chr, s32 arg1)
 }
 
 
+#if PRACTICE_ROM
+// https://decomp.me/scratch/tLyZG
+s32 chrTickBeams(PropRecord *prop)
+{
+    ModelRenderData renderdata;
+    ChrRecord *chr;
+    Model *model;
+    s32 headSwitchVisible;
+    s32 headVisible;
+    s32 tickamount;
+    u8 rightWeaponOnscreen;
+    u8 leftWeaponOnscreen;
+
+    renderdata = D_8002CC6C;
+    chr = prop->chr;
+    model = chr->model;
+    headVisible = 1;
+    tickamount = g_ClockTimer;
+
+    if ((!(chr->chrflags & CHRFLAG_HIDDEN)) || (chr->chrflags & CHRFLAG_00040000))
+    {
+        if (D_8002C904)
+        {
+            if (((ModelAnimation *)animation_table_ptrs1[g_AnimationTablePointerCountRelated]) != ((ModelAnimation *)1))
+            {
+                if (objecthandlerGetModelAnim(model) != ((ModelAnimation *)animation_table_ptrs1[g_AnimationTablePointerCountRelated]))
+                {
+#if PRACTICE_ROM
+                    if (speedgraphframes != 0)
+#endif
+                    modelSetAnimation(model, (ModelAnimation *)animation_table_ptrs1[g_AnimationTablePointerCountRelated], 0, 0.0f, 0.5f, 0.0f);
+                }
+            }
+        }
+        else
+        {
+#if PRACTICE_ROM
+            if (speedgraphframes != 0)
+#endif
+            chrlvActionTick(chr);
+
+            if (chr->model == NULL)
+            {
+                return 1;
+            }
+        }
+
+        if (D_8002C90C)
+        {
+            tickamount = 0;
+
+            if (D_8002C910)
+            {
+                tickamount = 1;
+            }
+        }
+    }
+
+    if (chr->hidden & CHRHIDDEN_REMOVE)
+    {
+#if PRACTICE_ROM
+        if (speedgraphframes != 0)
+#endif
+        disable_sounds_attached_to_player_then_something(prop);
+        return 1;
+    }
+
+    if (chr->weapons_held[GUNRIGHT] != NULL)
+    {
+        if (chr->weapons_held[GUNRIGHT]->obj->runtime_bitflags & 0x04)
+        {
+#if PRACTICE_ROM
+            if (speedgraphframes != 0)
+#endif
+            objFreePermanently(chr->weapons_held[GUNRIGHT]->obj, 1);
+        }
+    }
+
+    if (chr->weapons_held[GUNLEFT] != NULL)
+    {
+        if (chr->weapons_held[GUNLEFT]->obj->runtime_bitflags & 0x04)
+        {
+#if PRACTICE_ROM
+            if (speedgraphframes != 0)
+#endif
+            objFreePermanently(chr->weapons_held[GUNLEFT]->obj, 1);
+        }
+    }
+
+    if (chr->chrflags & CHRFLAG_HIDDEN)
+    {
+        headSwitchVisible = 0;
+    }
+    else
+    {
+        if (((prop->type == 6) && (g_playerPointers[getPlayerPointerIndex(prop)]->unknown == 1)) || (chr->chrflags & CHRFLAG_CULL_USING_HITBOX))
+        {
+            headSwitchVisible = 1;
+
+            if (((chr->actiontype == ACT_ANIM) && (chr->act_anim.unk02c == 0)) && (chr->act_anim.noTranslate != 0))
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                modelTickAnimQuarterSpeed(model, tickamount, 0);
+            }
+            else
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                chrPositionRelated7F020E40(chr, tickamount);
+            }
+
+            goto after_position_update;
+        }
+
+        if ((chr->actiontype == ACT_PATROL) || (chr->actiontype == ACT_GOPOS))
+        {
+            if (((chr->actiontype == ACT_PATROL) && (chr->act_patrol.waydata.mode == 6)) || ((chr->actiontype == ACT_GOPOS) && (chr->act_gopos.waydata.mode == 6)))
+            {
+                headSwitchVisible = sub_GAME_7F054D6C(prop, &prop->pos, getinstsize(model), 1);
+
+                if (headSwitchVisible)
+                {
+#if PRACTICE_ROM
+                    if (speedgraphframes != 0)
+                    {
+#endif
+                    getsuboffset(model, &chr->prevpos);
+                    subcalcpos(model);
+                    set_color_shading_from_tile(prop, &chr->nextcol);
+                    getsuboffset(model, &prop->pos);
+                    chrPositionRelated7F020D94(chr);
+#if PRACTICE_ROM
+                    }
+#endif
+                }
+            }
+            else
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                chrPositionRelated7F020E40(chr, tickamount);
+                headSwitchVisible = sub_GAME_7F054D6C(prop, &prop->pos, getinstsize(model), 1);
+
+                if (headSwitchVisible)
+                {
+                    if (chr->actiontype == ACT_PATROL)
+                    {
+#if PRACTICE_ROM
+                        if (speedgraphframes != 0)
+#endif
+                        chr->act_patrol.lastvisible60 = g_GlobalTimer;
+                    }
+                    else if (chr->actiontype == ACT_GOPOS)
+                    {
+#if PRACTICE_ROM
+                        if (speedgraphframes != 0)
+#endif
+                        chr->act_gopos.unk9c = g_GlobalTimer;
+                    }
+                }
+            }
+        }
+        else if ((chr->actiontype == ACT_ANIM) && (chr->act_anim.unk02c == 0))
+        {
+            headSwitchVisible = sub_GAME_7F054D6C(prop, &prop->pos, getinstsize(model), 1);
+
+            if (headSwitchVisible && (chr->act_anim.noTranslate == 0))
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                chrPositionRelated7F020E40(chr, tickamount);
+            }
+            else
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                modelTickAnimQuarterSpeed(model, tickamount, 0);
+            }
+        }
+        else if (chr->actiontype == ACT_STAND)
+        {
+            headSwitchVisible = sub_GAME_7F054D6C(prop, &prop->pos, getinstsize(model), 1);
+
+            if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                chrPositionRelated7F020E40(chr, tickamount);
+            }
+            else if (model->anim2 != NULL)
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                modelTickAnimQuarterSpeed(model, tickamount, 0);
+            }
+        }
+        else
+        {
+            if (chr->chrflags & CHRFLAG_IGNORE_ANIM_TRANSLATION)
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                modelTickAnimQuarterSpeed(model, tickamount, 0);
+            }
+            else
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                chrPositionRelated7F020E40(chr, tickamount);
+            }
+
+            headSwitchVisible = sub_GAME_7F054D6C(prop, &prop->pos, getinstsize(model), 1);
+        }
+    }
+
+after_position_update:
+    if (((chr->actiontype != ACT_STAND) || (model->anim2 != NULL)) || (prop->type == 6))
+    {
+#if PRACTICE_ROM
+        if (speedgraphframes != 0)
+#endif
+        chr->hidden |= CHRHIDDEN_BACKGROUND_AI;
+    }
+
+#if PRACTICE_ROM
+    if (speedgraphframes != 0)
+#endif
+    chrUpdateAimProperties(chr);
+
+    if (chr->field_20 != NULL)
+    {
+        sub_GAME_7F06B248(chr->field_20);
+        chr->field_20 = NULL;
+    }
+
+    if (headSwitchVisible)
+    {
+        if (get_debug_chrnum_flag()) {}
+
+#if PRACTICE_ROM
+        if (speedgraphframes != 0)
+#endif
+        prop->flags |= PROPFLAG_ONSCREEN;
+#if PRACTICE_ROM
+        if (speedgraphframes != 0)
+#endif
+        chr->chrflags |= CHRFLAG_HAS_BEEN_ON_SCREEN;
+
+#ifdef VERSION_US
+        if (cheatIsActive(12))
+        {
+            modelSetDistanceScale(0.3125f);
+        }
+#else
+        if (cheatIsActive(12) && not_in_us_7F0209EC(chr->bodynum, chr->headnum))
+        {
+            modelSetDistanceScale(0.3125f);
+
+            if (chr->chrflags & CHRFLAG_10000000)
+            {
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+                {
+#endif
+                chr->chrflags &= ~CHRFLAG_10000000;
+                modelSetScale(model, model->scale / 0.8f);
+#if PRACTICE_ROM
+                }
+#endif
+            }
+        }
+#endif
+
+#if PRACTICE_ROM
+        if (speedgraphframes != 0)
+#endif
+        D_80036090 = (u32)sub_GAME_7F02083C;
+        dword_CODE_bss_80069B60 = (u32)chr;
+
+        renderdata.unk_matrix = camGetWorldToScreenMtxf();
+        renderdata.mtxlist = dynAllocate(model->obj->numMatrices * (sizeof(Mtxf)));
+
+        if (((ChrRecord *)dword_CODE_bss_80069B60)->flinchcnt >= 0)
+        {
+#if PRACTICE_ROM
+            if (speedgraphframes != 0)
+            {
+#endif
+            ((ChrRecord *)dword_CODE_bss_80069B60)->flinchcnt += g_ClockTimer;
+
+#ifdef VERSION_EU
+            if (((ChrRecord *)dword_CODE_bss_80069B60)->flinchcnt >= 24)
+#else
+            if (((ChrRecord *)dword_CODE_bss_80069B60)->flinchcnt >= 30)
+#endif
+            {
+                ((ChrRecord *)dword_CODE_bss_80069B60)->flinchcnt = -1;
+            }
+#if PRACTICE_ROM
+            }
+#endif
+        }
+
+        subcalcmatrices(&renderdata, model);
+
+        D_80036090 = 0;
+        modelSetDistanceScale(1.0f);
+
+#if PRACTICE_ROM
+        if (speedgraphframes != 0)
+#endif
+        update_color_shading(&chr->shadecol, &chr->nextcol);
+
+        prop->zDepth = sub_GAME_7F06C768(model);
+
+        chr->field_20 = sub_GAME_7F06B120(NULL, model);
+
+        rightWeaponOnscreen = chr->weapons_held[GUNRIGHT] != NULL
+            ? chr->weapons_held[GUNRIGHT]->flags & PROPFLAG_ONSCREEN
+            : 0;
+        leftWeaponOnscreen = chr->weapons_held[GUNLEFT] != NULL
+            ? chr->weapons_held[GUNLEFT]->flags & PROPFLAG_ONSCREEN
+            : 0;
+
+        sub_GAME_7F0523F8(prop, GUNRIGHT, &chr->field_20);
+        sub_GAME_7F0523F8(prop, GUNLEFT, &chr->field_20);
+
+#if PRACTICE_ROM
+        if (speedgraphframes == 0)
+        {
+            if (chr->weapons_held[GUNRIGHT] != NULL)
+            {
+                chr->weapons_held[GUNRIGHT]->flags =
+                    (chr->weapons_held[GUNRIGHT]->flags & ~PROPFLAG_ONSCREEN) |
+                    rightWeaponOnscreen;
+            }
+
+            if (chr->weapons_held[GUNLEFT] != NULL)
+            {
+                chr->weapons_held[GUNLEFT]->flags =
+                    (chr->weapons_held[GUNLEFT]->flags & ~PROPFLAG_ONSCREEN) |
+                    leftWeaponOnscreen;
+            }
+        }
+#endif
+
+        if (chr->handle_positiondata_hat != NULL)
+        {
+            ObjectRecord *hatobj;
+            Model *hatmodel;
+
+            hatobj = chr->handle_positiondata_hat->obj;
+            hatmodel = hatobj->model;
+
+#if PRACTICE_ROM
+            if (speedgraphframes != 0)
+#endif
+            chr->handle_positiondata_hat->flags |= PROPFLAG_ONSCREEN;
+
+            renderdata.unk_matrix = modelFindNodeMtx(model, hatmodel->attachedto_objinst, 0);
+            renderdata.mtxlist = dynAllocate(hatmodel->obj->numMatrices * (sizeof(Mtxf)));
+
+            instcalcmatrices(&renderdata, hatmodel);
+
+            if ((chr->headnum >= 0x2a) && (chr->headnum < 0x46))
+            {
+                coord3d pos;
+                f32 xscale;
+                f32 yscale;
+                f32 zscale;
+                Mtxf mtx;
+                Mtxf tmp;
+                HATTYPE hat;
+                s32 unusedv;
+                struct headHat *entry;
+                volatile s32 changed;
+                s32 headindex;
+
+                pos.x = D_8002CCAC;
+                pos.y = D_8002CCB0;
+                pos.z = D_8002CCB4;
+
+                hat = get_hat_model(chr->handle_positiondata_hat);
+
+                headindex = chr->headnum - 0x2a;
+                entry = (struct headHat *)((((u8 *)headHat_array_8003E464) + (headindex * 0x90)) + (hat * 0x18));
+
+#if PRACTICE_ROM
+                if (speedgraphframes != 0)
+#endif
+                if (!get_debug_render_raster())
+                {
+                    changed = 0;
+
+                    if (joyGetButtons(PLAYER_1, L_TRIG))
+                    {
+                        if (joyGetButtons(PLAYER_1, A_BUTTON))
+                        {
+                            entry->zoffset -= D_80051D58;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, B_BUTTON))
+                        {
+                            entry->zoffset += D_80051D5C;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, D_CBUTTONS))
+                        {
+                            entry->yoffset -= D_80051D60;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, U_CBUTTONS))
+                        {
+                            entry->yoffset += D_80051D64;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, L_CBUTTONS))
+                        {
+                            entry->xoffset -= D_80051D68;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, R_CBUTTONS))
+                        {
+                            entry->xoffset += D_80051D6C;
+                            changed = 1;
+                        }
+                    }
+
+                    if (joyGetButtons(PLAYER_1, R_TRIG))
+                    {
+                        if (joyGetButtons(PLAYER_1, A_BUTTON))
+                        {
+                            entry->zsize *= D_80051D70;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, B_BUTTON))
+                        {
+                            entry->zsize *= D_80051D74;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, D_CBUTTONS))
+                        {
+                            entry->ysize *= D_80051D78;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, U_CBUTTONS))
+                        {
+                            entry->ysize *= D_80051D7C;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, L_CBUTTONS))
+                        {
+                            entry->xsize *= D_80051D80;
+                            changed = 1;
+                        }
+
+                        if (joyGetButtons(PLAYER_1, R_CBUTTONS))
+                        {
+                            entry->xsize *= D_80051D84;
+                            changed = 1;
+                        }
+                    }
+                }
+
+                pos.x = entry->xoffset * D_80051D88;
+                pos.y = entry->yoffset * D_80051D88;
+                pos.z = entry->zoffset * D_80051D88;
+
+                xscale = entry->xsize;
+                yscale = entry->ysize;
+                zscale = entry->zsize;
+
+                matrix_4x4_set_identity_and_position(&pos, &mtx);
+
+                matrix_column_1_scalar_multiply(xscale, (f32 *)(&mtx));
+                matrix_column_2_scalar_multiply(yscale, (f32 *)(&mtx));
+                matrix_column_3_scalar_multiply_2(zscale, (f32 *)(&mtx));
+
+                matrix_4x4_multiply_homogeneous((Mtxf *)hatmodel->render_pos, &mtx, &tmp);
+                matrix_4x4_copy(&tmp, (Mtxf *)hatmodel->render_pos);
+
+                if (hat == 2)
+                {
+                    headVisible = 0;
+                }
+            }
+
+            if ((!(chr->hidden & CHRHIDDEN_DROP_HELD_ITEMS)) || (!(hatobj->runtime_bitflags & 0x80)))
+            {
+                chr->field_20 = sub_GAME_7F06B120(chr->field_20, hatmodel);
+            }
+        }
+
+        if (model->obj->Switches[4] != NULL)
+        {
+            union ModelRwData *rwdata;
+            ModelFileHeader *headfile;
+
+            rwdata = modelGetNodeRwData(model, model->obj->Switches[4]);
+            headfile = rwdata->HeadPlaceholder.ModelFileHeader;
+
+            if ((headfile != NULL) && (headfile->Switches[1] != NULL))
+            {
+                modelGetNodeRwData(model, headfile->Switches[1])->Switch.visible = headVisible;
+            }
+        }
+
+        sub_GAME_7F06B29C(chr->field_20);
+        chr->field_20 = sub_GAME_7F06BB28(chr->field_20);
+    }
+    else
+    {
+#if PRACTICE_ROM
+        if (speedgraphframes != 0)
+        {
+#endif
+        if (chr->weapons_held[GUNRIGHT] != NULL)
+        {
+            chr->weapons_held[GUNRIGHT]->flags &= ~PROPFLAG_ONSCREEN;
+        }
+
+        if (chr->weapons_held[GUNLEFT] != NULL)
+        {
+            chr->weapons_held[GUNLEFT]->flags &= ~PROPFLAG_ONSCREEN;
+        }
+
+        if (chr->handle_positiondata_hat != NULL)
+        {
+            chr->handle_positiondata_hat->flags &= ~PROPFLAG_ONSCREEN;
+        }
+
+        prop->flags &= ~PROPFLAG_ONSCREEN;
+
+        chr->shadecol.r = chr->nextcol.r;
+        chr->shadecol.g = chr->nextcol.g;
+        chr->shadecol.b = chr->nextcol.b;
+        chr->shadecol.a = chr->nextcol.a;
+#if PRACTICE_ROM
+        }
+#endif
+    }
+
+#if PRACTICE_ROM
+    if (speedgraphframes != 0)
+#endif
+    if (!(chr->chrflags & CHRFLAG_HIDDEN))
+    {
+        if (chr->hidden & CHRHIDDEN_DROP_HELD_ITEMS)
+        {
+            PropRecord *dropprop = prop->child;
+            PropRecord *unusedprop;
+
+            while (dropprop != NULL)
+            {
+                PropRecord *nextprop = dropprop->prev;
+
+                objDrop(dropprop);
+
+                dropprop = nextprop;
+            }
+
+            chr->hidden &= ~CHRHIDDEN_DROP_HELD_ITEMS;
+        }
+
+        chrlvTriggerFireWeapon(chr);
+    }
+
+    return 0;
+}
+#else
 
 #ifdef NONMATCHING
 /*
-* Address: 
+* Address:
 *   US: 0x7F020EF0
 *   JP: 0x7F021188
 *   EU: 0x7F020E68
@@ -6705,6 +7358,8 @@ glabel chrTickBeams
 /* 0544D4 7F021AE4 00000000 */   nop
 
 )
+#endif
+
 #endif
 
 #endif
