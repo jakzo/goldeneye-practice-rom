@@ -514,6 +514,17 @@ void bossMainloop(void)
 #endif
                             permit_stderr(0);
 
+#ifdef PRACTICE_ROM
+                            // Replay pacing frames have no corresponding
+                            // recorded simulation or render frame. Settle the
+                            // playback controller state, then hold the last
+                            // completed image.
+                            if (speedgraphframes == 0 && !g_IsTimePaused)
+                            {
+                                break;
+                            }
+#endif
+
                             gdl = firstGdl = dynGetMasterDisplayList();
 #ifdef DEBUGMENU
                             //ported from pd beta, official way to open debug menu

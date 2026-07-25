@@ -87,6 +87,7 @@ void                 alarmActivate(void);
 void                 weaponSetGunfireVisible(PropRecord *prop, s32 firing);
 s32                  weaponIsGunfireVisible(PropRecord *);
 s32                  sub_GAME_7F0539E4(coord3d *pos); //getVolume?
+bool                 sub_GAME_7F054D6C(PropRecord *prop, coord3d *pos, f32 size, bool useNearFog);
 ObjectRecord        *create_new_item_instance_of_model(PROP propid, s32 arg1);
 void                 maybe_detonate_object(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS item, s32 owner);
 void                 chrobjMaybeDetonateObjectIfFlags(ObjectRecord *arg0, f32 arg1, coord3d *arg2, ITEM_IDS item, s32 arg4);

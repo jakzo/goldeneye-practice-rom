@@ -4102,8 +4102,18 @@ void chrPositionRelated7F020E40(ChrRecord *chr, s32 arg1)
 }
 
 
+/**
+ * Address:
+ * US: 0x7F020EF0
+ * JP: 0x7F021188
+ * EU: 0x7F020E68
+ *
+ * Note: This function name is a misnomer. It drives character animation,
+ * visibility, rendering, held-item cleanup and weapon firing.
+ *
+ * Based on the byte-matching implementation in goldeneye_src_decomp.
+ */
 #if PRACTICE_ROM
-// https://decomp.me/scratch/tLyZG
 s32 chrTickBeams(PropRecord *prop)
 {
     ModelRenderData renderdata;
@@ -4197,7 +4207,7 @@ s32 chrTickBeams(PropRecord *prop)
     }
     else
     {
-        if (((prop->type == 6) && (g_playerPointers[getPlayerPointerIndex(prop)]->unknown == 1)) || (chr->chrflags & CHRFLAG_CULL_USING_HITBOX))
+        if (((prop->type == PROP_TYPE_VIEWER) && (g_playerPointers[getPlayerPointerIndex(prop)]->unknown == 1)) || (chr->chrflags & CHRFLAG_CULL_USING_HITBOX))
         {
             headSwitchVisible = 1;
 
@@ -4221,7 +4231,7 @@ s32 chrTickBeams(PropRecord *prop)
 
         if ((chr->actiontype == ACT_PATROL) || (chr->actiontype == ACT_GOPOS))
         {
-            if (((chr->actiontype == ACT_PATROL) && (chr->act_patrol.waydata.mode == 6)) || ((chr->actiontype == ACT_GOPOS) && (chr->act_gopos.waydata.mode == 6)))
+            if (((chr->actiontype == ACT_PATROL) && (chr->act_patrol.waydata.mode == WAYMODE_MAGIC)) || ((chr->actiontype == ACT_GOPOS) && (chr->act_gopos.waydata.mode == WAYMODE_MAGIC)))
             {
                 headSwitchVisible = sub_GAME_7F054D6C(prop, &prop->pos, getinstsize(model), 1);
 
@@ -4328,7 +4338,7 @@ s32 chrTickBeams(PropRecord *prop)
     }
 
 after_position_update:
-    if (((chr->actiontype != ACT_STAND) || (model->anim2 != NULL)) || (prop->type == 6))
+    if (((chr->actiontype != ACT_STAND) || (model->anim2 != NULL)) || (prop->type == PROP_TYPE_VIEWER))
     {
 #if PRACTICE_ROM
         if (speedgraphframes != 0)
@@ -4602,7 +4612,7 @@ after_position_update:
                 matrix_4x4_multiply_homogeneous((Mtxf *)hatmodel->render_pos, &mtx, &tmp);
                 matrix_4x4_copy(&tmp, (Mtxf *)hatmodel->render_pos);
 
-                if (hat == 2)
+                if (hat == HATTYPE_PEAKED)
                 {
                     headVisible = 0;
                 }
