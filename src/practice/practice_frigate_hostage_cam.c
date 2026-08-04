@@ -4,6 +4,7 @@
 #include "chr.h"
 #include "chrai.h"
 #include "chrlv.h"
+#include "game/lvl.h"
 #include "game/objecthandler.h"
 #include "game/textrelated.h"
 #include "practice_config.h"
@@ -15,6 +16,7 @@
 #include <ultra64.h>
 
 #define FRIGATE_HOSTAGE_AI_LIST_ID 0x0402
+#define FRIGATE_HOSTAGE_TAKER_AI_LIST_ID 0x0403
 #define FRIGATE_HOSTAGE_ESCAPE_AI_LIST_ID 0x0404
 #define FRIGATE_HOSTAGE_IDEAL_ESCAPE_PAD_ID 145
 // Offset 38 is the yield inside Frigate's post-rescue hostage loop.
@@ -32,11 +34,14 @@
 #define HOSTAGE_PROGRESS_LINE_HEIGHT 10
 #define HOSTAGE_PROGRESS_GREEN 0x00FF00FF
 #define HOSTAGE_PROGRESS_ORANGE 0xFF9900FF
+#define HOSTAGE_PROGRESS_RED 0xFF0000FF
+#define HOSTAGE_PROGRESS_YELLOW 0xFFFF00FF
 #define HOSTAGE_PROGRESS_OUTLINE 0x000000FF
 #define HOSTAGE_PROGRESS_TEXT_MAX 32
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
 static const s16 s_FrigateHostageChrIds[] = {44, 45, 48, 49, 52, 53};
+static const s16 s_FrigateHostageTakerChrIds[] = {1, 9, 15, 22, 20, 28};
 static const s16 s_FrigateHostageEscapePadIds[] = {143, 145, 147,
                                                    148, 168, 169};
 
@@ -69,7 +74,7 @@ typedef struct FrigateHostageProgress {
 
 static FrigateHostageProgress
     s_FrigateHostageProgress[ARRAY_COUNT(s_FrigateHostageChrIds)];
-static u8 s_FrigateHostageFreedCount;
+static u8 s_FrigateHostageTrackedCount;
 static s32 s_FrigateHostageLastTimer;
 
 static const struct PracticeNpcFollowCameraParams s_FrigateHostageCamera = {
@@ -105,7 +110,7 @@ static void reset_hostage_progress(void) {
     s_FrigateHostageProgress[i].reroll_ticks = 0;
   }
 
-  s_FrigateHostageFreedCount = 0;
+  s_FrigateHostageTrackedCount = 0;
 }
 
 static s32 hostage_pad_number(s16 pad_id) {
@@ -360,7 +365,7 @@ static void update_hostage_progress(ChrRecord *hostage, s32 index,
   }
 
   if (progress->order == 0) {
-    progress->order = ++s_FrigateHostageFreedCount;
+    progress->order = ++s_FrigateHostageTrackedCount;
   }
 
   if (hostage_pad_number(hostage->padpreset1) != 0 &&
@@ -452,9 +457,33 @@ static FrigateHostageProgress *hostage_progress_for_order(s32 order,
   return NULL;
 }
 
+static f32 hostage_execution_seconds_remaining(ChrRecord *taker,
+                                                AIRecord *taker_ai) {
+  f32 execution_seconds;
+
+  if (taker == NULL || taker->prop == NULL || taker->ailist != taker_ai ||
+      !(taker->hidden & CHRHIDDEN_TIMER_ACTIVE)) {
+    return -1.0f;
+  }
+
+  if (lvlGetSelectedDifficulty() == DIFFICULTY_AGENT) {
+    execution_seconds = 180.0f / CHRAI_TICKRATE_F;
+  } else if (lvlGetSelectedDifficulty() == DIFFICULTY_SECRET) {
+    execution_seconds = 150.0f / CHRAI_TICKRATE_F;
+  } else {
+    execution_seconds = 120.0f / CHRAI_TICKRATE_F;
+  }
+
+  execution_seconds -= chrGetTimer(taker);
+  return execution_seconds > 0.0f ? execution_seconds : 0.0f;
+}
+
 Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
   FrigateHostageProgress *progress;
+  AIRecord *hostage_ai;
+  AIRecord *taker_ai;
   ChrRecord *hostage;
+  ChrRecord *taker;
   char text[HOSTAGE_PROGRESS_TEXT_MAX];
   const char *reroll_status;
   const char *status;
@@ -463,6 +492,7 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
   s32 hostage_index;
   s32 order;
   s32 pad_number;
+  s32 pre_release_status;
   s32 x = HOSTAGE_PROGRESS_X;
   s32 y = HOSTAGE_PROGRESS_Y;
   u32 color;
@@ -472,13 +502,74 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
     return gdl;
   }
 
-  for (order = 1; order <= s_FrigateHostageFreedCount; order++) {
+  hostage_ai = ailistFindById(FRIGATE_HOSTAGE_AI_LIST_ID);
+  taker_ai = ailistFindById(FRIGATE_HOSTAGE_TAKER_AI_LIST_ID);
+
+  for (hostage_index = 0;
+       hostage_index < (s32)ARRAY_COUNT(s_FrigateHostageChrIds);
+       hostage_index++) {
+    progress = &s_FrigateHostageProgress[hostage_index];
+    hostage = chrFindByLiteralId(s_FrigateHostageChrIds[hostage_index]);
+    taker = chrFindByLiteralId(s_FrigateHostageTakerChrIds[hostage_index]);
+
+    if (hostage == NULL || hostage->prop == NULL || chrIsDead(hostage) ||
+        hostage->ailist != hostage_ai || taker == NULL ||
+        taker->prop == NULL) {
+      continue;
+    }
+
+    seconds = hostage_execution_seconds_remaining(taker, taker_ai);
+    if (progress->order == 0 &&
+        (chrIsDead(taker) || seconds >= 0.0f ||
+         (taker->numarghs > 0 && taker->ailist != taker_ai))) {
+      progress->order = ++s_FrigateHostageTrackedCount;
+    }
+  }
+
+  for (order = 1; order <= s_FrigateHostageTrackedCount; order++) {
     progress = hostage_progress_for_order(order, &hostage_index);
     if (progress == NULL) {
       continue;
     }
 
     hostage = chrFindByLiteralId(s_FrigateHostageChrIds[hostage_index]);
+    taker = chrFindByLiteralId(s_FrigateHostageTakerChrIds[hostage_index]);
+    pre_release_status = FALSE;
+
+    if (hostage != NULL && hostage->prop != NULL && !chrIsDead(hostage) &&
+        hostage->ailist == hostage_ai && taker != NULL &&
+        taker->prop != NULL) {
+      if (chrIsDead(taker)) {
+        sprintf(text, "%d. waiting", order);
+        color = HOSTAGE_PROGRESS_YELLOW;
+        pre_release_status = TRUE;
+      } else {
+        seconds = hostage_execution_seconds_remaining(taker, taker_ai);
+        if (seconds >= 0.0f) {
+          sprintf(text, "%d. %.1fs - executing", order, seconds);
+          color = HOSTAGE_PROGRESS_RED;
+          pre_release_status = TRUE;
+        } else if (taker->numarghs > 0 && taker->ailist != taker_ai) {
+          sprintf(text, "%d. taker alive", order);
+          color = HOSTAGE_PROGRESS_ORANGE;
+          pre_release_status = TRUE;
+        }
+      }
+    }
+
+    if (pre_release_status) {
+      gdl = textRenderGlow(gdl, &x, &y, (s8 *)text, ptrFontBankGothicChars,
+                           ptrFontBankGothic, color,
+                           HOSTAGE_PROGRESS_OUTLINE, viGetX(), viGetY(), 0, 0);
+      x = HOSTAGE_PROGRESS_X;
+      y += HOSTAGE_PROGRESS_LINE_HEIGHT;
+      continue;
+    }
+
+    if (progress->pad_id < 0) {
+      continue;
+    }
+
     pad_number = hostage_pad_number(progress->pad_id);
     color = HOSTAGE_PROGRESS_ORANGE;
     reroll_status = NULL;

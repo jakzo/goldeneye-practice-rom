@@ -80,6 +80,7 @@
     - Option to make every freed hostage choose the fastest escape destination (PAD2 a.k.a. PAD145)
     - Option to make guards always use the fastest death animation for the hit body part
     - Hostage escape progress display, ordered by when each hostage is freed
+        - Before a hostage is freed and after a taker has seen bond, red `executing` text counts down its taker's execution timer, orange `taker alive` text means a wounded taker abandoned the execution but did not die, and yellow `waiting` text means the dead taker has not despawned yet
         - `PAD1` through `PAD6` identify the six random escape destinations
         - A time such as `12.3s` is the estimated time remaining on the current waypoint route; it resets if the hostage chooses another destination
         - Green text means the hostage is using off-screen magic movement; orange text means normal movement
