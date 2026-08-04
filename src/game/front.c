@@ -8131,7 +8131,7 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
     sprintf(stagename, "%02d:%02d", missiontime / 60, missiontime % 60);
     }
 #if PRACTICE_ROM
-    x = 110;
+    x = 132;
 #else
     x = 0x82;
 #endif
@@ -8146,7 +8146,7 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
         if (running_seconds >= 1.0f) {
             u32 lag_color;
 
-            x = 180;
+            x = 195;
             sprintf(stagename, "Lag: ");
             DL = frontPrintText(DL, &x, &y, stagename, ptrFontZurichBoldChars,
                                 ptrFontZurichBold, 0xFF, viGetX(), viGetY(), 0,
@@ -8181,7 +8181,7 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
         stagename[0] = '\0';
         sprintf(stagename, "%02d:%02d", targettime / 60, targettime % 60);
 #if PRACTICE_ROM
-        x = 110;
+        x = 132;
 #else
         x = 0x82;
 #endif
@@ -8213,7 +8213,7 @@ Gfx *constructor_menu0D_missioncomplete(Gfx *DL)
                 stagename[0] = '\0';
                 sprintf(stagename, "%02d:%02d", besttime / 60, besttime % 60);
 #if PRACTICE_ROM
-                x = 110;
+                x = 132;
 #else
                 x = 0x82;
 #endif
