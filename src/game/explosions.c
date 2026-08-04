@@ -906,6 +906,9 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
 
         temp_f10 = (s32) (g_ExplosionTypes[temp_s5->explosion_type].flareanimspeed * 15.0f);
 
+#ifdef PRACTICE_ROM
+        if (!practice_external_camera_is_rendering()) {
+#endif
         for (i = 0; i < EXPLOSION_PARTS_LEN; i++)
         {
             if (temp_f10 < temp_s5->parts[i].frame)
@@ -913,6 +916,9 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
                 temp_s5->parts[i].frame = 0;
             }
         }
+#ifdef PRACTICE_ROM
+        }
+#endif
     }
 
     return gdl;
@@ -2309,5 +2315,4 @@ Gfx * explosionCallRenderBulletImpactOnProp(Gfx *arg0)
 {
     return explosionRenderBulletImpactOnProp(arg0, NULL, 0);
 }
-
 

@@ -48,6 +48,7 @@
 #include "gun.h"
 #include "fr.h"
 #include "objective_status.h"
+#include "practice/practice_external_camera.h"
 
 extern Model *g_CurrentProjectileModel;
 extern ModelNode *dword_CODE_bss_80075B74;
@@ -4989,13 +4990,21 @@ void sub_GAME_7F04424C(PropRecord* prop)
     PropRecord* child;
 
     obj = prop->obj;
+#ifdef PRACTICE_ROM
+    if ((obj->runtime_bitflags & RUNTIMEBITFLAG_REMOVE) &&
+        !practice_external_camera_is_rendering())
+#else
     if (obj->runtime_bitflags & RUNTIMEBITFLAG_REMOVE)
+#endif
     {
         objFree(obj, 1, obj->state & PROPSTATE_RESPAWN);
         return;
     }
 
     prop->flags &= ~(PROPFLAG_ONSCREEN);
+#ifdef PRACTICE_ROM
+    if (!practice_external_camera_is_rendering())
+#endif
     chrobjWeaponTick(prop);
 
     child = prop->child;
@@ -5019,7 +5028,12 @@ void sub_GAME_7F0442DC(PropRecord* prop)
     obj = prop->obj;
     model = obj->model;
 
+#ifdef PRACTICE_ROM
+    if ((obj->runtime_bitflags & RUNTIMEBITFLAG_REMOVE) &&
+        !practice_external_camera_is_rendering())
+#else
     if (obj->runtime_bitflags & RUNTIMEBITFLAG_REMOVE)
+#endif
     {
         objFree(obj, 1, (obj->state & PROPSTATE_RESPAWN));
         return;
@@ -5033,6 +5047,9 @@ void sub_GAME_7F0442DC(PropRecord* prop)
 
         matrix_4x4_multiply_homogeneous(mtx, &obj->embedment->matrix, (Mtxf*)model->render_pos);
         modelUpdateRelationsQuick(model, model->obj->RootNode);
+#ifdef PRACTICE_ROM
+        if (!practice_external_camera_is_rendering())
+#endif
         chrobjWeaponTick(prop);
 
         child = prop->child;
@@ -5046,6 +5063,9 @@ void sub_GAME_7F0442DC(PropRecord* prop)
     else
     {
         prop->flags &= ~(PROPFLAG_ONSCREEN);
+#ifdef PRACTICE_ROM
+        if (!practice_external_camera_is_rendering())
+#endif
         chrobjWeaponTick(prop);
 
         child = prop->child;
@@ -6046,6 +6066,13 @@ s32 object_interaction(struct PropRecord *arg0) {
   sp67C = 0.0f;
   sp674 = getPlayerCount();
   sp670 = 1;
+#ifdef PRACTICE_ROM
+  if (practice_external_camera_is_rendering())
+  {
+    sp678 = 0;
+    goto render_only;
+  }
+#endif
   if (obj->runtime_bitflags & 0x00000004)
   {
     objFree(obj, 0, obj->state & 0x00000004);
@@ -7288,6 +7315,9 @@ s32 object_interaction(struct PropRecord *arg0) {
       }
     }
   }
+#ifdef PRACTICE_ROM
+render_only:
+#endif
   if ((obj->type == 45) && (get_ptr_for_players_tank() == arg0))
   {
     var_v1_5 = 1;
@@ -7654,6 +7684,8 @@ s32 object_interaction(struct PropRecord *arg0) {
     }
     modelUpdateRelationsQuick(model, model->obj->RootNode);
     arg0->zDepth = -((Mtxf *) model->render_pos)[0].m[3][2];
+#ifdef PRACTICE_ROM
+    if (!practice_external_camera_is_rendering())
     chrobjWeaponTick(arg0);
     {
       struct PropRecord *current = arg0->child;
@@ -7665,10 +7697,25 @@ s32 object_interaction(struct PropRecord *arg0) {
       }
 
     }
+#else
+    chrobjWeaponTick(arg0);
+    {
+      struct PropRecord *current = arg0->child;
+      while (current != ((void *) 0))
+      {
+        sp684 = current->prev;
+        sub_GAME_7F0442DC(current);
+        current = sp684;
+      }
+
+    }
+#endif
   }
   else
   {
     arg0->flags &= 0xFFFD;
+#ifdef PRACTICE_ROM
+    if (!practice_external_camera_is_rendering())
     chrobjWeaponTick(arg0);
     {
       struct PropRecord *current = arg0->child;
@@ -7680,7 +7727,26 @@ s32 object_interaction(struct PropRecord *arg0) {
       }
 
     }
+#else
+    chrobjWeaponTick(arg0);
+    {
+      struct PropRecord *current = arg0->child;
+      while (current != ((void *) 0))
+      {
+        sp684 = current->prev;
+        sub_GAME_7F04424C(current);
+        current = sp684;
+      }
+
+    }
+#endif
   }
+#ifdef PRACTICE_ROM
+  if (practice_external_camera_is_rendering())
+  {
+    return 0;
+  }
+#endif
   if (obj->runtime_bitflags & 0x100)
   {
     obj->runtime_bitflags &= ~0x100;

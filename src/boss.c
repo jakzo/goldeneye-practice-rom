@@ -80,6 +80,10 @@ typedef union {
 // forward declarations
 void bossMainloop(void);
 
+#ifdef PRACTICE_ROM
+extern u8 *g_GfxMemPos;
+#endif
+
 /* data */
 u32 g_BossDebugNoticeEntry = 0;
 s32 g_DebugAndUpdateStageFlag = FALSE;
@@ -328,6 +332,9 @@ void bossMainloop(void)
     s32 freeGfx;
     s32 mainTickElapsed;
     s32 rspReplyMsg;
+#ifdef PRACTICE_ROM
+    u8 *renderOnlyGfxMemPos;
+#endif
 
     u32 unused_stackpadding_[56];
 
@@ -376,6 +383,9 @@ void bossMainloop(void)
         localGfxDoneMsg = g_bossGfxDoneMsg;
         toggleFlag = 0;
         pendingGfx = 0;
+#ifdef PRACTICE_ROM
+        renderOnlyGfxMemPos = NULL;
+#endif
         test_if_recording_demos_this_stage_load(g_StageNum, lvlGetSelectedDifficulty());
         if (g_DebugAndUpdateStageFlag)
         {
@@ -472,6 +482,12 @@ void bossMainloop(void)
             {
                 case (OS_SC_RETRACE_MSG):
                 {
+#ifdef PRACTICE_ROM
+                    if (renderOnlyGfxMemPos != NULL && pendingGfx != 0)
+                    {
+                        break;
+                    }
+#endif
 #ifdef DEBUG
     /* debug logging from simple.c, I think this requires #include <ultralog.h>
     * //    if (logging)
@@ -515,16 +531,17 @@ void bossMainloop(void)
                             permit_stderr(0);
 
 #ifdef PRACTICE_ROM
-                            // Replay pacing frames have no corresponding
-                            // recorded simulation or render frame. Settle the
-                            // playback controller state, then hold the last
-                            // completed image.
-                            if (speedgraphframes == 0 && !g_IsTimePaused)
+                            if ((speedgraphframes == 0) && (pendingGfx != 0))
                             {
                                 break;
                             }
-#endif
 
+                            if (speedgraphframes == 0)
+                            {
+                                renderOnlyGfxMemPos = g_GfxMemPos;
+                                save_rng_before_paused_render();
+                            }
+#endif
                             gdl = firstGdl = dynGetMasterDisplayList();
 #ifdef DEBUGMENU
                             //ported from pd beta, official way to open debug menu
@@ -612,10 +629,6 @@ void bossMainloop(void)
                                 gdl = debugmenuRender(gdl);
                             }
 
-#ifdef PRACTICE_ROM
-                            restore_rng_after_paused_render();
-#endif
-
                             gDPFullSync(gdl++); // 0xe9000000, 0x00000000
                             gSPEndDisplayList(gdl++); // 0xb8000000, 0x00000000
 
@@ -634,8 +647,19 @@ void bossMainloop(void)
                             }
 
                             freeGfx = dynGetFreeGfx2(gdl);
+#ifdef PRACTICE_ROM
+                            if (speedgraphframes == 0)
+                            {
+                                video_related_8();
+                            }
+                            else
+                            {
+#endif
                             dynSwapBuffers();
                             video_related_8();
+#ifdef PRACTICE_ROM
+                            }
+#endif
 
                             if ((get_debug_taskgrab_val())
                                 && (joyGetButtonsPressedThisFrame(0, (A_BUTTON | B_BUTTON)))
@@ -665,13 +689,23 @@ void bossMainloop(void)
                             rspGfxTaskStart(firstGdl, gdl, 0, (s32*)rspReplyMsg);
 
                             pendingGfx++;
+#ifdef PRACTICE_ROM
+                            if (speedgraphframes != 0)
+                            {
+#endif
                             memaSingleDefragPass();
 #ifdef VERSION_EU
                             eu_sub_7f0c00a4();
 #endif
                             toggleFlag ^= 1;
+#ifdef PRACTICE_ROM
+                            }
+#endif
 
                             speedgraphMarkerHandler(0x10000);
+#ifdef PRACTICE_ROM
+                            restore_rng_after_paused_render();
+#endif
                             if(1);
                         }
                     }
@@ -680,6 +714,13 @@ void bossMainloop(void)
 
                 case (OS_SC_DONE_MSG):
                     pendingGfx--;
+#ifdef PRACTICE_ROM
+                    if (renderOnlyGfxMemPos != NULL && pendingGfx == 0)
+                    {
+                        g_GfxMemPos = renderOnlyGfxMemPos;
+                        renderOnlyGfxMemPos = NULL;
+                    }
+#endif
                     break;
 
                 case OS_SC_PRE_NMI_MSG:

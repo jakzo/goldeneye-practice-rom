@@ -5,8 +5,7 @@ ARG MIPS_GCC_META_VERSION=4:10.2.0-1
 ARG MIPS_GCC_VERSION=10.3.0-1ubuntu1cross2
 
 # install distro packages
-RUN apt update
-RUN apt -y install \
+RUN apt update && apt -y install \
     bash-completion \
     sudo \
     binutils-mips-linux-gnu=${MIPS_BINUTILS_VERSION} \

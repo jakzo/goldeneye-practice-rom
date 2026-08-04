@@ -13,6 +13,7 @@
 #include "objecthandler.h"
 #include "player.h"
 #include "player_2.h"
+#include "practice_render.h"
 #include "stan.h"
 #include <fr.h>
 #include <math.h>
@@ -42,6 +43,11 @@ struct PracticeExternalCameraTrackedActionState {
   bool valid;
 };
 
+struct PracticeExternalCameraRenderPosState {
+  Model *model;
+  RenderPosView *render_pos;
+};
+
 static struct PracticeExternalCameraView
     g_ExternalCameraViews[PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS];
 static s32 g_ExternalCameraViewCount;
@@ -50,6 +56,9 @@ static bool g_IsRenderingExternalCamera;
 extern s32 z_buffer;
 extern s32 z_buffer_width;
 extern s32 g_ClockTimer;
+extern u64 g_randomSeed;
+extern u64 g_chrObjRandomSeed;
+extern u8 *g_GfxMemPos;
 extern u8 g_ViBackIndex;
 extern VideoSettings *g_ViBackData;
 extern s32 g_viColorOutputMode;
@@ -268,6 +277,112 @@ static void prepare_pip_props(void) {
   g_playerPointers[PLAYER_2] = saved_player_two;
 }
 
+static void finish_pip_character_render(void) {
+  PropRecord *prop;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL && prop->chr->field_20 != NULL) {
+      sub_GAME_7F06B248(prop->chr->field_20);
+      prop->chr->field_20 = NULL;
+    }
+  }
+}
+
+static void save_pip_render_pos_state(
+    struct PracticeExternalCameraRenderPosState *states, s32 *count,
+    Model *model) {
+  s32 i;
+
+  if (model == NULL) {
+    return;
+  }
+
+  for (i = 0; i < *count; i++) {
+    if (states[i].model == model) {
+      return;
+    }
+  }
+
+  if (*count < POS_DATA_ENTRY_LEN) {
+    states[*count].model = model;
+    states[*count].render_pos = model->render_pos;
+    (*count)++;
+  }
+}
+
+static void save_pip_prop_render_pos_states(
+    struct PracticeExternalCameraRenderPosState *states, s32 *count,
+    PropRecord *prop) {
+  PropRecord *child;
+  s32 i;
+
+  if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+      prop->chr != NULL) {
+    ChrRecord *chr = prop->chr;
+
+    save_pip_render_pos_state(states, count, chr->model);
+
+    for (i = 0; i < 3; i++) {
+      if (chr->weapons_held[i] != NULL &&
+          chr->weapons_held[i]->obj != NULL) {
+        save_pip_render_pos_state(states, count,
+                                  chr->weapons_held[i]->obj->model);
+      }
+    }
+
+    if (chr->handle_positiondata_hat != NULL &&
+        chr->handle_positiondata_hat->obj != NULL) {
+      save_pip_render_pos_state(states, count,
+                                chr->handle_positiondata_hat->obj->model);
+    }
+  } else if ((prop->type == PROP_TYPE_OBJ ||
+              prop->type == PROP_TYPE_WEAPON ||
+              prop->type == PROP_TYPE_DOOR) &&
+             prop->obj != NULL) {
+    save_pip_render_pos_state(states, count, prop->obj->model);
+  }
+
+  // Embedded mines, bugs and other attachments leave the top-level active
+  // list and are rendered through their parent's child chain.
+  for (child = prop->child; child != NULL; child = child->prev) {
+    save_pip_prop_render_pos_states(states, count, child);
+  }
+}
+
+static s32 save_pip_render_pos_states(
+    struct PracticeExternalCameraRenderPosState *states) {
+  PropRecord *prop;
+  s32 count = 0;
+  s32 i;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    save_pip_prop_render_pos_states(states, &count, prop);
+  }
+
+  // A tracked item can transition between the projectile list and a parent's
+  // child chain in the same frame. Keep it covered even while relinking.
+  for (i = 0; i < g_ExternalCameraViewCount; i++) {
+    if (g_ExternalCameraViews[i].forced_object != NULL) {
+      save_pip_render_pos_state(
+          states, &count, g_ExternalCameraViews[i].forced_object->model);
+    }
+  }
+
+  return count;
+}
+
+static void restore_pip_render_pos_states(
+    struct PracticeExternalCameraRenderPosState *states, s32 count) {
+  s32 i;
+
+  for (i = 0; i < count; i++) {
+    states[i].model->render_pos = states[i].render_pos;
+  }
+}
+
 static void save_tracked_action_state(
     const struct PracticeExternalCameraView *view,
     struct PracticeExternalCameraTrackedActionState *state) {
@@ -328,6 +443,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   struct PropRecord *render_item_prop;
   u32 saved_render_item_flags2;
   bool render_item_valid;
+  struct PracticeExternalCameraRenderPosState *saved_render_positions;
+  s32 saved_render_position_count;
 
   // Saved player view/matrix state
   s16 saved_viewx;
@@ -376,6 +493,9 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   Mtxf *saved_field_10E8;
   Mtxf *saved_field_10EC;
 
+  u64 saved_random_seed;
+  u64 saved_chr_obj_random_seed;
+
   coord3d saved_frustum_940;
   f32 saved_frustum_94C;
   coord3d saved_frustum_950;
@@ -399,6 +519,11 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
       g_CurrentPlayer->prop == NULL) {
     return gdl;
   }
+
+  saved_random_seed = g_randomSeed;
+  saved_chr_obj_random_seed = g_chrObjRandomSeed;
+  saved_render_positions = NULL;
+  saved_render_position_count = 0;
 
   for (s = 0; s < g_ExternalCameraViewCount; s++) {
     saved_tracked_props[s] = g_ExternalCameraViews[s].tracked_prop;
@@ -478,6 +603,25 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   spacing = (screen_w - PIP_SIZE * g_ExternalCameraViewCount) /
             (g_ExternalCameraViewCount + 1);
   top = PIP_SPACING;
+
+  {
+    s32 reserved_size =
+        (POS_DATA_ENTRY_LEN * sizeof(*saved_render_positions) + 15) & ~15;
+    s32 used_size;
+
+    // Every saved model belongs to one of the fixed prop slots (a character
+    // body or an object/attachment), so this is a hard upper bound. Compact
+    // the last dyn allocation immediately to retain only the deduplicated
+    // entries. The same gameplay pointers are restored after every PIP, so a
+    // single table can be reused by all views in this frame.
+    saved_render_positions = dynAllocate(reserved_size);
+    saved_render_position_count =
+        save_pip_render_pos_states(saved_render_positions);
+    used_size =
+        (saved_render_position_count * sizeof(*saved_render_positions) + 15) &
+        ~15;
+    g_GfxMemPos -= reserved_size - used_size;
+  }
 
   for (s = 0; s < g_ExternalCameraViewCount; s++) {
     view = &g_ExternalCameraViews[s];
@@ -610,6 +754,7 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     }
 
     g_IsRenderingExternalCamera = TRUE;
+    g_IsRenderOnly = TRUE;
     prepare_pip_props();
 
     // The zero-time visibility pass still runs character action logic. An
@@ -637,6 +782,10 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
 #endif
     gdl = sub_GAME_7F0A2C44(gdl);
     gdl = explosionRenderFlyingParticles(gdl);
+    restore_pip_render_pos_states(saved_render_positions,
+                                  saved_render_position_count);
+    finish_pip_character_render();
+    g_IsRenderOnly = FALSE;
     g_IsRenderingExternalCamera = FALSE;
 
     if (view->flags & PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY) {
@@ -755,13 +904,23 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   // Rebuild both from Bond's restored camera. Restoring the visibility bits
   // alone is not enough: a character which was onscreen when its PIP started
   // can otherwise remain on the PIP's active/onscreen path indefinitely.
-  if (preserve_gameplay_visibility) {
+  if (preserve_gameplay_visibility && s > 0) {
     bgRoomVisibilityRelated();
+    g_IsRenderingExternalCamera = TRUE;
+    g_IsRenderOnly = TRUE;
     prepare_pip_props();
+    restore_pip_render_pos_states(saved_render_positions,
+                                  saved_render_position_count);
+    finish_pip_character_render();
+    g_IsRenderOnly = FALSE;
+    g_IsRenderingExternalCamera = FALSE;
     for (i = 0; i < g_ExternalCameraViewCount; i++) {
       restore_tracked_action_state(&saved_tracked_actions[i]);
     }
   }
+
+  g_randomSeed = saved_random_seed;
+  g_chrObjRandomSeed = saved_chr_obj_random_seed;
 
   return gdl;
 }

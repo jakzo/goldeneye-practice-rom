@@ -28,6 +28,10 @@
 #include "assets/obseg/text/LgunE.h"
 #include "textrelated.h"
 
+#ifdef PRACTICE_ROM
+extern s32 speedgraphframes;
+#endif
+
 // bss
 s32 dword_CODE_bss_80075DB0;
 s32 dword_CODE_bss_80075DB4;
@@ -8878,6 +8882,10 @@ weapon_bullet_type_shotgun_mine:
 
 void bondwalkFireBothHands(void)
 {
+#ifdef PRACTICE_ROM
+    if (speedgraphframes == 0) return;
+#endif
+
     handles_firing_or_throwing_weapon_in_hand(GUNRIGHT);
     handles_firing_or_throwing_weapon_in_hand(GUNLEFT);
 }

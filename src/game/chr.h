@@ -318,4 +318,8 @@ void        sub_GAME_7F0221DC(Model *arg0, s32 arg1, ModelNode *arg2, struct coo
 s32 not_in_us_7F0209EC(s32 bodynum, s32 headnum);
 #endif
 
+#ifdef PRACTICE_ROM
+s32 chrTickBeams(PropRecord *prop);
+#endif
+
 #endif

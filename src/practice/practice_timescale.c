@@ -71,10 +71,17 @@ void restore_rng_if_frame_dropped(void) {
 }
 
 // Rendering can consume RNG even though a zero-delta frame must not affect
-// gameplay. Restore both live seeds after the frame has finished building its
-// display list; recorded replay seeds remain diagnostic-only.
+// gameplay. Reuse the existing frozen-seed storage to capture the exact state
+// after replay input processing and before display-list construction.
+void save_rng_before_paused_render(void) {
+  if (speedgraphframes == 0) {
+    g_FrozenFrameRngSeed = g_randomSeed;
+    g_FrozenFrameChrObjRngSeed = g_chrObjRandomSeed;
+  }
+}
+
 void restore_rng_after_paused_render(void) {
-  if (g_TimeScaleDeltaFrames == 0) {
+  if (speedgraphframes == 0) {
     g_randomSeed = g_FrozenFrameRngSeed;
     g_chrObjRandomSeed = g_FrozenFrameChrObjRngSeed;
   }

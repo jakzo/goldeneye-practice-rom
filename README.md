@@ -12,6 +12,7 @@
         - Any should work though I recommend [ares](https://ares-emu.net/download) for its accuracy
     - Nintendo 64:
         - [SummerCart64](https://summercart64.dev/)
+            - You may need to [update your flashcart menu](https://menu.summercart64.dev/#summercart64) to run the practice ROM from it
         - [EverDrive 64](https://krikzz.com/our-products/cartridges/ed64x7.html)
         - Copy the ROM to either of these via the micro SD card or USB
 

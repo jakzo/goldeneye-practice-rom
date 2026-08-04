@@ -42,6 +42,7 @@
 #include "practice/practice_splits.h"
 #include "practice/practice_replay.h"
 #include "practice/practice_lag.h"
+#include "practice/practice_render.h"
 #include "bg.h"
 #include "objective.h"
 #include "mp_watch.h"
@@ -975,6 +976,9 @@ Gfx* lvlRender(Gfx* DL)
     {
         s32 i;
         s32 pcount;
+#ifdef PRACTICE_ROM
+        PracticeRenderContext render_context;
+#endif
 
         pcount = getPlayerCount();
 
@@ -1004,16 +1008,36 @@ Gfx* lvlRender(Gfx* DL)
 
             if (get_debug_render_raster() == DEB_BOND_VIEW)
             {
+#ifdef PRACTICE_ROM
+                if (speedgraphframes != 0)
+                {
+                    DL = sub_GAME_7F087A08(DL);
+                }
+                else if (camGetWorldToScreenMtxf() == NULL)
+                {
+                    continue;
+                }
+#else
                 DL = sub_GAME_7F087A08(DL);
+#endif
             }
 
             DL = viSetupScreensForNumPlayers(DL);
             DL = skyRender(DL);
             bgRoomVisibilityRelated();
 #if PRACTICE_ROM
-            if (speedgraphframes != 0)
+            if (speedgraphframes != 0) {
 #endif
             determing_type_of_object_and_detection();
+#ifdef PRACTICE_ROM
+            } else {
+                practice_restore_render_matrices();
+                practice_prepare_character_render(&render_context);
+            }
+#endif
+#ifdef PRACTICE_ROM
+            if (speedgraphframes != 0)
+#endif
             chraiUpdateOnscreenPropCount();
 #if PRACTICE_ROM
             if (speedgraphframes != 0) {
@@ -1032,10 +1056,6 @@ Gfx* lvlRender(Gfx* DL)
             }
 #endif
             DL = bgLevelRender(DL);
-#if PRACTICE_ROM
-            // TODO: Remove once render is idempotent
-            if (speedgraphframes == 0) continue;
-#endif
 
             if (get_debug_portal_flag())
             {
@@ -1089,6 +1109,9 @@ Gfx* lvlRender(Gfx* DL)
                 }
             }
 
+#ifdef PRACTICE_ROM
+            if (speedgraphframes != 0)
+#endif
             setanimationdebugflag(getDebugMode() == DEB_SELANIM);
             DL = sub_GAME_7F049B58(DL);
 
@@ -1129,6 +1152,12 @@ Gfx* lvlRender(Gfx* DL)
             }
 
             DL = mp_watch_menu_display(DL);
+#ifdef PRACTICE_ROM
+            if (speedgraphframes == 0)
+            {
+                practice_finish_character_render(&render_context);
+            }
+#endif
         }
 
 #ifdef PRACTICE_ROM

@@ -26,6 +26,7 @@
 #include "objecthandler.h"
 #include "player.h"
 #include "player_2.h"
+#include "practice/practice_render.h"
 #include "stan.h"
 
 // forward declarations
@@ -4140,7 +4141,7 @@ s32 chrTickBeams(PropRecord *prop)
                 if (objecthandlerGetModelAnim(model) != ((ModelAnimation *)animation_table_ptrs1[g_AnimationTablePointerCountRelated]))
                 {
 #if PRACTICE_ROM
-                    if (speedgraphframes != 0)
+                    if (!g_IsRenderOnly)
 #endif
                     modelSetAnimation(model, (ModelAnimation *)animation_table_ptrs1[g_AnimationTablePointerCountRelated], 0, 0.0f, 0.5f, 0.0f);
                 }
@@ -4149,7 +4150,7 @@ s32 chrTickBeams(PropRecord *prop)
         else
         {
 #if PRACTICE_ROM
-            if (speedgraphframes != 0)
+            if (!g_IsRenderOnly)
 #endif
             chrlvActionTick(chr);
 
@@ -4173,7 +4174,7 @@ s32 chrTickBeams(PropRecord *prop)
     if (chr->hidden & CHRHIDDEN_REMOVE)
     {
 #if PRACTICE_ROM
-        if (speedgraphframes != 0)
+        if (!g_IsRenderOnly)
 #endif
         disable_sounds_attached_to_player_then_something(prop);
         return 1;
@@ -4184,7 +4185,7 @@ s32 chrTickBeams(PropRecord *prop)
         if (chr->weapons_held[GUNRIGHT]->obj->runtime_bitflags & 0x04)
         {
 #if PRACTICE_ROM
-            if (speedgraphframes != 0)
+            if (!g_IsRenderOnly)
 #endif
             objFreePermanently(chr->weapons_held[GUNRIGHT]->obj, 1);
         }
@@ -4195,7 +4196,7 @@ s32 chrTickBeams(PropRecord *prop)
         if (chr->weapons_held[GUNLEFT]->obj->runtime_bitflags & 0x04)
         {
 #if PRACTICE_ROM
-            if (speedgraphframes != 0)
+            if (!g_IsRenderOnly)
 #endif
             objFreePermanently(chr->weapons_held[GUNLEFT]->obj, 1);
         }
@@ -4214,14 +4215,14 @@ s32 chrTickBeams(PropRecord *prop)
             if (((chr->actiontype == ACT_ANIM) && (chr->act_anim.unk02c == 0)) && (chr->act_anim.noTranslate != 0))
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 modelTickAnimQuarterSpeed(model, tickamount, 0);
             }
             else
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 chrPositionRelated7F020E40(chr, tickamount);
             }
@@ -4238,7 +4239,7 @@ s32 chrTickBeams(PropRecord *prop)
                 if (headSwitchVisible)
                 {
 #if PRACTICE_ROM
-                    if (speedgraphframes != 0)
+                    if (!g_IsRenderOnly)
                     {
 #endif
                     getsuboffset(model, &chr->prevpos);
@@ -4254,7 +4255,7 @@ s32 chrTickBeams(PropRecord *prop)
             else
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 chrPositionRelated7F020E40(chr, tickamount);
                 headSwitchVisible = sub_GAME_7F054D6C(prop, &prop->pos, getinstsize(model), 1);
@@ -4264,14 +4265,14 @@ s32 chrTickBeams(PropRecord *prop)
                     if (chr->actiontype == ACT_PATROL)
                     {
 #if PRACTICE_ROM
-                        if (speedgraphframes != 0)
+                        if (!g_IsRenderOnly)
 #endif
                         chr->act_patrol.lastvisible60 = g_GlobalTimer;
                     }
                     else if (chr->actiontype == ACT_GOPOS)
                     {
 #if PRACTICE_ROM
-                        if (speedgraphframes != 0)
+                        if (!g_IsRenderOnly)
 #endif
                         chr->act_gopos.unk9c = g_GlobalTimer;
                     }
@@ -4285,14 +4286,14 @@ s32 chrTickBeams(PropRecord *prop)
             if (headSwitchVisible && (chr->act_anim.noTranslate == 0))
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 chrPositionRelated7F020E40(chr, tickamount);
             }
             else
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 modelTickAnimQuarterSpeed(model, tickamount, 0);
             }
@@ -4304,14 +4305,14 @@ s32 chrTickBeams(PropRecord *prop)
             if (headSwitchVisible || (chr->chrflags & CHRFLAG_INIT))
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 chrPositionRelated7F020E40(chr, tickamount);
             }
             else if (model->anim2 != NULL)
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 modelTickAnimQuarterSpeed(model, tickamount, 0);
             }
@@ -4321,14 +4322,14 @@ s32 chrTickBeams(PropRecord *prop)
             if (chr->chrflags & CHRFLAG_IGNORE_ANIM_TRANSLATION)
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 modelTickAnimQuarterSpeed(model, tickamount, 0);
             }
             else
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 chrPositionRelated7F020E40(chr, tickamount);
             }
@@ -4341,13 +4342,13 @@ after_position_update:
     if (((chr->actiontype != ACT_STAND) || (model->anim2 != NULL)) || (prop->type == PROP_TYPE_VIEWER))
     {
 #if PRACTICE_ROM
-        if (speedgraphframes != 0)
+        if (!g_IsRenderOnly)
 #endif
         chr->hidden |= CHRHIDDEN_BACKGROUND_AI;
     }
 
 #if PRACTICE_ROM
-    if (speedgraphframes != 0)
+    if (!g_IsRenderOnly)
 #endif
     chrUpdateAimProperties(chr);
 
@@ -4383,7 +4384,7 @@ after_position_update:
             if (chr->chrflags & CHRFLAG_10000000)
             {
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
                 {
 #endif
                 chr->chrflags &= ~CHRFLAG_10000000;
@@ -4407,7 +4408,7 @@ after_position_update:
         if (((ChrRecord *)dword_CODE_bss_80069B60)->flinchcnt >= 0)
         {
 #if PRACTICE_ROM
-            if (speedgraphframes != 0)
+            if (!g_IsRenderOnly)
             {
 #endif
             ((ChrRecord *)dword_CODE_bss_80069B60)->flinchcnt += g_ClockTimer;
@@ -4431,7 +4432,7 @@ after_position_update:
         modelSetDistanceScale(1.0f);
 
 #if PRACTICE_ROM
-        if (speedgraphframes != 0)
+        if (!g_IsRenderOnly)
 #endif
         update_color_shading(&chr->shadecol, &chr->nextcol);
 
@@ -4450,7 +4451,7 @@ after_position_update:
         sub_GAME_7F0523F8(prop, GUNLEFT, &chr->field_20);
 
 #if PRACTICE_ROM
-        if (speedgraphframes == 0)
+        if (g_IsRenderOnly)
         {
             if (chr->weapons_held[GUNRIGHT] != NULL)
             {
@@ -4510,7 +4511,7 @@ after_position_update:
                 entry = (struct headHat *)((((u8 *)headHat_array_8003E464) + (headindex * 0x90)) + (hat * 0x18));
 
 #if PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (!g_IsRenderOnly)
 #endif
                 if (!get_debug_render_raster())
                 {
@@ -4674,7 +4675,7 @@ after_position_update:
     }
 
 #if PRACTICE_ROM
-    if (speedgraphframes != 0)
+    if (!g_IsRenderOnly)
 #endif
     if (!(chr->chrflags & CHRFLAG_HIDDEN))
     {
@@ -7571,7 +7572,13 @@ Gfx *chrRenderProp(PropRecord *prop, Gfx *gdl, s32 withalpha)
                 mrData.PropType = 7;
             }
 
+#ifdef PRACTICE_ROM
+            if (speedgraphframes != 0) {
+#endif
             g_playerPerm->time_other_players_on_screen += 1;
+#ifdef PRACTICE_ROM
+            }
+#endif
             drawjointlist(&mrData, chr->field_20);
 
             gdl = mrData.gdl;
@@ -7615,8 +7622,19 @@ Gfx *chrRenderProp(PropRecord *prop, Gfx *gdl, s32 withalpha)
 
     if (withalpha != 0)
     {
+#ifdef PRACTICE_ROM
+        if (speedgraphframes == 0)
+        {
+            chr->field_20 = NULL;
+        }
+        else
+        {
+#endif
         sub_GAME_7F06B248(chr->field_20);
         chr->field_20 = NULL;
+#ifdef PRACTICE_ROM
+        }
+#endif
     }
 
     return gdl;
