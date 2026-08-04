@@ -77,7 +77,7 @@
     - Third-person camera which tracks the gate guard
     - Option to never play the gate intro cutscene
 - **Frigate**
-    - Option to make every freed hostage choose the fastest escape destination (PAD2)
+    - Option to make every freed hostage choose the fastest escape destination (PAD2 a.k.a. PAD145)
     - Option to make guards always use the fastest death animation for the hit body part
     - Hostage escape progress display, ordered by when each hostage is freed
         - `PAD1` through `PAD6` identify the six random escape destinations

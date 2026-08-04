@@ -1,5 +1,9 @@
 ### Unreleased
 
+# 0.7.0
+
+- Added a Frigate option to make every freed hostage choose the fastest escape destination (PAD2 a.k.a. PAD145)
+- Added a Frigate option to make guards use the fastest death animation for the hit body part
 - Fixed crash when loading state
 - Fixed log text not rendering while paused via hotkey
 - Fixed external camera physics weirdness
