@@ -35,18 +35,23 @@ ROOT = Path(__file__).resolve().parent.parent
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 REPLAY_FIXTURES = {
-    "REPLAY_DAM": ROOT / "tests/replays/dam.ram",
-    "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
-    "REPLAY_FRIGATE": ROOT / "tests/replays/frigate_00.ram",
-    "REPLAY_GRENADE_CAM": ROOT / "tests/replays/runway_agent_grenade.ram",
-    "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
-    "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
-    "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives.ram",
-}
-EU_REPLAY_FIXTURES = {
-    "REPLAY_ARCHIVES": ROOT / "tests/replays/archives_eu.ram",
-    "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives_eu.ram",
-    "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives_eu.ram",
+    "US": {
+        "REPLAY_DAM": ROOT / "tests/replays/dam.ram",
+        "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
+        "REPLAY_FRIGATE": ROOT / "tests/replays/frigate_00.ram",
+        "REPLAY_GRENADE_CAM": ROOT / "tests/replays/runway_agent_grenade.ram",
+        "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
+        "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
+        "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives.ram",
+    },
+    "EU": {
+        "REPLAY_ARCHIVES": ROOT / "tests/replays/archives_eu.ram",
+        "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives_eu.ram",
+        "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives_eu.ram",
+    },
+    "JP": {
+        "REPLAY_RUNWAY": ROOT / "tests/replays/runway_jp.ram",
+    },
 }
 PRINT_LOCK = threading.Lock()
 COLOR_RESET = "\033[0m"
@@ -313,17 +318,33 @@ def select_test(test_case, rom):
     return result.returncode == 0
 
 
+def is_fixture_replay_test(test_case):
+    return test_case.startswith("REPLAY_")
+
+
+def replay_fixture_for(test_case, version):
+    return REPLAY_FIXTURES[version].get(test_case)
+
+
 def install_replay_fixture(test_case, rom, version):
-    fixture = (
-        EU_REPLAY_FIXTURES.get(test_case) if version == "EU" else None
-    ) or REPLAY_FIXTURES.get(test_case)
+    fixture = replay_fixture_for(test_case, version)
     if fixture is None:
+        if is_fixture_replay_test(test_case):
+            raise ValueError(
+                f"no {version} replay fixture is configured for {test_case}"
+            )
         return
 
-    sram = bytearray(fixture.read_bytes())
+    sram = fixture.read_bytes()
     if len(sram) != SRAM_SIZE_BYTES:
         raise ValueError(f"{fixture.name} replay SRAM fixture has the wrong size")
-    sram[REPLAY_REGION_OFFSET] = REPLAY_REGIONS[version]
+    actual_region = sram[REPLAY_REGION_OFFSET]
+    expected_region = REPLAY_REGIONS[version]
+    if actual_region != expected_region:
+        raise ValueError(
+            f"{fixture.name} is region {actual_region}, expected {expected_region} "
+            f"for {version}"
+        )
     rom.with_suffix(".ram").write_bytes(sram)
 
 
@@ -670,6 +691,29 @@ def main():
 
     excluded_tests = set(args.exclude)
     test_cases = [test for test in test_cases if test not in excluded_tests]
+
+    unavailable_replays = [
+        test
+        for test in test_cases
+        if is_fixture_replay_test(test)
+        and replay_fixture_for(test, args.version) is None
+    ]
+    if args.test and unavailable_replays:
+        available = ", ".join(sorted(REPLAY_FIXTURES[args.version]))
+        print(
+            f"error: no {args.version} replay fixture is configured for "
+            f"{args.test}; available regional replay tests: {available}",
+            file=sys.stderr,
+        )
+        return 2
+    if unavailable_replays:
+        print(
+            f"Skipping replay tests without {args.version} fixtures: "
+            f"{', '.join(unavailable_replays)}"
+        )
+        unavailable_replays = set(unavailable_replays)
+        test_cases = [test for test in test_cases if test not in unavailable_replays]
+
     if not test_cases:
         print("error: all selected test cases were excluded", file=sys.stderr)
         return 2

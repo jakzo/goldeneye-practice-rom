@@ -289,7 +289,6 @@ jobs:
               --timeout 120 \
               --jobs 1 \
               --exclude REPLAY_DAM \
-              --exclude REPLAY_RUNWAY \
               --exclude REPLAY_ARCHIVES \
               --junit-xml "$RUNNER_TEMP/practice-test-artifacts/results.xml"
           test_status=$?
@@ -297,6 +296,7 @@ jobs:
           exit "$test_status"
 
       - name: Run profiled Archives replay (${{ matrix.region.version }})
+        if: matrix.region.version != 'JP'
         env:
           ARES: ${{ env.ARES_PREFIX }}/bin/ares
           ARES_ARGS: >-
@@ -326,6 +326,7 @@ jobs:
           test -s "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives-001-game-frames.csv"
 
       - name: Summarize Archives performance (${{ matrix.region.version }})
+        if: matrix.region.version != 'JP'
         env:
           SUMMARY_FILE: ${{ runner.temp }}/practice-test-summary-${{ matrix.build.mode }}-${{ matrix.region.slug }}.md
         run: |
@@ -353,7 +354,7 @@ jobs:
           exit "$stats_status"
 
       - name: Upload Archives performance stats
-        if: always()
+        if: always() && matrix.region.version != 'JP'
         uses: actions/upload-artifact@v6
         with:
           name: performance-stats-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}

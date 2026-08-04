@@ -19,20 +19,23 @@ seeds diverge from the game state.
    - `practice_tests_should_disable_intro`, so the replay controls the normal
      stage startup; and
    - the fixture-replay completion check in `practice_tests_frame`.
-5. Map the test constant to the `.ram` fixture in `REPLAY_FIXTURES` in
-   `scripts/run_practice_tests.py`. If a replay is long enough to exceed the
-   default test timeout, also add it to `MINIMUM_TEST_TIMEOUT_SECONDS`.
+5. Map the test constant to the `.ram` fixture for the recording's region in
+   `REPLAY_FIXTURES` in `scripts/run_practice_tests.py`. If a replay is long
+   enough to exceed the default test timeout, also add it to
+   `MINIMUM_TEST_TIMEOUT_SECONDS`.
 6. Run the test:
 
    ```bash
    just test REPLAY_YOUR_TEST
    ```
 
-The runner copies the fixture beside its temporary ROM and updates the replay
-header's region byte for the selected ROM version. Playback itself validates the
-header, restores the replay's initial seeds, checks the per-frame seeds when the
-recording contains them, and reports `TEST_FAILED` on divergence or incomplete
-playback. A passing run ends with `TEST_COMPLETE`.
+The runner copies the matching regional fixture beside its temporary ROM and
+validates that the replay header identifies the selected ROM region. Full-suite
+runs skip replay tests which have no fixture for that region; explicitly
+requesting such a replay is an error. Playback restores the replay's initial
+seeds, checks the per-frame seeds when the recording contains them, and reports
+`TEST_FAILED` on divergence or incomplete playback. A passing run ends with
+`TEST_COMPLETE`.
 
 For interactive debugging, use `just test-debug REPLAY_YOUR_TEST`. To exercise a
 specific ROM region, pass it as the second argument, for example

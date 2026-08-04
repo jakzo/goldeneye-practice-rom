@@ -131,7 +131,11 @@ void practice_tests_set_case(s32 test_case) {
   g_LevelRestartTestPhase = 0;
   g_LevelRestartTimer = 0;
 
-  practice.grenade_cam = test_case == REPLAY_GRENADE_CAM;
+  practice.grenade_cam =
+      test_case == REPLAY_GRENADE_CAM || test_case == REPLAY_FRIGATE;
+
+  // Crashes...
+  practice.frigate_hostage_cam = test_case == REPLAY_FRIGATE;
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
