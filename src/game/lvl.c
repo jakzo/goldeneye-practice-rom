@@ -1161,7 +1161,8 @@ Gfx* lvlRender(Gfx* DL)
         }
 
 #ifdef PRACTICE_ROM
-        if (speedgraphframes != 0)
+        if (speedgraphframes != 0 &&
+            g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x5)
         {
             practice_external_camera_begin_frame();
             practice_dam_guard_cam_tick();
