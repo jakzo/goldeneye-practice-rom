@@ -4,7 +4,7 @@
 #include <bondtypes.h>
 #include <ultra64.h>
 
-#define PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS 3
+#define PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS 1
 
 enum PracticeExternalCameraFlags {
   PRACTICE_EXTERNAL_CAMERA_DRAW_CROSSHAIR = 1 << 0,
