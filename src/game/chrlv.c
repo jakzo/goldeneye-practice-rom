@@ -29,6 +29,7 @@
 #include "stan.h"
 #include "bondhead.h"
 #include "unk_0A1DA0.h"
+#include "practice/practice_frigate_fast_guard_death.h"
 
 
 
@@ -2091,7 +2092,12 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
 
         if (self->damage >= self->maxdamage)
         {
+#ifdef PRACTICE_ROM
+            if (!practice_frigate_fast_guard_death_enabled(self) &&
+                ((arg2 < 1.5707964f) || (arg2 > 4.712389f)) && ((randomGetNext() % (u32)0x14) == 0))
+#else
             if (((arg2 < 1.5707964f) || (arg2 > 4.712389f)) && ((randomGetNext() % (u32)0x14) == 0))
+#endif
             {
                 ft = getsubroty(model) + M_PI_F;
 
@@ -2155,7 +2161,19 @@ void triggered_on_shot_hit(ChrRecord *self, coord3d *arg1, f32 arg2, s32 req_ani
 
                     another_flag = 1;
 
+#ifdef PRACTICE_ROM
+                    tr = practice_frigate_guard_death_animation_index(
+                        self,
+                        D_8002C914[animation_something_index].field_1C,
+                        D_8002C914[animation_something_index].field_20,
+                        req_animation_id);
+                    if (tr < 0)
+                    {
+                        tr = (randomGetNext() % (u32)D_8002C914[animation_something_index].field_20);
+                    }
+#else
                     tr = (randomGetNext() % (u32)D_8002C914[animation_something_index].field_20);
+#endif
                     struck_anib = &D_8002C914[animation_something_index].field_1C[tr];
                     chrStopFiring(self);
 

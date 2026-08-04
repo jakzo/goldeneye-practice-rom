@@ -78,6 +78,7 @@
     - Option to never play the gate intro cutscene
 - **Frigate**
     - Option to make every freed hostage choose the fastest escape destination (PAD2)
+    - Option to make guards always use the fastest death animation for the hit body part
     - Hostage escape progress display, ordered by when each hostage is freed
         - `PAD1` through `PAD6` identify the six random escape destinations
         - A time such as `12.3s` is the estimated time remaining on the current waypoint route; it resets if the hostage chooses another destination
