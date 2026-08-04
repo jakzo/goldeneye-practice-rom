@@ -47,6 +47,7 @@ struct PracticeConfig {
   s32 dam_guard_cam;
   s32 frigate_hostage_cam;
   s32 frigate_hostage_progress;
+  s32 frigate_ideal_hostage_pads;
 };
 
 extern struct PracticeConfig practice;

@@ -77,10 +77,11 @@
     - Third-person camera which tracks the gate guard
     - Option to never play the gate intro cutscene
 - **Frigate**
+    - Option to make every freed hostage choose the fastest escape destination (PAD2)
     - Hostage escape progress display, ordered by when each hostage is freed
         - `PAD1` through `PAD6` identify the six random escape destinations
         - A time such as `12.3s` is the estimated time remaining on the current waypoint route; it resets if the hostage chooses another destination
-        - Green text means the hostage is using off-screen magic movement; red text means normal movement
+        - Green text means the hostage is using off-screen magic movement; orange text means normal movement
         - `REACHED` means the hostage reached the current destination and is choosing another one
         - `ROUTING` means there is no active waypoint route to estimate
         - After a destination is rejected, the new destination the game selected is shown along with the reason for the new selection:

@@ -1,6 +1,8 @@
 ### Unreleased
 
 - Fixed crash when loading state
+- Fixed log text not rendering while paused via hotkey
+- Fixed external camera physics weirdness
 
 # 0.6.1
 

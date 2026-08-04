@@ -35,6 +35,7 @@
 #include "player.h"
 #include "file.h"
 #include "fog.h"
+#include "practice/practice_frigate_hostage_cam.h"
 
 
 
@@ -3334,6 +3335,9 @@ void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
                         {
                             osSyncPrintf("RUSS : Pad is bollox -> Num=%d (%d) - PAD_PRESET1=%d\n", pad_id, ChrEntityp->padpreset1, PAD_PRESET1);
                         }
+#endif
+#ifdef PRACTICE_ROM
+                        pad_id = practice_frigate_hostage_escape_pad(ChrEntityp, pad_id);
 #endif
                         chrSetPadPreset(ChrEntityp, pad_id);
                     }

@@ -35,6 +35,7 @@ struct PracticeConfig practice = {
     FALSE,                    // dam_guard_cam
     FALSE,                    // frigate_hostage_cam
     TRUE,                     // frigate_hostage_progress
+    FALSE,                    // frigate_ideal_hostage_pads
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -223,6 +224,8 @@ static const struct PracticeSetting s_level_settings[] = {
     OPTIONS_SETTING("Hostage progress", frigate_hostage_progress, s_on_off,
                     frigate_apply),
     OPTIONS_SETTING("Hostage cam", frigate_hostage_cam, s_off_on,
+                    frigate_apply),
+    OPTIONS_SETTING("Ideal hostage pads", frigate_ideal_hostage_pads, s_off_on,
                     frigate_apply),
     DYNAMIC_OPTIONS_SETTING("Boot into level", boot_level, boot_level_options),
     OPTIONS_SETTING("Splits", splits_enabled, s_on_off, has_splits),

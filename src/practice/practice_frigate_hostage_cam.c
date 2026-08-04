@@ -16,6 +16,7 @@
 
 #define FRIGATE_HOSTAGE_AI_LIST_ID 0x0402
 #define FRIGATE_HOSTAGE_ESCAPE_AI_LIST_ID 0x0404
+#define FRIGATE_HOSTAGE_IDEAL_ESCAPE_PAD_ID 145
 // Offset 38 is the yield inside Frigate's post-rescue hostage loop.
 #define FRIGATE_HOSTAGE_FREED_AI_OFFSET 38
 #define FRIGATE_HOSTAGE_REACHED_AI_OFFSET 91
@@ -30,7 +31,7 @@
 #define HOSTAGE_PROGRESS_Y 12
 #define HOSTAGE_PROGRESS_LINE_HEIGHT 10
 #define HOSTAGE_PROGRESS_GREEN 0x00FF00FF
-#define HOSTAGE_PROGRESS_RED 0xFF3030FF
+#define HOSTAGE_PROGRESS_ORANGE 0xFF9900FF
 #define HOSTAGE_PROGRESS_OUTLINE 0x000000FF
 #define HOSTAGE_PROGRESS_TEXT_MAX 32
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -117,6 +118,23 @@ static s32 hostage_pad_number(s16 pad_id) {
   }
 
   return 0;
+}
+
+u16 practice_frigate_hostage_escape_pad(ChrRecord *hostage, u16 pad_id) {
+  s32 i;
+
+  if (!practice.frigate_ideal_hostage_pads ||
+      bossGetStageNum() != LEVELID_FRIGATE || hostage_pad_number(pad_id) == 0) {
+    return pad_id;
+  }
+
+  for (i = 0; i < (s32)ARRAY_COUNT(s_FrigateHostageChrIds); i++) {
+    if (hostage->chrnum == s_FrigateHostageChrIds[i]) {
+      return FRIGATE_HOSTAGE_IDEAL_ESCAPE_PAD_ID;
+    }
+  }
+
+  return pad_id;
 }
 
 static f32 horizontal_distance(const coord3d *from, const coord3d *to) {
@@ -462,7 +480,7 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
 
     hostage = chrFindByLiteralId(s_FrigateHostageChrIds[hostage_index]);
     pad_number = hostage_pad_number(progress->pad_id);
-    color = HOSTAGE_PROGRESS_RED;
+    color = HOSTAGE_PROGRESS_ORANGE;
     reroll_status = NULL;
 
     if (progress->reroll_ticks > 0) {
