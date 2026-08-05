@@ -49,6 +49,7 @@
 #include "fr.h"
 #include "objective_status.h"
 #include "practice/practice_external_camera.h"
+#include "practice/practice_render.h"
 
 extern Model *g_CurrentProjectileModel;
 extern ModelNode *dword_CODE_bss_80075B74;
@@ -6067,7 +6068,7 @@ s32 object_interaction(struct PropRecord *arg0) {
   sp674 = getPlayerCount();
   sp670 = 1;
 #ifdef PRACTICE_ROM
-  if (practice_external_camera_is_rendering())
+  if (g_IsRenderOnly)
   {
     sp678 = 0;
     goto render_only;

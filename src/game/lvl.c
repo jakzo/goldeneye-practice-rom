@@ -978,6 +978,9 @@ Gfx* lvlRender(Gfx* DL)
         s32 pcount;
 #ifdef PRACTICE_ROM
         PracticeRenderContext render_context;
+        bool render_state_invalidated = practice_is_render_state_invalidated();
+        bool refresh_render_state =
+            speedgraphframes == 0 && render_state_invalidated;
 #endif
 
         pcount = getPlayerCount();
@@ -1009,7 +1012,7 @@ Gfx* lvlRender(Gfx* DL)
             if (get_debug_render_raster() == DEB_BOND_VIEW)
             {
 #ifdef PRACTICE_ROM
-                if (speedgraphframes != 0)
+                if (speedgraphframes != 0 || refresh_render_state)
                 {
                     DL = sub_GAME_7F087A08(DL);
                 }
@@ -1030,6 +1033,8 @@ Gfx* lvlRender(Gfx* DL)
 #endif
             determing_type_of_object_and_detection();
 #ifdef PRACTICE_ROM
+            } else if (refresh_render_state) {
+                practice_prepare_refreshed_render(&render_context);
             } else {
                 practice_restore_render_matrices();
                 practice_prepare_character_render(&render_context);
@@ -1159,6 +1164,13 @@ Gfx* lvlRender(Gfx* DL)
             }
 #endif
         }
+
+#ifdef PRACTICE_ROM
+        if (render_state_invalidated && speedgraphframes != 0)
+        {
+            practice_validate_render_state();
+        }
+#endif
 
 #ifdef PRACTICE_ROM
         if (speedgraphframes != 0 &&

@@ -1,6 +1,7 @@
 #include "practice_states.h"
 #include "../practice_replay.h"
 #include "../practice_grenade_cam.h"
+#include "../practice_render.h"
 #include "../practice_sfx.h"
 #include "../practice_sram.h"
 #include "player.h"
@@ -125,6 +126,9 @@ void load_game_state(void) {
   }
 
   practice_grenade_cam_refresh();
+
+  /* The current paused frame did not tick the newly restored model graph. */
+  practice_invalidate_render_state();
 
   // Re-baseline frame timer so time isn't dumped into the next deltaFrames
   store_osgetcount();

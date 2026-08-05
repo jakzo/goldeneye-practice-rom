@@ -43,6 +43,7 @@
 #include <ultra64.h>
 
 extern s32 g_ClockTimer;
+extern u8 *g_GfxMemPos;
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern u64 g_randomSeed;
 extern u64 g_chrObjRandomSeed;
@@ -115,6 +116,7 @@ static s32 g_ReplayTestInitialInvert;
 static s32 g_ReplayTestHotkeyFrame;
 static s32 g_LevelRestartTestPhase;
 static s32 g_LevelRestartTimer;
+static s32 g_PausedStateLoadTestPhase;
 
 void practice_tests_set_case(s32 test_case) {
   g_practice_test_case = test_case;
@@ -130,6 +132,7 @@ void practice_tests_set_case(s32 test_case) {
   g_ReplayTestHotkeyFrame = 0;
   g_LevelRestartTestPhase = 0;
   g_LevelRestartTimer = 0;
+  g_PausedStateLoadTestPhase = 0;
 
   practice.grenade_cam =
       test_case == REPLAY_GRENADE_CAM || test_case == REPLAY_FRIGATE;
@@ -1668,9 +1671,9 @@ void practice_tests_tick() {
         }
       }
     } else if (after_frames(2)) {
-      emu_log("TRIGGER_LOAD");
-      load_game_state();
-      emu_log("LOAD_DONE");
+      emu_log("TRIGGER_PAUSED_LOAD");
+      pause();
+      g_PausedStateLoadTestPhase = 1;
     } else if (after_frames(2)) {
       PropRecord *chr_prop = get_prop_by_index(saved_chr_prop_index);
       bool ok = TRUE;
@@ -1805,6 +1808,57 @@ void practice_tests_frame() {
   }
   if (g_ReplayTestHotkeyFrame == 1) {
     // set_time_scale(0.5f);
+  }
+
+  if (g_practice_test_case == STATE_CAVERNS_ATTACHMENTS) {
+    if (g_PausedStateLoadTestPhase == 1) {
+      s32 live_header = g_CurrentPlayer->hands[0].field_B70;
+      s32 live_render_pos = g_CurrentPlayer->hands[0].field_B74;
+      s32 live_rw_data = g_CurrentPlayer->hands[0].field_B78;
+
+      g_SimulatedButtons = hotkey_trigger() | U_JPAD;
+      g_SimulatedButtonsPressed = U_JPAD;
+      practice_check_hotkeys();
+
+      if (g_CurrentPlayer->hands[0].field_B70 != live_header ||
+          g_CurrentPlayer->hands[0].field_B74 != live_render_pos ||
+          g_CurrentPlayer->hands[0].field_B78 != live_rw_data) {
+        emu_log("HAND_RENDER_POINTER_CHANGED");
+        emu_log("TEST_FAILED");
+      }
+
+      g_SimulatedButtons = hotkey_trigger();
+      g_SimulatedButtonsPressed = 0;
+      g_PausedStateLoadTestPhase = 2;
+      emu_log("PAUSED_LOAD_DONE");
+    } else if (g_PausedStateLoadTestPhase >= 2 &&
+               g_PausedStateLoadTestPhase < 10) {
+      if (g_PausedStateLoadTestPhase == 2) {
+        g_LevelRestartTimer = (s32)g_GfxMemPos;
+      } else if ((s32)g_GfxMemPos != g_LevelRestartTimer) {
+        emu_log("PAUSED_RELOAD_ARENA_MOVED old=%x new=%x",
+                g_LevelRestartTimer, g_GfxMemPos);
+        emu_log("TEST_FAILED");
+      }
+
+      g_SimulatedButtons = hotkey_trigger() | U_JPAD;
+      g_SimulatedButtonsPressed = U_JPAD;
+      practice_check_hotkeys();
+      g_SimulatedButtons = hotkey_trigger();
+      g_SimulatedButtonsPressed = 0;
+      g_PausedStateLoadTestPhase++;
+    } else if (g_PausedStateLoadTestPhase == 10) {
+      if ((s32)g_GfxMemPos != g_LevelRestartTimer) {
+        emu_log("PAUSED_RELOAD_ARENA_MOVED old=%x new=%x",
+                g_LevelRestartTimer, g_GfxMemPos);
+        emu_log("TEST_FAILED");
+      }
+      g_SimulatedButtons = 0;
+      g_SimulatedButtonsPressed = 0;
+      unpause();
+      g_PausedStateLoadTestPhase = 11;
+      emu_log("PAUSED_LOAD_RELEASED");
+    }
   }
 
   if (g_practice_test_case == REPLAY ||

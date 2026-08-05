@@ -4,10 +4,13 @@
 
 #include "game/chrai.h"
 #include "game/chr.h"
+#include "game/chrobjhandler.h"
 #include "game/dyn.h"
 #include "game/matrixmath.h"
 #include "game/player.h"
 #include "practice_render.h"
+
+extern s32 object_interaction(PropRecord *prop);
 
 typedef struct PracticeRenderJoint {
   void *model;
@@ -20,6 +23,7 @@ typedef struct PracticeRenderJoint {
 extern PracticeRenderJoint *D_80036060;
 
 bool g_IsRenderOnly = FALSE;
+static bool g_IsRenderStateInvalidated = FALSE;
 
 static s32 count_model_render_joints(Model *model) {
   ModelNode *node;
@@ -83,6 +87,18 @@ static s32 count_character_render_joints(ChrRecord *chr) {
   }
 
   return count;
+}
+
+void practice_invalidate_render_state(void) {
+  g_IsRenderStateInvalidated = TRUE;
+}
+
+bool practice_is_render_state_invalidated(void) {
+  return g_IsRenderStateInvalidated;
+}
+
+void practice_validate_render_state(void) {
+  g_IsRenderStateInvalidated = FALSE;
 }
 
 static void save_joint_pool(PracticeRenderContext *context, s32 max_count) {
@@ -205,6 +221,80 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
       }
     }
   }
+}
+
+void practice_prepare_refreshed_render(PracticeRenderContext *context) {
+  PropRecord *prop;
+  s32 max_joint_count = 0;
+  s32 hand;
+
+  g_IsRenderOnly = TRUE;
+
+  /*
+   * Hand render matrices live in the previous frame's dynamic arena. Reserve
+   * new-frame storage and convert the saved fixed-point matrices into it
+   * before any other render allocation can reuse their old addresses.
+   */
+  for (hand = 0; hand < 2; hand++) {
+    struct hand *hand_state = &g_CurrentPlayer->hands[hand];
+    ModelFileHeader *header = (ModelFileHeader *)hand_state->field_B70;
+    RenderPosView *old_render_pos =
+        (RenderPosView *)hand_state->field_B74;
+
+    if (header != NULL && old_render_pos != NULL) {
+      RenderPosView *new_render_pos =
+          dynAllocate(header->numMatrices * sizeof(RenderPosView));
+      s32 matrix;
+
+      for (matrix = 0; matrix < header->numMatrices; matrix++) {
+        Mtxf restored_matrix;
+
+        /*
+         * Rewinding the paused render arena can make new_render_pos equal
+         * old_render_pos.  guMtxL2F is not safe when its input and output
+         * overlap, so finish reading the fixed matrix into stack storage
+         * before writing the restored float matrix back to the arena.
+         */
+        guMtxL2F(restored_matrix.m,
+                 (Mtx *)&old_render_pos[matrix].pos);
+        matrix_4x4_copy(&restored_matrix,
+                        &new_render_pos[matrix].pos);
+      }
+
+      hand_state->field_B74 = (s32)new_render_pos;
+    }
+  }
+
+  /*
+   * A load can replace models and their dynamic matrix buffers after the
+   * normal tick has already been skipped for a paused frame.  In that case
+   * there is no previous fixed-point render matrix to convert back to float.
+   * Build fresh matrices from the restored state instead.
+   */
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL) {
+      max_joint_count += count_character_render_joints(prop->chr);
+    }
+  }
+
+  save_joint_pool(context, max_joint_count);
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL && prop->chr->model != NULL) {
+      chrTickBeams(prop);
+    } else if ((prop->type == PROP_TYPE_OBJ ||
+                prop->type == PROP_TYPE_WEAPON ||
+                prop->type == PROP_TYPE_DOOR) &&
+               prop->obj != NULL && prop->obj->model != NULL) {
+      object_interaction(prop);
+    }
+  }
+
+  chraiUpdateOnscreenPropCount();
 }
 
 void practice_finish_character_render(PracticeRenderContext *context) {

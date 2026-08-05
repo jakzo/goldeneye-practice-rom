@@ -1103,6 +1103,18 @@ static void clear_model_blood_patches(ModelBloodNode *blood_nodes,
   }
 }
 
+void clear_chr_model_blood_patches(ChrRecord *chr) {
+  ModelBloodNode blood_nodes[MAX_MODEL_BLOOD_NODES];
+  s32 blood_node_count;
+
+  if (chr == NULL || chr->model == NULL) {
+    return;
+  }
+
+  blood_node_count = get_model_blood_nodes(chr->model, blood_nodes);
+  clear_model_blood_patches(blood_nodes, blood_node_count);
+}
+
 static void load_model_blood_patches(StateStream *stream, Model *model) {
   ModelBloodNode blood_nodes[MAX_MODEL_BLOOD_NODES];
   s32 blood_node_count = get_model_blood_nodes(model, blood_nodes);

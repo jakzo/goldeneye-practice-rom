@@ -3181,6 +3181,18 @@ bool load_props_state(StateStream *stream) {
 
   dataStart = stream->base_address + stream->total_processed;
 
+  /* Release every live blood clone before recreating or loading any CHR.
+   * Loading one CHR at a time can otherwise temporarily require both the
+   * post-save and saved allocations, exhausting the shared vertex pool. */
+  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+    PropRecord *live_prop = get_prop_by_index(i);
+
+    if (live_prop != NULL && live_prop->type == PROP_TYPE_CHR &&
+        live_prop->chr != NULL && live_prop->chr->prop == live_prop) {
+      clear_chr_model_blood_patches(live_prop->chr);
+    }
+  }
+
   g_NumExplosionEntries = read_u32(stream);
   g_NumSmokeEntries = read_u32(stream);
 

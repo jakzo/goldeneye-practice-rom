@@ -41,6 +41,7 @@
 #include "PR/R4300.h"
 #include "practice/practice_config.h"
 #include "practice/practice_hotkeys.h"
+#include "practice/practice_render.h"
 #include "practice/practice_replay.h"
 #include "practice/practice_timescale.h"
 #include "practice/practice_unlock.h"
@@ -334,6 +335,7 @@ void bossMainloop(void)
     s32 rspReplyMsg;
 #ifdef PRACTICE_ROM
     u8 *renderOnlyGfxMemPos;
+    u8 *pausedRenderGfxMemBase;
 #endif
 
     u32 unused_stackpadding_[56];
@@ -385,6 +387,7 @@ void bossMainloop(void)
         pendingGfx = 0;
 #ifdef PRACTICE_ROM
         renderOnlyGfxMemPos = NULL;
+        pausedRenderGfxMemBase = NULL;
 #endif
         test_if_recording_demos_this_stage_load(g_StageNum, lvlGetSelectedDifficulty());
         if (g_DebugAndUpdateStageFlag)
@@ -538,8 +541,23 @@ void bossMainloop(void)
 
                             if (speedgraphframes == 0)
                             {
+                                if (pausedRenderGfxMemBase == NULL)
+                                {
+                                    pausedRenderGfxMemBase = g_GfxMemPos;
+                                }
+                                else if (practice_is_render_state_invalidated())
+                                {
+                                    /* Replace the previous post-load render
+                                     * state instead of retaining another
+                                     * generation of paused-frame matrices. */
+                                    g_GfxMemPos = pausedRenderGfxMemBase;
+                                }
                                 renderOnlyGfxMemPos = g_GfxMemPos;
                                 save_rng_before_paused_render();
+                            }
+                            else
+                            {
+                                pausedRenderGfxMemBase = NULL;
                             }
 #endif
                             gdl = firstGdl = dynGetMasterDisplayList();

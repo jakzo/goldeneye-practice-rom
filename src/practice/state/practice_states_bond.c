@@ -27,6 +27,8 @@ extern void sub_GAME_7F07DE9C(struct player *player);
 extern s32 g_EnterTankAudioState;
 extern void *memcpy(void *dst, const void *src, size_t count);
 
+#define MAX_SAVED_HAND_RENDER_MATRICES 256
+
 static const struct {
   u32 srcoff;
   u32 size;
@@ -161,6 +163,9 @@ static bool load_player_state_direct(StateStream *stream, struct player *dst) {
   struct Model *backup_ptr_char_objectinstance = dst->ptr_char_objectinstance;
   Model *backup_model = dst->model;
   ObjectRecord *backup_hand_rocket[2];
+  s32 backup_hand_model_header[2];
+  s32 backup_hand_render_pos[2];
+  s32 backup_hand_rw_data[2];
   InvItem *backup_ptr_inventory_first_in_cycle =
       dst->ptr_inventory_first_in_cycle;
   InvItem *backup_p_itemcur = dst->p_itemcur;
@@ -170,6 +175,11 @@ static bool load_player_state_direct(StateStream *stream, struct player *dst) {
 
   backup_hand_rocket[0] = dst->hands[0].rocket;
   backup_hand_rocket[1] = dst->hands[1].rocket;
+  for (i = 0; i < 2; i++) {
+    backup_hand_model_header[i] = dst->hands[i].field_B70;
+    backup_hand_render_pos[i] = dst->hands[i].field_B74;
+    backup_hand_rw_data[i] = dst->hands[i].field_B78;
+  }
 
   for (i = 0; i < 5; i++) {
     read_bytes(stream, dst_bytes + player_blocks[i].srcoff,
@@ -187,6 +197,11 @@ static bool load_player_state_direct(StateStream *stream, struct player *dst) {
   dst->model = backup_model;
   dst->hands[0].rocket = backup_hand_rocket[0];
   dst->hands[1].rocket = backup_hand_rocket[1];
+  for (i = 0; i < 2; i++) {
+    dst->hands[i].field_B70 = backup_hand_model_header[i];
+    dst->hands[i].field_B74 = backup_hand_render_pos[i];
+    dst->hands[i].field_B78 = backup_hand_rw_data[i];
+  }
   dst->ptr_inventory_first_in_cycle = backup_ptr_inventory_first_in_cycle;
   dst->p_itemcur = backup_p_itemcur;
   dst->textoverrides = backup_textoverrides;
@@ -266,6 +281,27 @@ static void save_current_player_state(StateStream *stream) {
       write_u32(stream, prop_index);
 
       item = item->next;
+    }
+  }
+
+  /* 4. First-person hand matrices (fixed-point after the previous render). */
+  {
+    s32 hand;
+
+    for (hand = 0; hand < 2; hand++) {
+      ModelFileHeader *header =
+          (ModelFileHeader *)g_CurrentPlayer->hands[hand].field_B70;
+      Mtx *matrices = (Mtx *)g_CurrentPlayer->hands[hand].field_B74;
+      s32 count = header != NULL && matrices != NULL ? header->numMatrices : 0;
+
+      if (count < 0 || count > MAX_SAVED_HAND_RENDER_MATRICES) {
+        count = 0;
+      }
+
+      write_u16(stream, count);
+      if (count > 0) {
+        write_bytes(stream, matrices, count * sizeof(Mtx));
+      }
     }
   }
 }
@@ -420,7 +456,29 @@ static void load_current_player_state(StateStream *stream) {
     }
   }
 
-  /* 6. Re-generate watch menu GDLs. */
+  /* 6. Restore fixed-point hand matrices into the current live buffers. */
+  {
+    s32 hand;
+
+    for (hand = 0; hand < 2; hand++) {
+      ModelFileHeader *header =
+          (ModelFileHeader *)g_CurrentPlayer->hands[hand].field_B70;
+      Mtx *matrices = (Mtx *)g_CurrentPlayer->hands[hand].field_B74;
+      s32 saved_count = read_u16(stream);
+      u32 size = saved_count * sizeof(Mtx);
+
+      if (saved_count > 0 &&
+          saved_count <= MAX_SAVED_HAND_RENDER_MATRICES && header != NULL &&
+          matrices != NULL && header->numMatrices == saved_count) {
+        read_bytes(stream, matrices, size);
+      } else if (size > 0) {
+        stream_seek(stream,
+                    stream->base_address + stream->total_processed + size);
+      }
+    }
+  }
+
+  /* 7. Re-generate watch menu GDLs. */
   {
     extern Gfx *sub_GAME_7F0A3330(Gfx * arg0, void *arg1, s32 arg2);
     extern void sub_GAME_7F0A69A8(void);
