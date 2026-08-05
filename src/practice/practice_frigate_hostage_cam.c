@@ -484,7 +484,6 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
   f32 pad_distance;
   s32 hostage_index;
   s32 order;
-  s32 pad_number;
   s32 pre_release_status;
   s32 x = HOSTAGE_PROGRESS_X;
   s32 y = HOSTAGE_PROGRESS_Y;
@@ -561,7 +560,6 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
       continue;
     }
 
-    pad_number = hostage_pad_number(progress->pad_id);
     color = HOSTAGE_PROGRESS_ORANGE;
     reroll_status = NULL;
 
@@ -583,15 +581,15 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
 
     if (progress->terminal_reason == FRIGATE_HOSTAGE_NO_PATH) {
       status = "NO PATH";
-      sprintf(text, "%d. PAD%d - %s", order, pad_number, status);
+      sprintf(text, "%d. PAD%d - %s", order, progress->pad_id, status);
     } else if (progress->terminal_reason == FRIGATE_HOSTAGE_STOPPED) {
       status = "STOPPED";
-      sprintf(text, "%d. PAD%d - %s", order, pad_number, status);
+      sprintf(text, "%d. PAD%d - %s", order, progress->pad_id, status);
     } else if (progress->terminal_reason == FRIGATE_HOSTAGE_DIED) {
       status = "DEAD";
-      sprintf(text, "%d. PAD%d - %s", order, pad_number, status);
+      sprintf(text, "%d. PAD%d - %s", order, progress->pad_id, status);
     } else if (hostage == NULL || hostage->prop == NULL) {
-      sprintf(text, "%d. PAD%d - GONE", order, pad_number);
+      sprintf(text, "%d. PAD%d - GONE", order, progress->pad_id);
     } else {
       pad_distance = progress->pad_id >= 0
                          ? chrGetDistanceToPad(hostage, progress->pad_id)
@@ -600,26 +598,27 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
           (pad_distance >= 0.0f &&
            pad_distance < FRIGATE_HOSTAGE_REACHED_DISTANCE)) {
         if (reroll_status != NULL) {
-          sprintf(text, "%d. PAD%d - REACHED - %s", order, pad_number,
+          sprintf(text, "%d. PAD%d - REACHED - %s", order, progress->pad_id,
                   reroll_status);
         } else {
-          sprintf(text, "%d. PAD%d - REACHED", order, pad_number);
+          sprintf(text, "%d. PAD%d - REACHED", order, progress->pad_id);
         }
       } else {
         seconds = hostage_route_seconds_remaining(hostage, progress);
         if (seconds >= 0.0f) {
           if (reroll_status != NULL) {
-            sprintf(text, "%d. PAD%d - %.1fs - %s", order, pad_number, seconds,
-                    reroll_status);
+            sprintf(text, "%d. PAD%d - %.1fs - %s", order, progress->pad_id,
+                    seconds, reroll_status);
           } else {
-            sprintf(text, "%d. PAD%d - %.1fs", order, pad_number, seconds);
+            sprintf(text, "%d. PAD%d - %.1fs", order, progress->pad_id,
+                    seconds);
           }
         } else {
           if (reroll_status != NULL) {
-            sprintf(text, "%d. PAD%d - ROUTING - %s", order, pad_number,
+            sprintf(text, "%d. PAD%d - ROUTING - %s", order, progress->pad_id,
                     reroll_status);
           } else {
-            sprintf(text, "%d. PAD%d - ROUTING", order, pad_number);
+            sprintf(text, "%d. PAD%d - ROUTING", order, progress->pad_id);
           }
         }
       }
