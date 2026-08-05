@@ -36,7 +36,7 @@
 #define HOSTAGE_PROGRESS_ORANGE 0xFF9900FF
 #define HOSTAGE_PROGRESS_RED 0xFF0000FF
 #define HOSTAGE_PROGRESS_YELLOW 0xFFFF00FF
-#define HOSTAGE_PROGRESS_OUTLINE 0x000000FF
+#define HOSTAGE_PROGRESS_SHADOW 0x000000FF
 #define HOSTAGE_PROGRESS_TEXT_MAX 32
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
@@ -478,6 +478,21 @@ static f32 hostage_execution_seconds_remaining(ChrRecord *taker,
   return execution_seconds > 0.0f ? execution_seconds : 0.0f;
 }
 
+static Gfx *render_hostage_progress_text(Gfx *gdl, s32 *x, s32 *y,
+                                         char *text, u32 color) {
+  s32 shadow_x = *x + 1;
+  s32 shadow_y = *y + 1;
+
+  // textRenderGlow draws nine copies per label. A single offset shadow keeps
+  // the progress readable without exhausting Frigate's display-list buffer
+  // when an external camera renders another view of the level.
+  gdl = textRender(gdl, &shadow_x, &shadow_y, text, ptrFontBankGothicChars,
+                   ptrFontBankGothic, HOSTAGE_PROGRESS_SHADOW, viGetX(),
+                   viGetY(), 0, 0);
+  return textRender(gdl, x, y, text, ptrFontBankGothicChars,
+                    ptrFontBankGothic, color, viGetX(), viGetY(), 0, 0);
+}
+
 Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
   FrigateHostageProgress *progress;
   AIRecord *hostage_ai;
@@ -558,9 +573,7 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
     }
 
     if (pre_release_status) {
-      gdl = textRenderGlow(gdl, &x, &y, (s8 *)text, ptrFontBankGothicChars,
-                           ptrFontBankGothic, color,
-                           HOSTAGE_PROGRESS_OUTLINE, viGetX(), viGetY(), 0, 0);
+      gdl = render_hostage_progress_text(gdl, &x, &y, text, color);
       x = HOSTAGE_PROGRESS_X;
       y += HOSTAGE_PROGRESS_LINE_HEIGHT;
       continue;
@@ -634,9 +647,7 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
       }
     }
 
-    gdl = textRenderGlow(gdl, &x, &y, (s8 *)text, ptrFontBankGothicChars,
-                         ptrFontBankGothic, color, HOSTAGE_PROGRESS_OUTLINE,
-                         viGetX(), viGetY(), 0, 0);
+    gdl = render_hostage_progress_text(gdl, &x, &y, text, color);
     x = HOSTAGE_PROGRESS_X;
     y += HOSTAGE_PROGRESS_LINE_HEIGHT;
   }

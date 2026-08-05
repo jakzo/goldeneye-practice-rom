@@ -48,6 +48,11 @@ struct PracticeExternalCameraRenderPosState {
   RenderPosView *render_pos;
 };
 
+struct PracticeExternalCameraMonitorState {
+  MonitorRecord *monitor;
+  MonitorRecord state;
+};
+
 static struct PracticeExternalCameraView
     g_ExternalCameraViews[PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS];
 static s32 g_ExternalCameraViewCount;
@@ -383,6 +388,90 @@ static void restore_pip_render_pos_states(
   }
 }
 
+static s32 count_pip_monitor_states_for_prop(PropRecord *prop) {
+  PropRecord *child;
+  s32 count = 0;
+
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL) {
+    if (prop->obj->type == PROPDEF_MONITOR) {
+      count++;
+    } else if (prop->obj->type == PROPDEF_MULTI_MONITOR) {
+      count += 4;
+    }
+  }
+
+  for (child = prop->child; child != NULL; child = child->prev) {
+    count += count_pip_monitor_states_for_prop(child);
+  }
+
+  return count;
+}
+
+static s32 count_pip_monitor_states(void) {
+  PropRecord *prop;
+  s32 count = 0;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    count += count_pip_monitor_states_for_prop(prop);
+  }
+
+  return count;
+}
+
+static void save_pip_monitor_states_for_prop(
+    struct PracticeExternalCameraMonitorState *states, s32 *count,
+    PropRecord *prop) {
+  PropRecord *child;
+  s32 i;
+
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL) {
+    if (prop->obj->type == PROPDEF_MONITOR) {
+      MonitorObjRecord *monitor = (MonitorObjRecord *)prop->obj;
+      states[*count].monitor = &monitor->Monitor;
+      states[*count].state = monitor->Monitor;
+      (*count)++;
+    } else if (prop->obj->type == PROPDEF_MULTI_MONITOR) {
+      MultiMonitorObjRecord *monitor = (MultiMonitorObjRecord *)prop->obj;
+      for (i = 0; i < 4; i++) {
+        states[*count].monitor = &monitor->Monitor[i];
+        states[*count].state = monitor->Monitor[i];
+        (*count)++;
+      }
+    }
+  }
+
+  for (child = prop->child; child != NULL; child = child->prev) {
+    save_pip_monitor_states_for_prop(states, count, child);
+  }
+}
+
+static s32 save_pip_monitor_states(
+    struct PracticeExternalCameraMonitorState *states) {
+  PropRecord *prop;
+  s32 count = 0;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    save_pip_monitor_states_for_prop(states, &count, prop);
+  }
+
+  return count;
+}
+
+static void restore_pip_monitor_states(
+    struct PracticeExternalCameraMonitorState *states, s32 count) {
+  s32 i;
+
+  for (i = 0; i < count; i++) {
+    *states[i].monitor = states[i].state;
+  }
+}
+
 static void save_tracked_action_state(
     const struct PracticeExternalCameraView *view,
     struct PracticeExternalCameraTrackedActionState *state) {
@@ -445,6 +534,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   bool render_item_valid;
   struct PracticeExternalCameraRenderPosState *saved_render_positions;
   s32 saved_render_position_count;
+  struct PracticeExternalCameraMonitorState *saved_monitor_states;
+  s32 saved_monitor_state_count;
 
   // Saved player view/matrix state
   s16 saved_viewx;
@@ -524,6 +615,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   saved_chr_obj_random_seed = g_chrObjRandomSeed;
   saved_render_positions = NULL;
   saved_render_position_count = 0;
+  saved_monitor_states = NULL;
+  saved_monitor_state_count = 0;
 
   for (s = 0; s < g_ExternalCameraViewCount; s++) {
     saved_tracked_props[s] = g_ExternalCameraViews[s].tracked_prop;
@@ -605,6 +698,9 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   top = PIP_SPACING;
 
   {
+    u8 *saved_dyn_pos = g_GfxMemPos;
+    s32 monitor_count;
+    s32 monitor_size;
     s32 reserved_size =
         (POS_DATA_ENTRY_LEN * sizeof(*saved_render_positions) + 15) & ~15;
     s32 used_size;
@@ -621,6 +717,20 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
         (saved_render_position_count * sizeof(*saved_render_positions) + 15) &
         ~15;
     g_GfxMemPos -= reserved_size - used_size;
+
+    // Monitor rendering advances command lists even with a zero clock. Keep
+    // those animation records in the dyn buffer so the PIP cannot alter what
+    // the next gameplay view renders or how much RNG it consumes.
+    monitor_count = count_pip_monitor_states();
+    monitor_size =
+        (monitor_count * sizeof(*saved_monitor_states) + 15) & ~15;
+    if (dynGetFreeVtx() < monitor_size + PIP_DYN_VTX_RESERVE) {
+      g_GfxMemPos = saved_dyn_pos;
+      return gdl;
+    }
+    saved_monitor_states = dynAllocate(monitor_size);
+    saved_monitor_state_count =
+        save_pip_monitor_states(saved_monitor_states);
   }
 
   for (s = 0; s < g_ExternalCameraViewCount; s++) {
@@ -782,6 +892,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
 #endif
     gdl = sub_GAME_7F0A2C44(gdl);
     gdl = explosionRenderFlyingParticles(gdl);
+    restore_pip_monitor_states(saved_monitor_states,
+                               saved_monitor_state_count);
     restore_pip_render_pos_states(saved_render_positions,
                                   saved_render_position_count);
     finish_pip_character_render();
