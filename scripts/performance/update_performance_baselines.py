@@ -50,19 +50,22 @@ def main():
         except KeyError as error:
             raise SystemExit(f"{path} is missing {error.args[0]}") from error
 
+    existing_builds = baseline.get("builds", {})
     missing = [
         f"{mode} {region}"
         for mode in BUILD_MODES
         for region in REGIONS
         if region not in results[mode]
+        and region not in existing_builds.get(mode, {})
     ]
     if missing:
-        raise SystemExit("missing profiler results for: " + ", ".join(missing))
+        raise SystemExit(
+            "missing profiler results and existing baselines for: "
+            + ", ".join(missing)
+        )
 
-    baseline["builds"] = {
-        mode: {region: results[mode][region] for region in REGIONS}
-        for mode in BUILD_MODES
-    }
+    for mode in BUILD_MODES:
+        baseline.setdefault("builds", {}).setdefault(mode, {}).update(results[mode])
     args.baseline.write_text(
         json.dumps(baseline, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
