@@ -306,18 +306,25 @@ void practiceLogError(const char *fmt, ...) {
 // practice_ui_render so pills stack from the top down.
 static s32 g_PillStackY;
 
-// Note that rendering text with outline causes the text to be rendered 9x
-#define RENDER_TEXT_WITH_OUTLINE TRUE
+Gfx *practice_render_text_with_shadow(Gfx *gdl, s32 *x, s32 *y, s8 *text,
+                                      s32 font_chars, s32 font,
+                                      s32 text_color, u32 shadow_color,
+                                      s16 view_x, s16 view_y, s32 arg_a,
+                                      s32 arg_b) {
+  s32 shadow_x = *x + 1;
+  s32 shadow_y = *y + 1;
+
+  gdl = textRender(gdl, &shadow_x, &shadow_y, text, font_chars, font,
+                   (s32)shadow_color, view_x, view_y, arg_a, arg_b);
+  return textRender(gdl, x, y, text, font_chars, font, text_color, view_x,
+                    view_y, arg_a, arg_b);
+}
 
 Gfx *renderText(Gfx *gdl, s32 *x, s32 *y, char *text, s32 fontChars, s32 font,
                 u32 color, s16 viewX, s16 viewY) {
-#if RENDER_TEXT_WITH_OUTLINE
-  return textRenderGlow(gdl, x, y, text, fontChars, font, (s32)color,
-                        0x000000FF, viewX, viewY, 0, 0);
-#else
-  return textRender(gdl, x, y, text, fontChars, font, (s32)color, viewX, viewY,
-                    0, 0);
-#endif
+  return practice_render_text_with_shadow(
+      gdl, x, y, (s8 *)text, fontChars, font, (s32)color, 0x000000FF, viewX,
+      viewY, 0, 0);
 }
 
 Gfx *practice_ui_render_pill(Gfx *gdl, const char *text, u32 text_color,

@@ -5,6 +5,7 @@
 #include "practice_splits.h"
 #include "practice_sram.h"
 #include "practice_tests.h"
+#include "practice_ui.h"
 #include <bondconstants.h>
 #include <fr.h>
 #include <joy.h>
@@ -672,9 +673,9 @@ static Gfx *print_option(Gfx *gdl, s32 x, s32 y, const char *text, s32 selected,
   }
 
   if (selected) {
-    return textRenderGlow(gdl, &x, &y, (s8 *)text, ptrFontZurichBoldChars,
-                          ptrFontZurichBold, TEXT_COLOR, TEXT_SELECTED_GLOW,
-                          viGetX(), viGetY(), 0, 0);
+    return practice_render_text_with_shadow(
+        gdl, &x, &y, (s8 *)text, ptrFontZurichBoldChars, ptrFontZurichBold,
+        TEXT_COLOR, TEXT_SELECTED_GLOW, viGetX(), viGetY(), 0, 0);
   }
 
   return frontPrintText(
@@ -786,9 +787,9 @@ static Gfx *render_settings(Gfx *gdl, char *heading, u32 heading_color,
     return gdl;
   }
   if (*y >= SETTINGS_VIEW_TOP) {
-    gdl = textRenderGlow(gdl, &x, y, heading, ptrFontZurichBoldChars,
-                         ptrFontZurichBold, heading_color, 0xffffffff, viGetX(),
-                         viGetY(), 0, 0);
+    gdl = practice_render_text_with_shadow(
+        gdl, &x, y, heading, ptrFontZurichBoldChars, ptrFontZurichBold,
+        heading_color, 0xffffffff, viGetX(), viGetY(), 0, 0);
     if (show_splits_badge) {
       gdl = render_heading_badge(gdl, x, *y, "has splits", 0xff0000cc);
     }
