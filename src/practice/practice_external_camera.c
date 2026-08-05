@@ -13,6 +13,7 @@
 #include "objecthandler.h"
 #include "player.h"
 #include "player_2.h"
+#include "practice_config.h"
 #include "practice_render.h"
 #include "stan.h"
 #include <fr.h>
@@ -95,9 +96,20 @@ void practice_external_camera_begin_frame(void) {
   g_ExternalCameraViewCount = 0;
 }
 
+s32 practice_external_camera_max_views(void) {
+  if (practice.max_external_cameras < 1) {
+    return 1;
+  }
+  if (practice.max_external_cameras > PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS) {
+    return PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS;
+  }
+  return practice.max_external_cameras;
+}
+
 s32 practice_external_camera_add_view(
     const struct PracticeExternalCameraView *view) {
   if (view == NULL ||
+      g_ExternalCameraViewCount >= practice_external_camera_max_views() ||
       g_ExternalCameraViewCount >= PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS) {
     return FALSE;
   }

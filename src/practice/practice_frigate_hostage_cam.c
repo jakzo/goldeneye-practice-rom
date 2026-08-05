@@ -25,11 +25,9 @@
 #define FRIGATE_HOSTAGE_REACHED_AI_OFFSET 91
 #define FRIGATE_HOSTAGE_ESCAPED_AI_OFFSET 224
 #define FRIGATE_HOSTAGE_REACHED_DISTANCE 500.0f
-#define FRIGATE_HOSTAGE_MAX_CAMERAS 1
 #define FRIGATE_HOSTAGE_ROUTE_REPLAN_INDEX 3
 #define FRIGATE_HOSTAGE_MAX_ROUTE_CHUNKS 32
-#define FRIGATE_HOSTAGE_REROLL_STATUS_TICKS                                  \
-  ((s32)(2.0f * CHRLV_FRAMERATE_F))
+#define FRIGATE_HOSTAGE_REROLL_STATUS_TICKS ((s32)(2.0f * CHRLV_FRAMERATE_F))
 #define HOSTAGE_PROGRESS_X 5
 #define HOSTAGE_PROGRESS_Y 12
 #define HOSTAGE_PROGRESS_LINE_HEIGHT 10
@@ -106,8 +104,7 @@ static void reset_hostage_progress(void) {
     s_FrigateHostageProgress[i].terminal_reason = FRIGATE_HOSTAGE_ACTIVE;
     s_FrigateHostageProgress[i].route_started = FALSE;
     s_FrigateHostageProgress[i].selection_random = 0;
-    s_FrigateHostageProgress[i].reroll_reason =
-        FRIGATE_HOSTAGE_REROLL_NONE;
+    s_FrigateHostageProgress[i].reroll_reason = FRIGATE_HOSTAGE_REROLL_NONE;
     s_FrigateHostageProgress[i].reroll_ticks = 0;
   }
 
@@ -230,9 +227,8 @@ static f32 hostage_route_tail_distance(ChrRecord *hostage, waypoint *anchor) {
     for (index = 1; index <= FRIGATE_HOSTAGE_ROUTE_REPLAN_INDEX; index++) {
       to = route[index];
       if (to == NULL) {
-        return distance +
-               horizontal_distance(from_position,
-                                   &hostage->act_gopos.targetpos);
+        return distance + horizontal_distance(from_position,
+                                              &hostage->act_gopos.targetpos);
       }
 
       to_position = hostage_waypoint_position(to);
@@ -249,8 +245,9 @@ static f32 hostage_route_tail_distance(ChrRecord *hostage, waypoint *anchor) {
   return -1.0f;
 }
 
-static f32 cached_hostage_route_tail_distance(
-    ChrRecord *hostage, FrigateHostageProgress *progress, waypoint *anchor) {
+static f32 cached_hostage_route_tail_distance(ChrRecord *hostage,
+                                              FrigateHostageProgress *progress,
+                                              waypoint *anchor) {
   if (progress->tail_anchor != anchor ||
       progress->tail_target != hostage->act_gopos.target_path ||
       progress->tail_distance < 0.0f) {
@@ -267,8 +264,8 @@ static f32 cached_hostage_route_tail_distance(
  * movement leaves the prop at the start of its current segment, so use the
  * engine's interpolated segment distance for that first leg.
  */
-static f32 hostage_route_distance_remaining(
-    ChrRecord *hostage, FrigateHostageProgress *progress) {
+static f32 hostage_route_distance_remaining(ChrRecord *hostage,
+                                            FrigateHostageProgress *progress) {
   waypoint *route_waypoint;
   const coord3d *from;
   const coord3d *to;
@@ -326,8 +323,8 @@ static f32 hostage_route_distance_remaining(
   return distance + tail_distance;
 }
 
-static f32 hostage_route_seconds_remaining(
-    ChrRecord *hostage, FrigateHostageProgress *progress) {
+static f32 hostage_route_seconds_remaining(ChrRecord *hostage,
+                                           FrigateHostageProgress *progress) {
   f32 distance = hostage_route_distance_remaining(hostage, progress);
   f32 distance_per_tick;
 
@@ -411,7 +408,6 @@ void practice_frigate_hostage_cam_tick(void) {
   AIRecord *escape_ai;
   ChrRecord *hostage;
   coord3d virtual_position;
-  s32 camera_count = 0;
   s32 i;
 
   if (bossGetStageNum() != LEVELID_FRIGATE) {
@@ -430,16 +426,12 @@ void practice_frigate_hostage_cam_tick(void) {
     hostage = chrFindByLiteralId(s_FrigateHostageChrIds[i]);
     update_hostage_progress(hostage, i, escape_ai);
 
-    if (practice.frigate_hostage_cam &&
-        camera_count < FRIGATE_HOSTAGE_MAX_CAMERAS &&
-        is_freed_living_hostage(hostage)) {
+    if (practice.frigate_hostage_cam && is_freed_living_hostage(hostage)) {
       chrlvGetPatrolPercentOrPosition(hostage, &virtual_position);
       adjust_virtual_position_y(hostage, &virtual_position);
-      if (practice_external_camera_add_npc_follow_view(
-              hostage, &s_FrigateHostageCamera, &virtual_position,
-              PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY, 0)) {
-        camera_count++;
-      }
+      practice_external_camera_add_npc_follow_view(
+          hostage, &s_FrigateHostageCamera, &virtual_position,
+          PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY, 0);
     }
   }
 }
@@ -459,7 +451,7 @@ static FrigateHostageProgress *hostage_progress_for_order(s32 order,
 }
 
 static f32 hostage_execution_seconds_remaining(ChrRecord *taker,
-                                                AIRecord *taker_ai) {
+                                               AIRecord *taker_ai) {
   f32 execution_seconds;
 
   if (taker == NULL || taker->prop == NULL || taker->ailist != taker_ai ||
@@ -514,8 +506,7 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
     taker = chrFindByLiteralId(s_FrigateHostageTakerChrIds[hostage_index]);
 
     if (hostage == NULL || hostage->prop == NULL || chrIsDead(hostage) ||
-        hostage->ailist != hostage_ai || taker == NULL ||
-        taker->prop == NULL) {
+        hostage->ailist != hostage_ai || taker == NULL || taker->prop == NULL) {
       continue;
     }
 
@@ -538,8 +529,7 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
     pre_release_status = FALSE;
 
     if (hostage != NULL && hostage->prop != NULL && !chrIsDead(hostage) &&
-        hostage->ailist == hostage_ai && taker != NULL &&
-        taker->prop != NULL) {
+        hostage->ailist == hostage_ai && taker != NULL && taker->prop != NULL) {
       if (chrIsDead(taker)) {
         sprintf(text, "%d. waiting", order);
         color = HOSTAGE_PROGRESS_YELLOW;
@@ -619,8 +609,8 @@ Gfx *practice_frigate_hostage_progress_render(Gfx *gdl) {
         seconds = hostage_route_seconds_remaining(hostage, progress);
         if (seconds >= 0.0f) {
           if (reroll_status != NULL) {
-            sprintf(text, "%d. PAD%d - %.1fs - %s", order, pad_number,
-                    seconds, reroll_status);
+            sprintf(text, "%d. PAD%d - %.1fs - %s", order, pad_number, seconds,
+                    reroll_status);
           } else {
             sprintf(text, "%d. PAD%d - %.1fs", order, pad_number, seconds);
           }

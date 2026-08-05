@@ -11,7 +11,7 @@
 #include <math.h>
 #include <ultra64.h>
 
-#define MAX_GRENADE_CAM_SLOTS 1
+#define MAX_GRENADE_CAM_SLOTS PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS
 #define FREEZE_DURATION_SEC 2.0f
 #define CAMERA_HEIGHT 300.0f
 #define MIN_CAMERA_HEIGHT 300.0f
@@ -66,10 +66,11 @@ static bool has_thrown_item_finished(struct ObjectRecord *obj) {
 
 static void submit_active_views(void) {
   s32 s;
+  s32 slot_limit = practice_external_camera_max_views();
   struct grenade_cam_slot *slot;
   struct PracticeExternalCameraView view;
 
-  for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
+  for (s = 0; s < slot_limit; s++) {
     slot = &g_GrenadeCamSlots[s];
     if (!slot->active)
       continue;
@@ -97,6 +98,7 @@ static void submit_active_views(void) {
 void practice_grenade_cam_tick(void) {
   s32 i;
   s32 s;
+  s32 slot_limit = practice_external_camera_max_views();
   struct PropRecord *player_prop = get_curplayer_positiondata();
   struct Projectile *p;
   struct grenade_cam_slot *slot;
@@ -120,7 +122,12 @@ void practice_grenade_cam_tick(void) {
     return;
   }
 
-  for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
+  for (s = slot_limit; s < MAX_GRENADE_CAM_SLOTS; s++) {
+    g_GrenadeCamSlots[s].active = FALSE;
+    g_GrenadeCamSlots[s].item_obj = NULL;
+  }
+
+  for (s = 0; s < slot_limit; s++) {
     slot = &g_GrenadeCamSlots[s];
     if (!slot->active)
       continue;
@@ -175,14 +182,14 @@ void practice_grenade_cam_tick(void) {
     if (!is_player_thrown_item)
       continue;
 
-    for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
+    for (s = 0; s < slot_limit; s++) {
       if (g_GrenadeCamSlots[s].active &&
           g_GrenadeCamSlots[s].item_obj == p->obj) {
         goto next_item;
       }
     }
 
-    for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
+    for (s = 0; s < slot_limit; s++) {
       slot = &g_GrenadeCamSlots[s];
       if (slot->active)
         continue;

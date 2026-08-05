@@ -4,7 +4,7 @@
 #include <bondtypes.h>
 #include <ultra64.h>
 
-#define PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS 1
+#define PRACTICE_EXTERNAL_CAMERA_MAX_VIEWS 2
 
 enum PracticeExternalCameraFlags {
   PRACTICE_EXTERNAL_CAMERA_DRAW_CROSSHAIR = 1 << 0,
@@ -41,6 +41,7 @@ struct PracticeNpcFollowCameraParams {
 };
 
 void practice_external_camera_begin_frame(void);
+s32 practice_external_camera_max_views(void);
 s32 practice_external_camera_add_view(
     const struct PracticeExternalCameraView *view);
 s32 practice_external_camera_make_npc_follow_view(

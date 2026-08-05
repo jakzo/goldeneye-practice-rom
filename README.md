@@ -41,6 +41,7 @@
     - 2.x control styles are not currently supported
 - **Grenade camera**
     - When throwing most projectiles, shows a picture-in-picture view that follows it so you can see where it landed
+    - The maximum number of external camera views defaults to 1 but can be raised to 2, though two views are likely to exhaust graphics memory and crash
 - **Time scale control**
     - During gameplay press `L + D-Left` to decrease game speed by 10%
     - During gameplay press `L + D-Right` to increase game speed by 10%

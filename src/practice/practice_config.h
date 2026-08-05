@@ -49,6 +49,7 @@ struct PracticeConfig {
   s32 frigate_hostage_progress;
   s32 frigate_ideal_hostage_pads;
   s32 frigate_fast_guard_death;
+  s32 max_external_cameras;
 };
 
 extern struct PracticeConfig practice;

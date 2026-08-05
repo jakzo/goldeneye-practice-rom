@@ -38,6 +38,7 @@ struct PracticeConfig practice = {
     TRUE,                     // frigate_hostage_progress
     FALSE,                    // frigate_ideal_hostage_pads
     FALSE,                    // frigate_fast_guard_death
+    1,                        // max_external_cameras
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -146,6 +147,10 @@ static const struct PracticeOption s_on_off[] = {
     {"On", TRUE},
     {"Off", FALSE},
 };
+static const struct PracticeOption s_max_external_cameras[] = {
+    {"1", 1},
+    {"2 (crashes likely)", 2},
+};
 
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
 static s32 frigate_apply(s32 stage_id) { return stage_id == LEVELID_FRIGATE; }
@@ -241,6 +246,8 @@ static const struct PracticeSetting s_global_settings[] = {
     OPTIONS_SETTING("Record replay seeds", record_replay_seeds, s_off_on, NULL),
 #endif
     OPTIONS_SETTING("Grenade cam", grenade_cam, s_off_on, NULL),
+    OPTIONS_SETTING("Max cameras", max_external_cameras, s_max_external_cameras,
+                    NULL),
     OPTIONS_SETTING("Log on split", log_splits, s_off_on, NULL),
     SLIDER_SETTING("Log text duration", log_message_duration, 0.1f, 20.0f,
                    0.1f),
