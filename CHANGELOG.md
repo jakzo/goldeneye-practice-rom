@@ -2,11 +2,35 @@
 
 # 0.7.0
 
-- Added a Frigate option to make every freed hostage choose the fastest escape destination (PAD2 a.k.a. PAD145)
+## Frigate practice tools
+
+- Added a Frigate option to make every freed hostage choose the fastest escape destination (PAD145)
 - Added a Frigate option to make guards use the fastest death animation for the hit body part
-- Fixed crash when loading state
+- Expanded the hostage progress display to track hostages before they are freed, including the taker's execution countdown, wounded-but-alive state and despawn wait
+
+## External cameras
+
+- Added a setting for one or two simultaneous external-camera views; one remains the default because two views may exhaust graphics memory and crash
+- Hidden external-camera views while the game is paused
+- Prevented external camera rendering from advancing animations and gameplay state
+
+## Interface and performance
+
+- Reduced practice UI text-rendering cost by replacing nine-copy outlines with a single offset shadow, helping prevent display-list exhaustion
+- Repositioned the mission, target and best times and lag readout on the mission-complete screen
 - Fixed log text not rendering while paused via hotkey
-- Fixed external camera physics weirdness
+
+## Save states
+
+- Fixed new state not rendering while paused after state load
+- Fixed crash when loading state
+
+## Builds and testing
+
+- Added region-specific replay fixtures and Japanese Runway replay coverage, with validation and automatic skipping when a replay is unavailable for a region
+- Updated release testing to run the available regional replay coverage and skip unsupported Japanese Archives profiling
+- Increased the replay-recording test timeout to avoid premature failures
+- Fixed an incorrect symbol reference in the throwable-weapon assembly
 
 # 0.6.1
 
