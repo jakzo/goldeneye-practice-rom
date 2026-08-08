@@ -26,11 +26,17 @@ MINIMUM_TEST_TIMEOUT_SECONDS = {
     "REPLAY": 180,
     "REPLAY_DAM": 300,
     "REPLAY_FRIGATE": 360,
+    "REPLAY_RUNWAY_SAVE_STATES": 600,
 }
 SRAM_SIZE_BYTES = 128 * 1024
-REPLAY_HEADER_OFFSET = 0x600
-REPLAY_REGION_OFFSET = REPLAY_HEADER_OFFSET + 0x10
+REPLAY_HEADER_OFFSET = 0x280
+LEGACY_REPLAY_HEADER_OFFSET = 0x600
+REPLAY_MAGIC = 0x47455250
 REPLAY_REGIONS = {"US": 1, "JP": 2, "EU": 3}
+SAVE_STATE_MAGIC = 0x47455353
+TEST_SAVE_STATE_SRAM_OFFSET = 0x280
+TEST_REPLAY_ROM_OFFSET = 0x00FE0000
+ROM_CONFIG_OFFSET = 0x00FFFFC0
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
@@ -39,6 +45,7 @@ REPLAY_FIXTURES = {
     "US": {
         "REPLAY_DAM": ROOT / "tests/replays/dam.ram",
         "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
+        "REPLAY_RUNWAY_SAVE_STATES": ROOT / "tests/replays/runway.ram",
         "REPLAY_FRIGATE": ROOT / "tests/replays/frigate_00.ram",
         "REPLAY_GRENADE_CAM": ROOT / "tests/replays/runway_agent_grenade.ram",
         "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
@@ -54,6 +61,7 @@ REPLAY_FIXTURES = {
         "REPLAY_RUNWAY": ROOT / "tests/replays/runway_jp.ram",
     },
 }
+MANUAL_TEST_CASES = {"REPLAY_RUNWAY_SAVE_STATES"}
 PRINT_LOCK = threading.Lock()
 COLOR_RESET = "\033[0m"
 TEST_COLOR_CODES = (
@@ -140,6 +148,37 @@ def parse_args():
         choices=("US", "EU", "JP"),
         default="US",
         help="ROM region version to build and test (default: US)",
+    )
+    parser.add_argument(
+        "--test-param",
+        type=int,
+        default=0,
+        metavar="VALUE",
+        help="integer parameter exposed to the selected ROM test",
+    )
+    parser.add_argument(
+        "--state-fixture",
+        type=Path,
+        metavar="PATH",
+        help="inject a raw save-state fixture into the test SRAM image",
+    )
+    parser.add_argument(
+        "--replay-fixture",
+        type=Path,
+        metavar="PATH",
+        help="use an explicit replay SRAM fixture instead of the configured one",
+    )
+    parser.add_argument(
+        "--output-state",
+        type=Path,
+        metavar="PATH",
+        help="extract the raw save state written by a successful test",
+    )
+    parser.add_argument(
+        "--output-state-dir",
+        type=Path,
+        metavar="PATH",
+        help="extract every emitted interval state into this directory",
     )
     parser.add_argument(
         "--timeout",
@@ -300,15 +339,20 @@ def print_test_line(test_case, line, *, file=sys.stdout):
         print(f"{prefix} {line}", file=file, flush=True)
 
 
-def select_test(test_case, rom):
+def select_test(test_case, rom, test_param=0, boot_level=None):
+    command = [
+        sys.executable,
+        str(PATCH_ROM_SCRIPT),
+        str(rom),
+        "--test-case",
+        test_case,
+        "--test-param",
+        str(test_param),
+    ]
+    if boot_level is not None:
+        command.extend(("--boot-level", str(boot_level)))
     result = subprocess.run(
-        [
-            sys.executable,
-            str(PATCH_ROM_SCRIPT),
-            str(rom),
-            "--test-case",
-            test_case,
-        ],
+        command,
         cwd=ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -327,26 +371,165 @@ def replay_fixture_for(test_case, version):
     return REPLAY_FIXTURES[version].get(test_case)
 
 
-def install_replay_fixture(test_case, rom, version):
-    fixture = replay_fixture_for(test_case, version)
+def install_replay_fixture(
+    test_case, rom, version, state_fixture=None, replay_fixture=None
+):
+    fixture = replay_fixture or replay_fixture_for(test_case, version)
     if fixture is None:
         if is_fixture_replay_test(test_case):
             raise ValueError(
                 f"no {version} replay fixture is configured for {test_case}"
             )
-        return
+        return None
 
     sram = fixture.read_bytes()
     if len(sram) != SRAM_SIZE_BYTES:
         raise ValueError(f"{fixture.name} replay SRAM fixture has the wrong size")
-    actual_region = sram[REPLAY_REGION_OFFSET]
+    replay_header_offset = next(
+        (
+            offset
+            for offset in (REPLAY_HEADER_OFFSET, LEGACY_REPLAY_HEADER_OFFSET)
+            if int.from_bytes(sram[offset : offset + 4], "big") == REPLAY_MAGIC
+        ),
+        None,
+    )
+    if replay_header_offset is None:
+        raise ValueError(f"{fixture.name} does not contain a practice replay")
+    replay_size = int.from_bytes(
+        sram[replay_header_offset + 8 : replay_header_offset + 12], "big"
+    )
+    if replay_size == 0 or replay_header_offset + replay_size > len(sram):
+        raise ValueError(f"{fixture.name} replay has an invalid size")
+    actual_region = sram[replay_header_offset + 0x10]
     expected_region = REPLAY_REGIONS[version]
     if actual_region != expected_region:
         raise ValueError(
             f"{fixture.name} is region {actual_region}, expected {expected_region} "
             f"for {version}"
         )
+    boot_level = sram[replay_header_offset + 0x11]
+    if test_case == "REPLAY_RUNWAY_SAVE_STATES":
+        if TEST_REPLAY_ROM_OFFSET + replay_size > ROM_CONFIG_OFFSET:
+            raise ValueError(f"{fixture.name} is too large for the test ROM slot")
+        with rom.open("r+b") as rom_file:
+            rom_file.seek(TEST_REPLAY_ROM_OFFSET)
+            rom_file.write(
+                sram[replay_header_offset : replay_header_offset + replay_size]
+            )
+
+    if replay_header_offset != REPLAY_HEADER_OFFSET:
+        relocated = bytearray(sram)
+        relocated[
+            REPLAY_HEADER_OFFSET : REPLAY_HEADER_OFFSET + replay_size
+        ] = sram[replay_header_offset : replay_header_offset + replay_size]
+        sram = bytes(relocated)
+
+    if state_fixture is not None:
+        replay_end = REPLAY_HEADER_OFFSET + replay_size
+        if (
+            test_case != "REPLAY_RUNWAY_SAVE_STATES"
+            and replay_end > TEST_SAVE_STATE_SRAM_OFFSET
+        ):
+            raise ValueError(
+                f"{fixture.name} replay data overlaps the test state region"
+            )
+        state = state_fixture.read_bytes()
+        if len(state) < 16:
+            raise ValueError(f"{state_fixture.name} save-state fixture is too small")
+        if int.from_bytes(state[0:4], "big") != SAVE_STATE_MAGIC:
+            raise ValueError(f"{state_fixture.name} has an invalid save-state magic")
+        declared_size = int.from_bytes(state[12:16], "big")
+        if declared_size == 0:
+            declared_size = int.from_bytes(state[6:8], "big")
+        if declared_size != len(state):
+            raise ValueError(
+                f"{state_fixture.name} declares {declared_size} bytes, "
+                f"but contains {len(state)}"
+            )
+        state_end = TEST_SAVE_STATE_SRAM_OFFSET + len(state)
+        if state_end > SRAM_SIZE_BYTES:
+            raise ValueError(f"{state_fixture.name} does not fit in test SRAM")
+        combined = bytearray(sram)
+        combined[TEST_SAVE_STATE_SRAM_OFFSET:state_end] = state
+        sram = bytes(combined)
+
     rom.with_suffix(".ram").write_bytes(sram)
+    return boot_level
+
+
+def extract_test_save_state(output, output_path):
+    size = None
+    encoded = []
+    complete = False
+    for line in output.splitlines():
+        if line.startswith("RUNWAY_STATE_BEGIN size="):
+            size = int(line.partition("=")[2])
+            encoded = []
+            complete = False
+        elif size is not None and line.startswith("RUNWAY_STATE_DATA "):
+            encoded.append(line.partition(" ")[2])
+        elif size is not None and line == "RUNWAY_STATE_END":
+            complete = True
+            break
+
+    if size is None or not complete:
+        raise ValueError("test did not emit a complete save state")
+    try:
+        state = bytes.fromhex("".join(encoded))
+    except ValueError as error:
+        raise ValueError("test emitted invalid save-state hex") from error
+    if len(state) != size:
+        raise ValueError(f"test emitted {len(state)} bytes, expected {size}")
+    if len(state) < 16 or int.from_bytes(state[0:4], "big") != SAVE_STATE_MAGIC:
+        raise ValueError("test emitted an invalid save-state header")
+    declared_size = int.from_bytes(state[12:16], "big")
+    if declared_size == 0:
+        declared_size = int.from_bytes(state[6:8], "big")
+    if declared_size != size:
+        raise ValueError("emitted save-state header has the wrong size")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_bytes(state)
+
+
+def extract_interval_save_states(output, output_dir):
+    size = None
+    encoded = []
+    pending_state = None
+    written = []
+    marker = re.compile(
+        r"^RUNWAY_STATE_CAPTURED nominal=(\d+) timestamp=(\d+)$"
+    )
+
+    for line in output.splitlines():
+        if line.startswith("RUNWAY_STATE_BEGIN size="):
+            size = int(line.partition("=")[2])
+            encoded = []
+        elif size is not None and line.startswith("RUNWAY_STATE_DATA "):
+            encoded.append(line.partition(" ")[2])
+        elif size is not None and line == "RUNWAY_STATE_END":
+            pending_state = bytes.fromhex("".join(encoded))
+            if len(pending_state) != size:
+                raise ValueError(
+                    f"test emitted {len(pending_state)} bytes, expected {size}"
+                )
+            size = None
+        else:
+            match = marker.match(line)
+            if match:
+                if pending_state is None:
+                    raise ValueError("capture marker has no preceding state")
+                nominal = int(match.group(1))
+                path = output_dir / f"{nominal:04d}.state"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(pending_state)
+                written.append(path)
+                pending_state = None
+
+    if size is not None or pending_state is not None:
+        raise ValueError("test emitted an incomplete interval state")
+    if not written:
+        raise ValueError("test emitted no interval states")
+    return written
 
 
 def stream_output(process, output_queue):
@@ -432,7 +615,8 @@ def run_test(
                 )
 
             output.append(line)
-            print_test_line(test_case, line.rstrip("\r\n"))
+            if not line.startswith("RUNWAY_STATE_DATA "):
+                print_test_line(test_case, line.rstrip("\r\n"))
             if line.startswith(WARNING_PREFIX) or line.startswith(ERROR_PREFIX):
                 return False, line.strip(), "".join(output)
             if "TEST_FAILED" in line:
@@ -526,6 +710,11 @@ def run_test_case(
     timeout,
     wait_for_emulator_exit,
     version,
+    test_param=0,
+    state_fixture=None,
+    output_state=None,
+    replay_fixture=None,
+    output_state_dir=None,
 ):
     timeout = max(timeout, MINIMUM_TEST_TIMEOUT_SECONDS.get(test_case, 0))
     test_dir = temp_dir / test_case
@@ -534,12 +723,14 @@ def run_test_case(
     shutil.copyfile(rom_path, rom)
 
     try:
-        install_replay_fixture(test_case, rom, version)
+        boot_level = install_replay_fixture(
+            test_case, rom, version, state_fixture, replay_fixture
+        )
     except (OSError, ValueError) as error:
         return TestResult(test_case, False, f"fixture setup failed: {error}", 0.0)
 
     print_test_line(test_case, "=== patching ===")
-    if not select_test(test_case, rom):
+    if not select_test(test_case, rom, test_param, boot_level):
         return TestResult(test_case, False, "ROM patch failed", 0.0)
 
     if stop_event.is_set():
@@ -567,6 +758,18 @@ def run_test_case(
     duration = time.monotonic() - started_at
     if passed and video_path:
         video_path.unlink(missing_ok=True)
+    if passed and output_state is not None:
+        try:
+            extract_test_save_state(output, output_state)
+        except (OSError, ValueError) as error:
+            passed = False
+            detail = f"state extraction failed: {error}"
+    if output_state_dir is not None:
+        try:
+            extract_interval_save_states(output, output_state_dir)
+        except (OSError, ValueError) as error:
+            passed = False
+            detail = f"interval state extraction failed: {error}"
     return TestResult(test_case, passed, detail, duration, output)
 
 
@@ -690,13 +893,48 @@ def main():
             return 2
         test_cases = [args.test]
 
+    if (
+        args.test_param
+        or args.state_fixture
+        or args.replay_fixture
+        or args.output_state
+        or args.output_state_dir
+    ) and not args.test:
+        print(
+            "error: parameterized replay/save-state options require --test",
+            file=sys.stderr,
+        )
+        return 2
+
+    if args.version != "US" and (
+        args.test_param
+        or args.state_fixture
+        or args.replay_fixture
+        or args.output_state
+        or args.output_state_dir
+    ):
+        print("error: parameterized save-state fixtures are US-only", file=sys.stderr)
+        return 2
+
+    if args.state_fixture and not args.state_fixture.is_absolute():
+        args.state_fixture = ROOT / args.state_fixture
+    if args.replay_fixture and not args.replay_fixture.is_absolute():
+        args.replay_fixture = ROOT / args.replay_fixture
+    if args.output_state and not args.output_state.is_absolute():
+        args.output_state = ROOT / args.output_state
+    if args.output_state_dir and not args.output_state_dir.is_absolute():
+        args.output_state_dir = ROOT / args.output_state_dir
+
     excluded_tests = set(args.exclude)
+    if not args.test:
+        excluded_tests.update(MANUAL_TEST_CASES)
     test_cases = [test for test in test_cases if test not in excluded_tests]
 
     unavailable_replays = [
         test
         for test in test_cases
         if is_fixture_replay_test(test)
+        and args.replay_fixture is None
         and replay_fixture_for(test, args.version) is None
     ]
     if args.test and unavailable_replays:
@@ -762,6 +1000,11 @@ def main():
                             args.timeout,
                             args.wait_for_emulator_exit,
                             args.version,
+                            args.test_param,
+                            args.state_fixture,
+                            args.output_state,
+                            args.replay_fixture,
+                            args.output_state_dir,
                         ): test_case
                         for test_case in test_cases
                     }

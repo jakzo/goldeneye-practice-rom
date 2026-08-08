@@ -1,4 +1,5 @@
 #include "practice_states_chr.h"
+#include "bondhead.h"
 #include "chr.h"
 #include "chrai.h"
 #include "chrobjhandler.h"
@@ -7,6 +8,7 @@
 #include "practice_states_utils.h"
 #include "practice_ui.h"
 #include <bondconstants.h>
+#include <assert.h>
 #include <snd.h>
 #include <string.h>
 
@@ -16,13 +18,30 @@ extern Vertex *sub_GAME_7F09BE4C(s32 vertexCount, s32 allocationType,
                                  void *allocationData, s32 arg3);
 extern void sub_GAME_7F09C044(Vertex *vertices);
 extern s32 dword_CODE_bss_8007A0D0;
+extern s32 dword_CODE_bss_8007A0D4;
 extern Vertex *dword_CODE_bss_8007A0E0;
+extern s16 word_CODE_bss_8007A0F0;
+
+typedef struct BloodVertexAllocation {
+  Vertex *vertices;
+  s32 unk04;
+  s32 unk08;
+  s16 count;
+  s16 ref_count;
+  s16 next;
+  s16 previous;
+} BloodVertexAllocation;
+
+extern BloodVertexAllocation *dword_CODE_bss_8007A0E8;
 
 #define CHR_COMBAT_HIDDEN_MASK                                                 \
   (CHRHIDDEN_FIRE_WEAPON_LEFT | CHRHIDDEN_FIRE_WEAPON_RIGHT |                  \
-   CHRHIDDEN_FIRE_TRACER | CHRHIDDEN_MOVING)
+   CHRHIDDEN_FIRE_TRACER | CHRHIDDEN_MOVING | CHRHIDDEN_OFFSCREEN_PATROL)
 
-#define CHR_LIFECYCLE_HIDDEN_MASK CHRHIDDEN_REMOVE
+#define CHR_LIFECYCLE_HIDDEN_MASK                                             \
+  (CHRHIDDEN_DROP_HELD_ITEMS | CHRHIDDEN_ALERT_GUARD_RELATED |                \
+   CHRHIDDEN_REMOVE | CHRHIDDEN_BACKGROUND_AI | CHRHIDDEN_0400 |              \
+   CHRHIDDEN_FREEZE)
 
 #define CHR_FLINCH_HIDDEN_MASK CHRHIDDEN_RAND_FLINCH_MASK
 
@@ -32,12 +51,34 @@ extern Vertex *dword_CODE_bss_8007A0E0;
 #define MAX_MODEL_TRAVERSAL_DEPTH 64
 #define MAX_MODEL_TRAVERSAL_NODES 512
 
-#define CHR_BEHAVIOR_FLAGS_MASK                                                \
-  (CHRSTART_FORCENOBLOOD | CHRFLAG_CAN_SHOOT_CHRS | CHRFLAG_NO_AUTOAIM |       \
-   CHRFLAG_LOCK_Y_POS | CHRFLAG_NO_SHADOW | CHRFLAG_IGNORE_ANIM_TRANSLATION |  \
-   CHRFLAG_IMPACT_ALWAYS | CHRFLAG_INCREASE_RUNNING_SPEED |                    \
-   CHRFLAG_COUNT_DEATH_AS_CIVILIAN | CHRFLAG_CULL_USING_HITBOX |               \
-   CHRFLAG_HIDDEN)
+static f32 normalize_chr_heading(f32 heading) {
+  union {
+    f32 value;
+    u32 bits;
+  } raw;
+  u32 exponent;
+
+  raw.value = heading;
+  exponent = raw.bits & 0x7f800000;
+
+  /*
+   * Intro camguards can leave the root heading as a denormal (Runway uses
+   * 0x000000a4).  It is effectively zero, but setsubroty's subtraction traps
+   * on denormal input on the N64 FPU when the character is recreated.
+   */
+  if (exponent == 0)
+    return 0.0f;
+
+  if (exponent == 0x7f800000) {
+    practiceLogError("CHR model heading is not finite: %08x", raw.bits);
+    assert(FALSE);
+    return 0.0f;
+  }
+
+  return heading;
+}
+
+#define CHR_BEHAVIOR_FLAGS_MASK 0xffffffffU
 
 typedef struct FiringAnimationTableRef {
   struct weapon_firing_animation_table *table;
@@ -189,11 +230,21 @@ static ModelAnimation *get_animation_by_offset(s32 offset) {
 }
 
 static s16 get_waypoint_index(const waypoint *point) {
+  s16 index;
+
   if (point == NULL || g_CurrentSetup.pathwaypoints == NULL) {
     return -1;
   }
 
-  return point - g_CurrentSetup.pathwaypoints;
+  /* waypointFindRoute writes a NULL terminator but leaves later route-array
+   * slots untouched. Some ACT_GOPOS records therefore contain stack junk in
+   * unused slots; only exact pointers into the live waypoint table are valid. */
+  for (index = 0; g_CurrentSetup.pathwaypoints[index].padID >= 0; index++) {
+    if (point == &g_CurrentSetup.pathwaypoints[index]) {
+      return index;
+    }
+  }
+  return -1;
 }
 
 static waypoint *get_waypoint_by_index(s16 index) {
@@ -267,12 +318,16 @@ static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
   case ACT_DIE:
     // notifychrindex (offset 0) is reused by chrlvIterateGuardSeeShotDie as the
     // guard-notification scan cursor. The thud frames fire one-shot SFX and are
-    // set to -1.0 once played, so restoring them prevents replay. timeextra,
-    // elapseextra, extraspeed, and drcarollimagedelay are written at death
-    // entry but never read, so they are omitted.
+    // set to -1.0 once played, so restoring them prevents replay. The remaining
+    // fields drive the corpse's extra movement in sub_GAME_7F01FC10 and must
+    // remain intact to avoid invalid floating-point divisions after loading.
     write_u32(stream, chr->act_die.notifychrindex);
     write_f32(stream, chr->act_die.thudframe1);
     write_f32(stream, chr->act_die.thudframe2);
+    write_f32(stream, chr->act_die.timeextra);
+    write_f32(stream, chr->act_die.elapseextra);
+    write_bytes(stream, &chr->act_die.extraspeed, sizeof(coord3d));
+    write_u16(stream, (u16)chr->act_die.drcarollimagedelay);
     break;
   case ACT_DEAD:
     // The corpse fade/reap timer lives in the offset-0 word, which the engine
@@ -454,11 +509,22 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
     s32 notifychrindex = read_u32(stream);
     f32 thudframe1 = read_f32(stream);
     f32 thudframe2 = read_f32(stream);
+    f32 timeextra = read_f32(stream);
+    f32 elapseextra = read_f32(stream);
+    coord3d extraspeed;
+    s16 drcarollimagedelay;
+
+    read_bytes(stream, &extraspeed, sizeof(coord3d));
+    drcarollimagedelay = (s16)read_u16(stream);
 
     if (chr != NULL) {
       chr->act_die.notifychrindex = notifychrindex;
       chr->act_die.thudframe1 = thudframe1;
       chr->act_die.thudframe2 = thudframe2;
+      chr->act_die.timeextra = timeextra;
+      chr->act_die.elapseextra = elapseextra;
+      chr->act_die.extraspeed = extraspeed;
+      chr->act_die.drcarollimagedelay = drcarollimagedelay;
     }
     break;
   }
@@ -751,156 +817,258 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
   }
 }
 
-static void save_model_animation(StateStream *stream, const Model *model) {
-  ModelRwData_HeaderRecord *root_data;
-  bool has_root_data =
-      model->obj != NULL && model->obj->RootNode != NULL &&
-      (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
+bool practice_states_save_chr_action(StateStream *stream,
+                                     const ChrRecord *chr) {
+  if (!is_supported_chr_action(chr)) {
+    practiceLogWarn("Unsupported viewer CHR action %d", chr->actiontype);
+    return FALSE;
+  }
 
-  write_u32(stream, get_animation_offset(model->anim));
-  write_u32(stream, get_animation_offset(model->anim2));
-  write_u8(stream, (u8)model->gunhand);
-  write_u8(stream, (u8)model->unk25);
-  write_u8(stream, (u8)model->animlooping);
-  write_u8(stream, (u8)model->unk27);
-  write_f32(stream, model->unk28);
-  write_f32(stream, model->unk2c);
-  write_u16(stream, (u16)model->framea);
-  write_u16(stream, (u16)model->frameb);
-  write_f32(stream, model->endframe);
-  write_f32(stream, model->speed);
-  write_f32(stream, model->newspeed);
-  write_f32(stream, model->oldspeed);
-  write_f32(stream, model->timespeed);
-  write_f32(stream, model->elapsespeed);
-  write_f32(stream, model->unk58);
-  write_f32(stream, model->unk5c);
-  write_u16(stream, (u16)model->frame2a);
-  write_u16(stream, (u16)model->frame2b);
-  write_f32(stream, model->unk6c);
-  write_f32(stream, model->speed2);
-  write_u32(stream, model->unk74);
-  write_u32(stream, model->unk78);
-  write_f32(stream, model->unk7c);
-  write_u32(stream, model->unk80);
-  write_f32(stream, model->unk84);
-  write_f32(stream, model->unk88);
-  write_u32(stream, model->unk8c);
-  write_f32(stream, model->animloopframe);
-  write_f32(stream, model->animloopmerge);
-  write_u32(stream, model->unk9c);
-  write_u32(stream, model->unka0);
-  write_f32(stream, model->playspeed);
-  write_f32(stream, model->animrate);
-  write_f32(stream, model->unkac);
-  write_f32(stream, model->unkb0);
-  write_f32(stream, model->unkb4);
-  write_f32(stream, model->unkb8);
-  write_u32(stream, model->unkbc);
+  save_supported_action(stream, chr);
+  return TRUE;
+}
 
-  write_u8(stream, has_root_data);
-  if (has_root_data) {
-    root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
-        (Model *)model, model->obj->RootNode);
-    write_bytes(stream, root_data, sizeof(ModelRwData_HeaderRecord));
+void practice_states_load_chr_action(StateStream *stream, ChrRecord *chr) {
+  load_supported_action(stream, chr);
+}
+
+typedef struct SavedModelAnimation {
+  s32 anim_offset;
+  s32 anim2_offset;
+  s8 gunhand;
+  s8 unk25;
+  s8 animlooping;
+  s8 unk27;
+  f32 unk28;
+  f32 unk2c;
+  s16 framea;
+  s16 frameb;
+  s32 unk34;
+  s32 unk38;
+  f32 endframe;
+  f32 speed;
+  f32 newspeed;
+  f32 oldspeed;
+  f32 timespeed;
+  f32 elapsespeed;
+  f32 unk58;
+  f32 unk5c;
+  s16 frame2a;
+  s16 frame2b;
+  s32 unk64;
+  s32 unk68;
+  f32 unk6c;
+  f32 speed2;
+  s32 unk74;
+  s32 unk78;
+  f32 unk7c;
+  s32 unk80;
+  f32 unk84;
+  f32 unk88;
+  s32 unk8c;
+  f32 animloopframe;
+  f32 animloopmerge;
+  s32 unk9c;
+  s32 unka0;
+  f32 playspeed;
+  f32 animrate;
+  f32 unkac;
+  f32 unkb0;
+  f32 unkb4;
+  f32 unkb8;
+  s32 unkbc;
+  u8 anim_flip_callback;
+  u8 has_root_data;
+} SavedModelAnimation;
+
+static void write_animation_zero_rle(StateStream *stream, const u8 *src,
+                                     u32 size) {
+  u32 offset = 0;
+
+  while (offset < size) {
+    u32 zero_count = 0;
+    u32 literal_start;
+    u32 literal_count;
+
+    while (offset + zero_count < size && src[offset + zero_count] == 0 &&
+           zero_count < 128) {
+      zero_count++;
+    }
+    if (zero_count >= 2) {
+      write_u8(stream, 0x80 | (zero_count - 1));
+      offset += zero_count;
+      continue;
+    }
+    literal_start = offset;
+    literal_count = 0;
+    while (offset < size && literal_count < 128) {
+      zero_count = 0;
+      while (offset + zero_count < size && src[offset + zero_count] == 0 &&
+             zero_count < 2) {
+        zero_count++;
+      }
+      if (zero_count >= 2) {
+        break;
+      }
+      offset++;
+      literal_count++;
+    }
+    write_u8(stream, literal_count - 1);
+    write_bytes(stream, src + literal_start, literal_count);
   }
 }
 
-static void load_model_animation(StateStream *stream, Model *model) {
-  s32 anim_offset = read_u32(stream);
-  s32 anim2_offset = read_u32(stream);
-  s8 gunhand = (s8)read_u8(stream);
-  s8 unk25 = (s8)read_u8(stream);
-  s8 animlooping = (s8)read_u8(stream);
-  s8 unk27 = (s8)read_u8(stream);
-  f32 unk28 = read_f32(stream);
-  f32 unk2c = read_f32(stream);
-  s16 framea = (s16)read_u16(stream);
-  s16 frameb = (s16)read_u16(stream);
-  f32 endframe = read_f32(stream);
-  f32 speed = read_f32(stream);
-  f32 newspeed = read_f32(stream);
-  f32 oldspeed = read_f32(stream);
-  f32 timespeed = read_f32(stream);
-  f32 elapsespeed = read_f32(stream);
-  f32 unk58 = read_f32(stream);
-  f32 unk5c = read_f32(stream);
-  s16 frame2a = (s16)read_u16(stream);
-  s16 frame2b = (s16)read_u16(stream);
-  f32 unk6c = read_f32(stream);
-  f32 speed2 = read_f32(stream);
-  s32 unk74 = read_u32(stream);
-  s32 unk78 = read_u32(stream);
-  f32 unk7c = read_f32(stream);
-  s32 unk80 = read_u32(stream);
-  f32 unk84 = read_f32(stream);
-  f32 unk88 = read_f32(stream);
-  s32 unk8c = read_u32(stream);
-  f32 animloopframe = read_f32(stream);
-  f32 animloopmerge = read_f32(stream);
-  s32 unk9c = read_u32(stream);
-  s32 unka0 = read_u32(stream);
-  f32 playspeed = read_f32(stream);
-  f32 animrate = read_f32(stream);
-  f32 unkac = read_f32(stream);
-  f32 unkb0 = read_f32(stream);
-  f32 unkb4 = read_f32(stream);
-  f32 unkb8 = read_f32(stream);
-  s32 unkbc = read_u32(stream);
-  bool has_root_data = read_u8(stream);
+static void read_animation_zero_rle(StateStream *stream, u8 *dst, u32 size) {
+  u32 offset = 0;
+
+  while (offset < size) {
+    u8 control = read_u8(stream);
+    u32 count = (control & 0x7f) + 1;
+
+    if (count > size - offset) {
+      practiceLogError("Model animation RLE exceeds destination size");
+      assert(FALSE);
+      count = size - offset;
+    }
+    if (control & 0x80) {
+      bzero(dst + offset, count);
+    } else {
+      read_bytes(stream, dst + offset, count);
+    }
+    offset += count;
+  }
+}
+
+void practice_states_save_model_animation(StateStream *stream,
+                                          const Model *model) {
+  SavedModelAnimation saved;
+  ModelRwData_HeaderRecord *root_data;
+
+  bzero(&saved, sizeof(saved));
+  saved.anim_offset = get_animation_offset(model->anim);
+  saved.anim2_offset = get_animation_offset(model->anim2);
+  saved.gunhand = model->gunhand;
+  saved.unk25 = model->unk25;
+  saved.animlooping = model->animlooping;
+  saved.unk27 = model->unk27;
+  saved.unk28 = model->unk28;
+  saved.unk2c = model->unk2c;
+  saved.framea = model->framea;
+  saved.frameb = model->frameb;
+  saved.unk34 = model->unk34;
+  saved.unk38 = model->unk38;
+  saved.endframe = model->endframe;
+  saved.speed = model->speed;
+  saved.newspeed = model->newspeed;
+  saved.oldspeed = model->oldspeed;
+  saved.timespeed = model->timespeed;
+  saved.elapsespeed = model->elapsespeed;
+  saved.unk58 = model->unk58;
+  saved.unk5c = model->unk5c;
+  saved.frame2a = model->frame2a;
+  saved.frame2b = model->frame2b;
+  saved.unk64 = model->unk64;
+  saved.unk68 = model->unk68;
+  saved.unk6c = model->unk6c;
+  saved.speed2 = model->speed2;
+  saved.unk74 = model->unk74;
+  saved.unk78 = model->unk78;
+  saved.unk7c = model->unk7c;
+  saved.unk80 = model->unk80;
+  saved.unk84 = model->unk84;
+  saved.unk88 = model->unk88;
+  saved.unk8c = model->unk8c;
+  saved.animloopframe = model->animloopframe;
+  saved.animloopmerge = model->animloopmerge;
+  saved.unk9c = model->unk9c;
+  saved.unka0 = model->unka0;
+  saved.playspeed = model->playspeed;
+  saved.animrate = model->animrate;
+  saved.unkac = model->unkac;
+  saved.unkb0 = model->unkb0;
+  saved.unkb4 = model->unkb4;
+  saved.unkb8 = model->unkb8;
+  saved.unkbc = model->unkbc;
+  saved.has_root_data =
+      model->obj != NULL && model->obj->RootNode != NULL &&
+      (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
+  if (model->animflipfunc == (s32)bheadFlipAnimation) {
+    saved.anim_flip_callback = 1;
+  } else if (model->animflipfunc != 0) {
+    practiceLogError("Unsupported model animation flip callback %08x",
+                     model->animflipfunc);
+  }
+
+  write_animation_zero_rle(stream, (u8 *)&saved, sizeof(saved));
+  if (saved.has_root_data) {
+    root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
+        (Model *)model, model->obj->RootNode);
+    write_animation_zero_rle(stream, (u8 *)root_data, sizeof(*root_data));
+  }
+}
+
+void practice_states_load_model_animation(StateStream *stream, Model *model) {
+  SavedModelAnimation saved;
   ModelRwData_HeaderRecord root_data;
 
-  if (has_root_data) {
-    read_bytes(stream, &root_data, sizeof(ModelRwData_HeaderRecord));
+  read_animation_zero_rle(stream, (u8 *)&saved, sizeof(saved));
+  if (saved.has_root_data) {
+    read_animation_zero_rle(stream, (u8 *)&root_data, sizeof(root_data));
   }
 
   if (model == NULL) {
     return;
   }
 
-  model->anim = get_animation_by_offset(anim_offset);
-  model->anim2 = get_animation_by_offset(anim2_offset);
-  model->gunhand = gunhand;
-  model->unk25 = unk25;
-  model->animlooping = animlooping;
-  model->unk27 = unk27;
-  model->unk28 = unk28;
-  model->unk2c = unk2c;
-  model->framea = framea;
-  model->frameb = frameb;
-  model->endframe = endframe;
-  model->speed = speed;
-  model->newspeed = newspeed;
-  model->oldspeed = oldspeed;
-  model->timespeed = timespeed;
-  model->elapsespeed = elapsespeed;
-  model->unk58 = unk58;
-  model->unk5c = unk5c;
-  model->frame2a = frame2a;
-  model->frame2b = frame2b;
-  model->unk6c = unk6c;
-  model->speed2 = speed2;
-  model->unk74 = unk74;
-  model->unk78 = unk78;
-  model->unk7c = unk7c;
-  model->unk80 = unk80;
-  model->unk84 = unk84;
-  model->unk88 = unk88;
-  model->unk8c = unk8c;
-  model->animloopframe = animloopframe;
-  model->animloopmerge = animloopmerge;
-  model->animflipfunc = 0;
-  model->unk9c = unk9c;
-  model->unka0 = unka0;
-  model->playspeed = playspeed;
-  model->animrate = animrate;
-  model->unkac = unkac;
-  model->unkb0 = unkb0;
-  model->unkb4 = unkb4;
-  model->unkb8 = unkb8;
-  model->unkbc = unkbc;
+  model->anim = get_animation_by_offset(saved.anim_offset);
+  model->anim2 = get_animation_by_offset(saved.anim2_offset);
+  model->gunhand = saved.gunhand;
+  model->unk25 = saved.unk25;
+  model->animlooping = saved.animlooping;
+  model->unk27 = saved.unk27;
+  model->unk28 = saved.unk28;
+  model->unk2c = saved.unk2c;
+  model->framea = saved.framea;
+  model->frameb = saved.frameb;
+  model->unk34 = saved.unk34;
+  model->unk38 = saved.unk38;
+  model->endframe = saved.endframe;
+  model->speed = saved.speed;
+  model->newspeed = saved.newspeed;
+  model->oldspeed = saved.oldspeed;
+  model->timespeed = saved.timespeed;
+  model->elapsespeed = saved.elapsespeed;
+  model->unk58 = saved.unk58;
+  model->unk5c = saved.unk5c;
+  model->frame2a = saved.frame2a;
+  model->frame2b = saved.frame2b;
+  model->unk64 = saved.unk64;
+  model->unk68 = saved.unk68;
+  model->unk6c = saved.unk6c;
+  model->speed2 = saved.speed2;
+  model->unk74 = saved.unk74;
+  model->unk78 = saved.unk78;
+  model->unk7c = saved.unk7c;
+  model->unk80 = saved.unk80;
+  model->unk84 = saved.unk84;
+  model->unk88 = saved.unk88;
+  model->unk8c = saved.unk8c;
+  model->animloopframe = saved.animloopframe;
+  model->animloopmerge = saved.animloopmerge;
+  model->animflipfunc =
+      saved.anim_flip_callback == 1 ? (s32)bheadFlipAnimation : 0;
+  model->unk9c = saved.unk9c;
+  model->unka0 = saved.unka0;
+  model->playspeed = saved.playspeed;
+  model->animrate = saved.animrate;
+  model->unkac = saved.unkac;
+  model->unkb0 = saved.unkb0;
+  model->unkb4 = saved.unkb4;
+  model->unkb8 = saved.unkb8;
+  model->unkbc = saved.unkbc;
 
-  if (has_root_data && model->obj != NULL && model->obj->RootNode != NULL &&
+  if (saved.has_root_data && model->obj != NULL &&
+      model->obj->RootNode != NULL &&
       (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
     ModelRwData_HeaderRecord *dst =
         (ModelRwData_HeaderRecord *)modelGetNodeRwData(model,
@@ -1115,6 +1283,26 @@ void clear_chr_model_blood_patches(ChrRecord *chr) {
   clear_model_blood_patches(blood_nodes, blood_node_count);
 }
 
+void reset_chr_blood_vertex_pool(void) {
+  s32 i;
+
+  if (dword_CODE_bss_8007A0E8 == NULL || dword_CODE_bss_8007A0E0 == NULL ||
+      dword_CODE_bss_8007A0D4 <= 0 || dword_CODE_bss_8007A0D0 <= 0) {
+    return;
+  }
+
+  word_CODE_bss_8007A0F0 = (s16)dword_CODE_bss_8007A0D0;
+  dword_CODE_bss_8007A0E8[0].vertices = dword_CODE_bss_8007A0E0;
+  dword_CODE_bss_8007A0E8[0].count = (s16)dword_CODE_bss_8007A0D0;
+  dword_CODE_bss_8007A0E8[0].ref_count = 0;
+  dword_CODE_bss_8007A0E8[0].next = -1;
+  dword_CODE_bss_8007A0E8[0].previous = -1;
+
+  for (i = 1; i < dword_CODE_bss_8007A0D4; i++) {
+    dword_CODE_bss_8007A0E8[i].ref_count = -1;
+  }
+}
+
 static void load_model_blood_patches(StateStream *stream, Model *model) {
   ModelBloodNode blood_nodes[MAX_MODEL_BLOOD_NODES];
   s32 blood_node_count = get_model_blood_nodes(model, blood_nodes);
@@ -1187,17 +1375,22 @@ static void clear_chr_transient_joint_list(ChrRecord *chr) {
 
 void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   s32 ailist_id = -1;
+
   bool supported_action = is_supported_chr_action(chr);
   bool has_model_transform =
       chr->model != NULL && chr->model->obj != NULL &&
       chr->model->obj->RootNode != NULL &&
       (chr->model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
+  f32 model_heading = has_model_transform
+                          ? normalize_chr_heading(getsubroty(chr->model))
+                          : 0.0f;
 
   // Allocation metadata is consumed before the destination ChrRecord exists so
   // a missing CHR can be recreated in its saved slot before the payload loads.
+  write_u16(stream, (u16)(chr - g_ChrSlots));
   write_u8(stream, (u8)chr->headnum);
   write_u8(stream, (u8)chr->bodynum);
-  write_f32(stream, has_model_transform ? getsubroty(chr->model) : 0.0f);
+  write_f32(stream, model_heading);
 
   write_u8(stream, (u8)chr->accuracyrating);
   write_u8(stream, (u8)chr->speedrating);
@@ -1282,7 +1475,7 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
 
     getsuboffset(chr->model, &model_offset);
     write_bytes(stream, &model_offset, sizeof(coord3d));
-    write_f32(stream, getsubroty(chr->model));
+    write_f32(stream, model_heading);
   }
 
   write_u8(stream, supported_action);
@@ -1290,7 +1483,7 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
     save_supported_action(stream, chr);
     write_u8(stream, chr->model != NULL);
     if (chr->model != NULL) {
-      save_model_animation(stream, chr->model);
+      practice_states_save_model_animation(stream, chr->model);
     }
   }
 
@@ -1332,9 +1525,10 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
 
 void load_chr_allocation_state(StateStream *stream,
                                ChrAllocationState *allocation) {
+  allocation->slot_index = (s16)read_u16(stream);
   allocation->headnum = (s8)read_u8(stream);
   allocation->bodynum = (s8)read_u8(stream);
-  allocation->heading = read_f32(stream);
+  allocation->heading = normalize_chr_heading(read_f32(stream));
 }
 
 void load_chr_record(StateStream *stream, ChrRecord *chr,
@@ -1441,7 +1635,7 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   has_model_transform = read_u8(stream);
   if (has_model_transform) {
     read_bytes(stream, &model_offset, sizeof(coord3d));
-    model_heading = read_f32(stream);
+    model_heading = normalize_chr_heading(read_f32(stream));
 
     if (chr->model != NULL && chr->model->obj != NULL &&
         chr->model->obj->RootNode != NULL) {
@@ -1453,7 +1647,8 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   if (read_u8(stream)) {
     load_supported_action(stream, chr);
     if (read_u8(stream)) {
-      load_model_animation(stream, chr != NULL ? chr->model : NULL);
+      practice_states_load_model_animation(stream,
+                                           chr != NULL ? chr->model : NULL);
     }
   }
 

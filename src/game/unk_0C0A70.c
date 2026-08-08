@@ -81,6 +81,10 @@ void updateFrameCounters(s32 deltaFrames)
     }
     g_TimeScaleDeltaFrames = deltaFrames;
     restore_rng_if_frame_dropped();
+    if (g_practice_test_case ==
+        PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES) {
+      practice_tests_before_replay_frame_check();
+    }
     practice_replay_on_frame_start();
 #endif
 
@@ -143,5 +147,3 @@ void eu_sub_7f0c00a4(void)
   
 }
 #endif
-
-

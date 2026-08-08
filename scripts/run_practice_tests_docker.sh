@@ -43,4 +43,10 @@ if [ ! -S "$display_socket" ]; then
 fi
 
 export DISPLAY=":${display_number}"
-./scripts/run_practice_tests.py "$@"
+if [ "${1:-}" = "--test-runway-save-states" ]; then
+    ./scripts/run_runway_save_state_tests.sh
+elif [ "${1:-}" = "--test-us-replay-save-states" ]; then
+    ./scripts/run_replay_save_state_tests.sh "${2:?replay directory required}"
+else
+    ./scripts/run_practice_tests.py "$@"
+fi

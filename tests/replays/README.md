@@ -40,3 +40,21 @@ seeds, checks the per-frame seeds when the recording contains them, and reports
 For interactive debugging, use `just test-debug REPLAY_YOUR_TEST`. To exercise a
 specific ROM region, pass it as the second argument, for example
 `just test-debug REPLAY_YOUR_TEST eu`.
+
+## Replay save/load-state test
+
+`REPLAY_RUNWAY_SAVE_STATES` embeds the selected replay in the ROM so save-state
+SRAM writes cannot overwrite it. After one second of playback, the test repeats
+this sequence until the replay completes:
+
+1. Hold the pause-hotkey trigger for three frames, save, hold for three more
+   frames, and release.
+2. Play 25 replay frames, hold the trigger for one frame, then load while
+   seeking the replay cursor back to the saved timestamp.
+3. Hold the trigger for three more frames, release, replay the same 25 frames,
+   then begin the next save cycle.
+
+The test fails on replay RNG divergence, an incomplete replay, or a replay
+cursor mismatch between the original and reloaded 25-frame segment. Run the
+Runway fixture headlessly in Docker with `just test-runway-save-states`, or run
+all US `.ram` files in a directory with `just test-us-replay-save-states DIR`.

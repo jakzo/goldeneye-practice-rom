@@ -24,6 +24,7 @@
 
 #define REPLAY_FLAG_FRAME_SEEDS 0x01
 #define REPLAY_KNOWN_FLAGS REPLAY_FLAG_FRAME_SEEDS
+#define TEST_REPLAY_ROM_OFFSET 0x00fe0000
 
 enum PracticeReplayMode {
   PRACTICE_REPLAY_DISABLED,
@@ -71,6 +72,7 @@ void practice_replay_on_stage_load(void);
 void practice_replay_request_recording(void);
 void practice_replay_request_seeded_recording(void);
 void practice_replay_request_playback(void);
+void practice_replay_use_test_rom_fixture(void);
 void practice_replay_stop_recording(void);
 void practice_replay_stop_playback(void);
 
@@ -82,5 +84,6 @@ u32 practice_replay_get_duration(void);
 
 s32 practice_replay_override_delta(s32 delta_frames);
 void practice_replay_on_frame_start(void);
+s32 practice_replay_seek(u32 timestamp);
 
 #endif /* PRACTICE_REPLAY_H */

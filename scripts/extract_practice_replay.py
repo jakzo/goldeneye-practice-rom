@@ -7,7 +7,15 @@ from pathlib import Path
 
 REPLAY_MAGIC = 0x47455250
 REPLAY_HEADER = struct.Struct(">IHHII4BHHQQII")
-REPLAY_SRAM_OFFSET = 0x600
+REPLAY_SRAM_OFFSET = 0x280
+LEGACY_REPLAY_SRAM_OFFSET = 0x600
+
+
+def replay_sram_offset(sram):
+    for offset in (REPLAY_SRAM_OFFSET, LEGACY_REPLAY_SRAM_OFFSET):
+        if len(sram) >= offset + 4 and struct.unpack_from(">I", sram, offset)[0] == REPLAY_MAGIC:
+            return offset
+    return REPLAY_SRAM_OFFSET
 
 
 def main():
@@ -24,11 +32,12 @@ def main():
     args = parser.parse_args()
 
     sram = args.sram.read_bytes()
-    header_end = REPLAY_SRAM_OFFSET + REPLAY_HEADER.size
+    source_offset = replay_sram_offset(sram)
+    header_end = source_offset + REPLAY_HEADER.size
     if len(sram) < header_end:
         parser.error("SRAM file is too small to contain a replay header")
 
-    header = REPLAY_HEADER.unpack_from(sram, REPLAY_SRAM_OFFSET)
+    header = REPLAY_HEADER.unpack_from(sram, source_offset)
     magic, version, header_size, total_size, frame_count = header[:5]
     if magic != REPLAY_MAGIC:
         parser.error("SRAM does not contain a practice replay")
@@ -39,21 +48,24 @@ def main():
     if frame_count == 0 or total_size < header_size:
         parser.error("replay header has invalid sizes")
 
-    replay_end = REPLAY_SRAM_OFFSET + total_size
+    replay_end = source_offset + total_size
     if replay_end > len(sram):
         parser.error("replay extends past the end of the SRAM file")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     if args.test_sram:
         test_sram = bytearray(len(sram))
-        test_sram[:replay_end] = sram[:replay_end]
+        test_sram[:REPLAY_SRAM_OFFSET] = sram[:REPLAY_SRAM_OFFSET]
+        test_sram[REPLAY_SRAM_OFFSET : REPLAY_SRAM_OFFSET + total_size] = sram[
+            source_offset:replay_end
+        ]
         args.output.write_bytes(test_sram)
         print(
             f"Created {len(test_sram)}-byte test SRAM with {frame_count}-frame "
             f"replay at {args.output}"
         )
     else:
-        args.output.write_bytes(sram[REPLAY_SRAM_OFFSET:replay_end])
+        args.output.write_bytes(sram[source_offset:replay_end])
         print(
             f"Extracted {total_size} bytes ({frame_count} frames) to {args.output}"
         )

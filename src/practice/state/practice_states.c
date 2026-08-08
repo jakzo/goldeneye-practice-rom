@@ -4,8 +4,10 @@
 #include "../practice_render.h"
 #include "../practice_sfx.h"
 #include "../practice_sram.h"
+#include "../practice_timescale.h"
 #include "player.h"
 #include "practice_ui.h"
+#include "emu_log.h"
 #include <snd.h>
 #include <ultra64.h>
 
@@ -15,9 +17,53 @@ extern void store_osgetcount(void);
 /* Small header cache so we can validate without re-reading SRAM. */
 static SaveStateHeader g_SavedHeader __attribute__((aligned(16)));
 bool g_HasSavedState = FALSE;
+static u32 g_SaveStateSramOffset = SAVE_STATE_SRAM_OFFSET;
+static bool g_PreserveReplayForTest = FALSE;
+
+static u32 get_saved_state_size(void) {
+  return g_SavedHeader.full_size != 0 ? g_SavedHeader.full_size
+                                      : g_SavedHeader.size;
+}
+
+void practice_states_set_test_storage(bool enabled) {
+  g_SaveStateSramOffset =
+      enabled ? TEST_SAVE_STATE_SRAM_OFFSET : SAVE_STATE_SRAM_OFFSET;
+  g_PreserveReplayForTest = enabled;
+  init_save_state_system();
+}
+
+void practice_states_log_test_fixture(void) {
+  static const char hex[] = "0123456789abcdef";
+  SramStream stream;
+  u8 bytes[128];
+  char encoded[sizeof(bytes) * 2 + 1];
+  u32 offset = 0;
+
+  if (!g_HasSavedState)
+    return;
+
+  sram_stream_init_read(&stream, g_SaveStateSramOffset);
+  emu_log("RUNWAY_STATE_BEGIN size=%d", get_saved_state_size());
+  while (offset < get_saved_state_size()) {
+    u32 chunk = get_saved_state_size() - offset;
+    u32 i;
+
+    if (chunk > sizeof(bytes))
+      chunk = sizeof(bytes);
+    read_bytes(&stream.base, bytes, chunk);
+    for (i = 0; i < chunk; i++) {
+      encoded[i * 2] = hex[bytes[i] >> 4];
+      encoded[i * 2 + 1] = hex[bytes[i] & 0xf];
+    }
+    encoded[chunk * 2] = '\0';
+    emu_log("RUNWAY_STATE_DATA %s", encoded);
+    offset += chunk;
+  }
+  emu_log("RUNWAY_STATE_END");
+}
 
 void init_save_state_system(void) {
-  sram_read(SAVE_STATE_SRAM_OFFSET, &g_SavedHeader, sizeof(g_SavedHeader));
+  sram_read(g_SaveStateSramOffset, &g_SavedHeader, sizeof(g_SavedHeader));
 
   g_HasSavedState = g_SavedHeader.magic == SAVE_STATE_MAGIC &&
                     g_SavedHeader.version == SAVE_STATE_VERSION;
@@ -29,11 +75,13 @@ void save_game_state(void) {
   if (g_CurrentPlayer == NULL)
     return;
 
-  practice_replay_stop_recording();
-  practice_replay_stop_playback();
-  practice_replay_invalidate_saved();
+  if (!g_PreserveReplayForTest) {
+    practice_replay_stop_recording();
+    practice_replay_stop_playback();
+    practice_replay_invalidate_saved();
+  }
 
-  sram_stream_init_write(&stream, SAVE_STATE_SRAM_OFFSET);
+  sram_stream_init_write(&stream, g_SaveStateSramOffset);
 
   /* 1. Write placeholder header (magic, version, level_id, size=0). */
   {
@@ -42,7 +90,7 @@ void save_game_state(void) {
     header.version = SAVE_STATE_VERSION;
     header.level_id = g_CurrentStageToLoad;
     header.size = 0; /* patched below */
-    header.unused = 0;
+    header.full_size = 0;
     write_bytes(&stream.base, &header, sizeof(header));
   }
 
@@ -58,22 +106,31 @@ void save_game_state(void) {
   /* Flush the remaining bytes in the buffer to SRAM. */
   stream_flush(&stream.base);
 
+  if (stream.error) {
+    g_HasSavedState = FALSE;
+    practiceLogWarn("Save state is too large for SRAM");
+    return;
+  }
+
   /* 4. Patch the header size field in g_SavedHeader. */
   g_SavedHeader.magic = SAVE_STATE_MAGIC;
   g_SavedHeader.version = SAVE_STATE_VERSION;
   g_SavedHeader.level_id = g_CurrentStageToLoad;
   g_SavedHeader.size = stream.base.total_processed;
+  g_SavedHeader.full_size = stream.base.total_processed;
 
-  sram_write(SAVE_STATE_SRAM_OFFSET, &g_SavedHeader, sizeof(g_SavedHeader));
+  sram_write(g_SaveStateSramOffset, &g_SavedHeader, sizeof(g_SavedHeader));
 
   g_HasSavedState = TRUE;
 
   practice_sfx_play_save_state_sound();
-  practiceLogInfo("State saved (%dKB)", (g_SavedHeader.size + 1023) / 1024);
+  practiceLogInfo("State saved (%dKB)",
+                  (get_saved_state_size() + 1023) / 1024);
 }
 
 void load_game_state(void) {
   SramStream stream;
+  s32 paused_resume_delta = g_IsTimePaused ? g_ForcedDeltaFrames : -1;
 
   if (g_CurrentPlayer == NULL || !g_HasSavedState) {
     if (!g_HasSavedState) {
@@ -102,13 +159,19 @@ void load_game_state(void) {
     return;
   }
 
+  if (get_saved_state_size() < sizeof(SaveStateHeader) ||
+      get_saved_state_size() > SRAM_SIZE_BYTES - g_SaveStateSramOffset) {
+    practiceLogWarn("Invalid save size %d", get_saved_state_size());
+    return;
+  }
+
   /* Stop all active sound effects before loading state. */
   sndDeactivateAllSfxByFlag_1();
 
-  sram_stream_init_read(&stream, SAVE_STATE_SRAM_OFFSET);
+  sram_stream_init_read(&stream, g_SaveStateSramOffset);
 
   /* 1. Skip header (already validated from g_SavedHeader). */
-  stream_seek(&stream.base, SAVE_STATE_SRAM_OFFSET + sizeof(SaveStateHeader));
+  stream_seek(&stream.base, g_SaveStateSramOffset + sizeof(SaveStateHeader));
 
   /* 2. Load scalar globals and cache prop-dependent global references. */
   load_global_state_pre_props(&stream.base);
@@ -125,6 +188,8 @@ void load_game_state(void) {
     return;
   }
 
+  freeze_current_frame_after_load(paused_resume_delta);
+
   practice_grenade_cam_refresh();
 
   /* The current paused frame did not tick the newly restored model graph. */
@@ -134,5 +199,9 @@ void load_game_state(void) {
   store_osgetcount();
 
   practice_sfx_play_save_state_sound();
+  /* Loading, model reconstruction, and refresh helpers may consume randomness.
+   * The resumed gameplay frame must start from the serialized sequence. */
+  restore_global_rng_after_load();
+  sync_frozen_rng_after_load();
   practiceLogInfo("State loaded");
 }

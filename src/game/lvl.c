@@ -981,6 +981,9 @@ Gfx* lvlRender(Gfx* DL)
         bool render_state_invalidated = practice_is_render_state_invalidated();
         bool refresh_render_state =
             speedgraphframes == 0 && render_state_invalidated;
+        if (speedgraphframes == 0) {
+            practice_prepare_paused_render_state(&render_context);
+        }
 #endif
 
         pcount = getPlayerCount();
@@ -1012,7 +1015,7 @@ Gfx* lvlRender(Gfx* DL)
             if (get_debug_render_raster() == DEB_BOND_VIEW)
             {
 #ifdef PRACTICE_ROM
-                if (speedgraphframes != 0 || refresh_render_state)
+                if (speedgraphframes != 0)
                 {
                     DL = sub_GAME_7F087A08(DL);
                 }

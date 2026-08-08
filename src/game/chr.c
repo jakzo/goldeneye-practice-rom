@@ -4448,7 +4448,11 @@ after_position_update:
             : 0;
 
         sub_GAME_7F0523F8(prop, GUNRIGHT, &chr->field_20);
+        practice_cache_equipped_weapon_matrix(
+            chr->weapons_held[GUNRIGHT]);
         sub_GAME_7F0523F8(prop, GUNLEFT, &chr->field_20);
+        practice_cache_equipped_weapon_matrix(
+            chr->weapons_held[GUNLEFT]);
 
 #if PRACTICE_ROM
         if (g_IsRenderOnly)

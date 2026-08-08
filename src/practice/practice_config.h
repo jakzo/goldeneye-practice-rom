@@ -6,7 +6,7 @@
 #define PRACTICE_ROM_CONFIG_OFFSET 0x00FFFFC0
 #define PRACTICE_ROM_CONFIG_SIZE 64
 #define PRACTICE_ROM_CONFIG_MAGIC 0x47505243
-#define PRACTICE_ROM_CONFIG_VERSION 1
+#define PRACTICE_ROM_CONFIG_VERSION 2
 #define PRACTICE_ROM_CONFIG_CHECKSUM_SALT 0xC0DEC0DE
 
 struct PracticeRomConfig {
@@ -16,8 +16,9 @@ struct PracticeRomConfig {
   u32 checksum;
   s32 test_case;
   s32 boot_level;
+  s32 test_param;
   u32 flags;
-  u8 reserved[PRACTICE_ROM_CONFIG_SIZE - sizeof(u32) * 7];
+  u8 reserved[PRACTICE_ROM_CONFIG_SIZE - sizeof(u32) * 8];
 };
 
 typedef char PracticeRomConfigMustMatchPatchedSize

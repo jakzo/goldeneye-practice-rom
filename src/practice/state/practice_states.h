@@ -7,6 +7,7 @@
 #include <ultra64.h>
 
 #define SAVE_STATE_MAGIC 0x47455353 // "GESS"
+#define TEST_SAVE_STATE_SRAM_OFFSET SAVE_STATE_SRAM_OFFSET
 
 /**
  * Increment this version number before releasing a new version of the ROM with
@@ -25,14 +26,15 @@
 typedef struct {
   u32 magic;
   u16 version;
-  u16 size;
+  u16 size; /* Low 16 bits retained for compatibility. */
   s32 level_id;
-  u32 unused;
+  u32 full_size; /* Full serialized size; zero in older version-8 states. */
 } SaveStateHeader;
 
 void save_global_state(StateStream *stream);
 void load_global_state_pre_props(StateStream *stream);
 bool load_global_state_post_props(void);
+void restore_global_rng_after_load(void);
 bool save_viewer_players_state(StateStream *stream);
 bool load_viewer_players_state(StateStream *stream);
 bool save_props_state(StateStream *stream);
@@ -43,5 +45,7 @@ extern bool g_HasSavedState;
 void init_save_state_system(void);
 void save_game_state(void);
 void load_game_state(void);
+void practice_states_set_test_storage(bool enabled);
+void practice_states_log_test_fixture(void);
 
 #endif /* PRACTICE_STATES_H */

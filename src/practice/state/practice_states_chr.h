@@ -16,6 +16,7 @@ typedef struct ChrAttachmentIndices {
 } ChrAttachmentIndices;
 
 typedef struct ChrAllocationState {
+  s16 slot_index;
   s8 headnum;
   s8 bodynum;
   f32 heading;
@@ -26,7 +27,14 @@ void load_chr_allocation_state(StateStream *stream,
                                ChrAllocationState *allocation);
 void load_chr_record(StateStream *stream, ChrRecord *chr,
                      ChrAttachmentIndices *attachments);
+void practice_states_save_model_animation(StateStream *stream,
+                                          const Model *model);
+void practice_states_load_model_animation(StateStream *stream, Model *model);
+bool practice_states_save_chr_action(StateStream *stream,
+                                     const ChrRecord *chr);
+void practice_states_load_chr_action(StateStream *stream, ChrRecord *chr);
 void clear_chr_model_blood_patches(ChrRecord *chr);
+void reset_chr_blood_vertex_pool(void);
 void load_chr_prop_spatial_state(PropRecord *prop, const coord3d *pos,
                                  s32 stan_offset, const u8 rooms[4]);
 

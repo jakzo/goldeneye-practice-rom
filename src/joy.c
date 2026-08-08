@@ -444,6 +444,30 @@ void joyConsumePlaybackSamples(void)
     }
 }
 
+void joyPrimePlaybackSample(u16 buttons, s8 stick_x, s8 stick_y)
+{
+    struct contdata *contdata = &g_ContData[CONTDATA_PLAYBACK];
+    s32 i;
+
+    contdata->curlast = 0;
+    contdata->curstart = 0;
+    contdata->nextlast = 0;
+    contdata->nextsecondlast = 0;
+
+    for (i = 0; i < MAXCONTROLLERS; i++)
+    {
+        contdata->samples[0].pads[i].button = 0;
+        contdata->samples[0].pads[i].stick_x = 0;
+        contdata->samples[0].pads[i].stick_y = 0;
+        contdata->samples[0].pads[i].errno = 0;
+        contdata->buttonspressed[i] = 0;
+    }
+
+    contdata->samples[0].pads[0].button = buttons;
+    contdata->samples[0].pads[0].stick_x = stick_x;
+    contdata->samples[0].pads[0].stick_y = stick_y;
+}
+
 void joyRecordSamples(void)
 {
     if (g_ContRecordFunc)

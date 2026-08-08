@@ -13,7 +13,7 @@ TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 ROM_CONFIG_OFFSET = 0x00FFFFC0
 ROM_CONFIG_SIZE = 64
 ROM_CONFIG_MAGIC = 0x47505243  # "GPRC"
-ROM_CONFIG_VERSION = 1
+ROM_CONFIG_VERSION = 2
 NO_TEST = 0
 NO_BOOT_LEVEL = -1
 CHECKSUM_SALT = 0xC0DEC0DE
@@ -82,7 +82,7 @@ def parse_selection(value, names, prefix, default):
         return names[name]
 
 
-def encode_config(test_case, boot_level):
+def encode_config(test_case, boot_level, test_param):
     size = ROM_CONFIG_SIZE
     flags = 0
     checksum = (
@@ -91,17 +91,19 @@ def encode_config(test_case, boot_level):
         ^ size
         ^ (test_case & 0xFFFFFFFF)
         ^ (boot_level & 0xFFFFFFFF)
+        ^ (test_param & 0xFFFFFFFF)
         ^ flags
         ^ CHECKSUM_SALT
     )
     return struct.pack(
-        ">IIIIiiI36x",
+        ">IIIIiiiI32x",
         ROM_CONFIG_MAGIC,
         ROM_CONFIG_VERSION,
         size,
         checksum,
         test_case,
         boot_level,
+        test_param,
         flags,
     )
 
@@ -138,6 +140,7 @@ def main():
     parser.add_argument("rom", type=Path)
     parser.add_argument("--test-case", default="")
     parser.add_argument("--boot-level", default="")
+    parser.add_argument("--test-param", type=lambda value: int(value, 0), default=0)
     args = parser.parse_args()
 
     try:
@@ -147,14 +150,16 @@ def main():
         boot_level = parse_selection(
             args.boot_level, parse_level_ids(), "LEVELID_", NO_BOOT_LEVEL
         )
-        changed = patch_rom(args.rom, encode_config(test_case, boot_level))
+        changed = patch_rom(
+            args.rom, encode_config(test_case, boot_level, args.test_param)
+        )
     except (OSError, ValueError) as error:
         parser.error(str(error))
 
     status = "patched" if changed else "unchanged"
     print(
         f"Runtime config {status}: test_case={test_case}, "
-        f"boot_level={boot_level}"
+        f"boot_level={boot_level}, test_param={args.test_param}"
     )
 
 

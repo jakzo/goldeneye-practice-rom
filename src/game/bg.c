@@ -5965,7 +5965,21 @@ s32 bgCheckIfRoomModelNeedsLoad(s32 roomID)
     g_BgRoomInfo[roomID].field_35 = 1;
     if (g_BgRoomInfo[roomID].model_bin_loaded == FALSE)
     {
+#ifdef PRACTICE_ROM
+        /* Save-state loads can logically rewind room residency while retaining
+         * the allocation until the renderer reaches a safe reuse/free point. */
+        if (g_BgRoomInfo[roomID].ptr_point_index != NULL ||
+            g_BgRoomInfo[roomID].ptr_expanded_mapping_info != NULL)
+        {
+            g_BgRoomInfo[roomID].model_bin_loaded = 1;
+        }
+        else
+        {
+            sub_GAME_7F0B6368(roomID);
+        }
+#else
         sub_GAME_7F0B6368(roomID);
+#endif
         return 1;
     }
     return 0;
@@ -6602,6 +6616,15 @@ void sub_GAME_7F0B66E8(void)
     {
         if (g_BgRoomInfo[i].field_35 == 0)
         {
+#ifdef PRACTICE_ROM
+            if (g_BgRoomInfo[i].model_bin_loaded == 0 &&
+                (g_BgRoomInfo[i].ptr_point_index != NULL ||
+                 g_BgRoomInfo[i].ptr_expanded_mapping_info != NULL))
+            {
+                delete_room_data(i);
+            }
+            else
+#endif
             if (g_BgRoomInfo[i].model_bin_loaded == 4)
             {
                 delete_room_data(i);
@@ -13534,7 +13557,6 @@ glabel sub_GAME_7F0BA2D4
 /* 0EF0EC 7F0BA5BC 27BD00B8 */   addiu $sp, $sp, 0xb8
 )
 #endif
-
 
 
 

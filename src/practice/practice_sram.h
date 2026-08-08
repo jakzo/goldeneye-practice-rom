@@ -8,12 +8,12 @@
 /*
  * SRAM layout:
  *   0x000-0x1ff: Original game save (emulated 4 Kbit EEPROM)
- *   0x200-0x5ff: Practice config (1 KiB reserved)
- *   0x600-end:   Practice save state or deterministic replay
+ *   0x200-0x27f: Practice config (128 bytes reserved)
+ *   0x280-end:   Practice save state or deterministic replay
  */
 #define GAME_SAVE_SRAM_SIZE 0x200
 #define CONFIG_SRAM_OFFSET GAME_SAVE_SRAM_SIZE
-#define CONFIG_SRAM_SIZE 0x400
+#define CONFIG_SRAM_SIZE 0x80
 #define SAVE_STATE_SRAM_OFFSET (CONFIG_SRAM_OFFSET + CONFIG_SRAM_SIZE)
 
 void osSramInit(void);

@@ -1,3 +1,4 @@
+#include "game/lvl.h"
 #include "practice_music.h"
 #include "practice_sfx.h"
 #include "ultratypes.h"
@@ -70,19 +71,30 @@ void restore_rng_if_frame_dropped(void) {
   g_PrevFrameTimeScaleDropped = (g_TimeScaleDeltaFrames == 0);
 }
 
-// Rendering can consume RNG even though a zero-delta frame must not affect
-// gameplay. Reuse the existing frozen-seed storage to capture the exact state
-// after replay input processing and before display-list construction.
-void save_rng_before_paused_render(void) {
-  if (speedgraphframes == 0) {
-    g_FrozenFrameRngSeed = g_randomSeed;
-    g_FrozenFrameChrObjRngSeed = g_chrObjRandomSeed;
-  }
-}
-
 void restore_rng_after_paused_render(void) {
   if (speedgraphframes == 0) {
     g_randomSeed = g_FrozenFrameRngSeed;
     g_chrObjRandomSeed = g_FrozenFrameChrObjRngSeed;
   }
+}
+
+void sync_frozen_rng_after_load(void) {
+  g_FrozenFrameRngSeed = g_randomSeed;
+  g_FrozenFrameChrObjRngSeed = g_chrObjRandomSeed;
+}
+
+void freeze_current_frame_after_load(s32 resume_delta_frames) {
+  if (!g_IsTimePaused)
+    return;
+
+  /*
+   * The pause hotkey is processed after this frame's delta has already been
+   * calculated. A state loaded by that same hotkey must render immediately,
+   * but must not run the restored simulation once with the old frame's delta.
+   */
+  g_ForcedDeltaFrames = resume_delta_frames;
+  g_TimeScaleDeltaFrames = 0;
+  speedgraphframes = 0;
+  g_ClockTimer = 0;
+  g_GlobalTimerDelta = 0.0f;
 }

@@ -13,6 +13,7 @@
 #include "chrobjhandler.h"
 #include "dyn.h"
 #include "explosions.h"
+#include "practice/practice_render.h"
 #include "fr.h"
 #include "image_bank.h"
 #include "othermodemicrocode.h"
@@ -26,6 +27,11 @@
 #include "stan.h"
 #include "unk_0BC530.h"
 #include <assets/GlobalImageTable.h>
+
+#ifdef PRACTICE_ROM
+extern s32 g_ViShakeIntensity;
+extern u32 g_ViShakeTimer;
+#endif
 
 // bss
 //CODE.bss:8007A100
@@ -248,7 +254,7 @@ explosionCreate(PropRecord *arg0, struct coord3d *target_pos, StandTile *target_
     f32 sp38;
     s32 var_v0;
     PropRecord *sp30;
-    
+
     sp44 = &g_ExplosionTypes[explosion_type];
     sp40 = NULL;
     
@@ -388,6 +394,12 @@ void setSixExplosionAndSmokeEntries(void) {
 
 void explosionScreenShake(coord3d* source_pos, coord3d* source_mag, coord3d* result)
 {
+#ifdef PRACTICE_ROM
+    s32 saved_num_explosion_entries = g_NumExplosionEntries;
+    s32 saved_num_smoke_entries = g_NumSmokeEntries;
+    s32 saved_vi_shake_intensity = g_ViShakeIntensity;
+    u32 saved_vi_shake_timer = g_ViShakeTimer;
+#endif
     PropRecord* explosion_prop;
     f32 angle;
     f32 diff_x;
@@ -454,6 +466,16 @@ void explosionScreenShake(coord3d* source_pos, coord3d* source_mag, coord3d* res
     result->z = explosion_mag * mag_scalar_z;
 
     viShake((f32) g_NumExplosionEntries * explosion_mag);
+
+#ifdef PRACTICE_ROM
+    if (g_IsRenderOnly)
+    {
+        g_NumExplosionEntries = saved_num_explosion_entries;
+        g_NumSmokeEntries = saved_num_smoke_entries;
+        g_ViShakeIntensity = saved_vi_shake_intensity;
+        g_ViShakeTimer = saved_vi_shake_timer;
+    }
+#endif
 }
 
 /***
@@ -907,7 +929,7 @@ Gfx *explosionRenderPropExplosion(PropRecord *prop, Gfx *gdl, s32 withalpha)
         temp_f10 = (s32) (g_ExplosionTypes[temp_s5->explosion_type].flareanimspeed * 15.0f);
 
 #ifdef PRACTICE_ROM
-        if (!practice_external_camera_is_rendering()) {
+        if (!practice_external_camera_is_rendering() && g_ClockTimer != 0) {
 #endif
         for (i = 0; i < EXPLOSION_PARTS_LEN; i++)
         {
@@ -2315,4 +2337,3 @@ Gfx * explosionCallRenderBulletImpactOnProp(Gfx *arg0)
 {
     return explosionRenderBulletImpactOnProp(arg0, NULL, 0);
 }
-

@@ -115,3 +115,4 @@ scripts/make/local/
 
 .DS_Store
 .cache
+tests/states/

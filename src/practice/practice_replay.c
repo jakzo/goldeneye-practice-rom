@@ -6,6 +6,7 @@
 #include "practice_sram.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
+#include "ramrom.h"
 #include "state/practice_states.h"
 #include "watch.h"
 #include <bondconstants.h>
@@ -79,6 +80,7 @@ static s32 g_RequestFrameSeeds;
 static s32 g_RequestPlayback;
 static f32 g_PlaybackElapsedVideoFrames;
 static s32 g_PlaybackAdvanceFrame;
+static s32 g_UseTestRomFixture;
 
 bool g_ReplayIsRecording = FALSE;
 bool g_ReplayIsPlaying = FALSE;
@@ -223,8 +225,11 @@ static void reader_init(ReplayDmaReader *reader, u32 total_size) {
   reader->current_page_offset = SAVE_STATE_SRAM_OFFSET;
   reader->total_size = total_size;
   reader->position = sizeof(ReplayHeader);
-  if (sram_read(reader->current_page_offset, reader->buffers[0],
-                REPLAY_DMA_BUFFER_SIZE) != 0) {
+  if (g_UseTestRomFixture) {
+    romCopy(reader->buffers[0], (void *)TEST_REPLAY_ROM_OFFSET,
+            REPLAY_DMA_BUFFER_SIZE);
+  } else if (sram_read(reader->current_page_offset, reader->buffers[0],
+                       REPLAY_DMA_BUFFER_SIZE) != 0) {
     reader->failed = TRUE;
   }
 }
@@ -232,8 +237,18 @@ static void reader_init(ReplayDmaReader *reader, u32 total_size) {
 static void reader_advance_page(ReplayDmaReader *reader) {
   u32 next_offset = reader->current_page_offset + REPLAY_DMA_BUFFER_SIZE;
 
-  if (next_offset >= SAVE_STATE_SRAM_OFFSET + reader->total_size ||
-      sram_read(next_offset, reader->buffers[0], REPLAY_DMA_BUFFER_SIZE) != 0) {
+  if (next_offset >= SAVE_STATE_SRAM_OFFSET + reader->total_size) {
+    reader->failed = TRUE;
+    return;
+  }
+
+  if (g_UseTestRomFixture) {
+    romCopy(reader->buffers[0],
+            (void *)(TEST_REPLAY_ROM_OFFSET +
+                     next_offset - SAVE_STATE_SRAM_OFFSET),
+            REPLAY_DMA_BUFFER_SIZE);
+  } else if (sram_read(next_offset, reader->buffers[0],
+                       REPLAY_DMA_BUFFER_SIZE) != 0) {
     reader->failed = TRUE;
     return;
   }
@@ -412,10 +427,21 @@ static s32 load_playback_frame(void) {
 }
 
 void practice_replay_init(void) {
+  g_UseTestRomFixture = FALSE;
   sram_read(SAVE_STATE_SRAM_OFFSET, &g_SavedReplayHeader,
             sizeof(g_SavedReplayHeader));
   if (!replay_header_is_valid(&g_SavedReplayHeader))
     bzero(&g_SavedReplayHeader, sizeof(g_SavedReplayHeader));
+}
+
+void practice_replay_use_test_rom_fixture(void) {
+  romCopy(&g_SavedReplayHeader, (void *)TEST_REPLAY_ROM_OFFSET,
+          sizeof(g_SavedReplayHeader));
+  if (!replay_header_is_valid(&g_SavedReplayHeader)) {
+    bzero(&g_SavedReplayHeader, sizeof(g_SavedReplayHeader));
+    return;
+  }
+  g_UseTestRomFixture = TRUE;
 }
 
 void practice_replay_request_recording(void) {
@@ -558,6 +584,48 @@ u32 practice_replay_get_duration(void) {
   return g_ActiveReplayHeader.duration_video_frames;
 }
 
+s32 practice_replay_seek(u32 timestamp) {
+  ReplayDmaReader *reader = &g_ReplayDma.reader;
+  ReplayFrame previous_frame;
+  bool has_previous_frame = FALSE;
+
+  if (!g_ReplayIsPlaying || timestamp >= g_ActiveReplayHeader.duration_video_frames)
+    return FALSE;
+
+  reader_init(reader, g_ActiveReplayHeader.total_size);
+  if (reader->failed)
+    return FALSE;
+
+  g_ReplayFrameIndex = 0;
+  g_ReplayTimestamp = 0;
+  g_PlaybackEntryCount = 0;
+  g_PlaybackOptionsFrameIndex = 0;
+  g_PlaybackFrameLoaded = FALSE;
+
+  while (g_ReplayTimestamp < timestamp) {
+    if (!load_playback_frame())
+      return FALSE;
+    previous_frame = g_PlaybackFrame;
+    has_previous_frame = TRUE;
+    g_ReplayFrameIndex++;
+    g_ReplayTimestamp += g_PlaybackFrame.delta_frames;
+    g_PlaybackFrameLoaded = FALSE;
+  }
+
+  if (g_ReplayTimestamp != timestamp || !load_playback_frame())
+    return FALSE;
+
+  g_PlaybackElapsedVideoFrames = (f32)g_ReplayTimestamp;
+  g_PlaybackAdvanceFrame = FALSE;
+  if (has_previous_frame) {
+    joyPrimePlaybackSample(previous_frame.buttons, previous_frame.stick_x,
+                           previous_frame.stick_y);
+  } else {
+    joyPrimePlaybackSample(0, 0, 0);
+  }
+  return TRUE;
+}
+
 s32 practice_replay_override_delta(s32 delta_frames) {
   if (!g_ReplayIsPlaying)
     return delta_frames;
@@ -603,7 +671,8 @@ s32 practice_replay_override_delta(s32 delta_frames) {
 }
 
 void practice_replay_on_frame_start(void) {
-  if (!g_ReplayIsPlaying || !g_PlaybackFrameLoaded)
+  if (!g_ReplayIsPlaying || !g_PlaybackFrameLoaded ||
+      !g_PlaybackAdvanceFrame)
     return;
 
   if ((g_ActiveReplayHeader.flags & REPLAY_FLAG_FRAME_SEEDS) &&

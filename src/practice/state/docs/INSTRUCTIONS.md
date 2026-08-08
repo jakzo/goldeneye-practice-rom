@@ -105,12 +105,15 @@ Add any general advice helpful for future agents working on this feature here. B
   `gasTimeToFullOpacity`, and `gasDoesDamageFlag`. `ptr_gas_sound` is a
   dynamic sound handle; clear it on load so active restored gas creates a fresh
   sound.
-- **Sky State**: Cloud and water geometry is rebuilt every frame from the
-  player camera and `CurrentEnvironmentRecord`; there are no persistent vertex
-  or shape buffers to restore. `g_SkyCloudOffset` is the independently advancing
-  cloud/water texture phase. Restore it together with the complete pointer-free
-  current environment (including any interpolated alternative sky) and
-  `g_FogSkyIsEnabled`.
+- **Sky and Fog State**: Cloud and water geometry is rebuilt every frame from
+  the player camera and `CurrentEnvironmentRecord`; there are no persistent
+  vertex or shape buffers to restore. `g_SkyCloudOffset` is the independently
+  advancing cloud/water texture phase. Fog additionally depends on its derived
+  scaled distances/intensities, `g_CurFogDetails`, the VI Z range, near-fog
+  selection, and the active main/alternate environment pair. Restore all of
+  these together with the complete pointer-free current environment (including
+  any interpolated alternative sky) and `g_FogSkyIsEnabled`; restoring only the
+  visible record leaves later intro/swirl fog calculations active after load.
 - **Music State**: The three compact-sequence players advance independently of
   the gameplay clock. Temporary time-scale pause explicitly stops the players
   and remembers which were active, resumes only those players, and suspends

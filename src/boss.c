@@ -28,6 +28,7 @@
 #include "tlb_manage.h"
 #include "fr.h"
 #include "game/image.h"
+#include "practice/practice_tests.h"
 #include "vi.h"
 #include "game/bg.h"
 #include "game/debugmenu_handler.h"
@@ -509,8 +510,13 @@ void bossMainloop(void)
                         {
 #ifdef PRACTICE_ROM
                             joyConsumeRegularSamples();
-                            if (g_StageNum != LEVELID_TITLE)
-                                practice_check_hotkeys();
+                            if (g_StageNum != LEVELID_TITLE) {
+                                if (g_practice_test_case ==
+                                        PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES) {
+                                    practice_tests_before_hotkeys(pendingGfx);
+                                }
+                                practice_check_hotkeys(pendingGfx);
+                            }
 #endif
 
                             if (get_is_ramrom_flag())
@@ -534,8 +540,9 @@ void bossMainloop(void)
                             permit_stderr(0);
 
 #ifdef PRACTICE_ROM
-                            if ((speedgraphframes == 0) && (pendingGfx != 0))
+                            if (speedgraphframes == 0 && pendingGfx != 0)
                             {
+                                restore_rng_after_paused_render();
                                 break;
                             }
 
@@ -553,7 +560,6 @@ void bossMainloop(void)
                                     g_GfxMemPos = pausedRenderGfxMemBase;
                                 }
                                 renderOnlyGfxMemPos = g_GfxMemPos;
-                                save_rng_before_paused_render();
                             }
                             else
                             {

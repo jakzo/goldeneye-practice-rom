@@ -11,6 +11,7 @@
 #include "practice_render.h"
 
 extern s32 object_interaction(PropRecord *prop);
+extern s32 modelFindNodeMtxIndex(ModelNode *node, s32 arg1);
 
 typedef struct PracticeRenderJoint {
   void *model;
@@ -20,10 +21,279 @@ typedef struct PracticeRenderJoint {
   struct PracticeRenderJoint *prev;
 } PracticeRenderJoint;
 
+typedef struct PracticeRenderObject {
+  Model *model;
+  RenderPosView *render_pos;
+} PracticeRenderObject;
+
+typedef struct PracticeEquippedWeaponMatrix {
+  Model *model;
+  s32 index;
+  Mtx matrix;
+} PracticeEquippedWeaponMatrix;
+
 extern PracticeRenderJoint *D_80036060;
+extern u8 *g_GfxMemPos;
+extern u8 *g_VtxBuffers[3];
+extern u8 g_GfxActiveBufferIndex;
+extern u32 D_80040990;
+extern u32 watch_screen_index;
+extern u32 controller_options_index;
+extern u32 game_options_index;
+extern s32 mission_brief_index;
+extern s32 D_800409A4;
+extern s32 watch_item_is_actively_selected;
+extern s32 D_800409AC;
+extern s32 D_800409B0;
+extern s32 D_800409B4;
+extern s32 g_curWatchItemIndex;
+extern f32 D_800409BC;
+extern s32 D_800409C0;
+extern s32 D_800409C4;
+extern f32 D_800409C8;
+extern f32 D_800409CC;
+extern s32 D_800409D0;
+extern f32 D_800409D4;
+extern s32 D_800409D8;
 
 bool g_IsRenderOnly = FALSE;
 static bool g_IsRenderStateInvalidated = FALSE;
+static Mtxf g_LoadedCameraMatrix10CC;
+static Mtxf g_LoadedCameraMatrix10D4;
+static Mtxf g_LoadedCameraMatrix10E8;
+static Mtxf g_LoadedPreviousCameraMatrix;
+static Mtxf g_LoadedProjectionMatrix;
+static Mtx g_LoadedRoomProjectionMatrix;
+static bool g_HasLoadedProjectionMatrix;
+static bool g_HasLoadedRoomProjectionMatrix;
+
+void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
+                                         Mtxf *matrix10e8, Mtxf *matrix10ec) {
+  if (matrix10cc != NULL) {
+    matrix_4x4_copy(matrix10cc, &g_LoadedCameraMatrix10CC);
+    g_CurrentPlayer->field_10CC = &g_LoadedCameraMatrix10CC;
+  } else {
+    g_CurrentPlayer->field_10CC = NULL;
+  }
+  if (matrix10d4 != NULL) {
+    matrix_4x4_copy(matrix10d4, &g_LoadedCameraMatrix10D4);
+    g_CurrentPlayer->field_10D4 = &g_LoadedCameraMatrix10D4;
+  } else {
+    g_CurrentPlayer->field_10D4 = NULL;
+  }
+  if (matrix10e8 != NULL) {
+    matrix_4x4_copy(matrix10e8, &g_LoadedCameraMatrix10E8);
+    g_CurrentPlayer->field_10E8 = &g_LoadedCameraMatrix10E8;
+  } else {
+    g_CurrentPlayer->field_10E8 = NULL;
+  }
+  if (matrix10ec != NULL) {
+    matrix_4x4_copy(matrix10ec, &g_LoadedPreviousCameraMatrix);
+    g_CurrentPlayer->field_10EC = &g_LoadedPreviousCameraMatrix;
+  } else {
+    g_CurrentPlayer->field_10EC = NULL;
+  }
+}
+
+void practice_set_loaded_projection_matrix(Mtxf *projection) {
+  g_HasLoadedProjectionMatrix = projection != NULL;
+  if (projection != NULL) {
+    matrix_4x4_copy(projection, &g_LoadedProjectionMatrix);
+    g_CurrentPlayer->projmatrixf = &g_LoadedProjectionMatrix;
+  }
+}
+
+void practice_set_loaded_room_projection_matrix(Mtx *room_projection) {
+  g_HasLoadedRoomProjectionMatrix = room_projection != NULL;
+  if (room_projection != NULL) {
+    bcopy(room_projection, &g_LoadedRoomProjectionMatrix,
+          sizeof(g_LoadedRoomProjectionMatrix));
+  }
+}
+
+static s32 equipped_weapon_matrix_index(Model *model) {
+  s32 switch_index;
+
+  if (model == NULL || model->obj == NULL)
+    return -1;
+
+  for (switch_index = 0;
+       switch_index < model->obj->numSwitches && switch_index < 2;
+       switch_index++) {
+    s32 index = modelFindNodeMtxIndex(model->obj->Switches[switch_index], 0);
+
+    if (index >= 0 && index < model->obj->numMatrices)
+      return index;
+  }
+
+  return -1;
+}
+
+void practice_cache_equipped_weapon_matrix(PropRecord *weapon_prop) {
+  ObjectRecord *obj = weapon_prop != NULL ? weapon_prop->obj : NULL;
+  Model *model = obj != NULL ? obj->model : NULL;
+  s32 index;
+
+  if (g_IsRenderOnly || weapon_prop == NULL ||
+      weapon_prop->type != PROP_TYPE_WEAPON ||
+      weapon_prop->parent == NULL ||
+      weapon_prop->parent->type != PROP_TYPE_CHR || model == NULL ||
+      model->render_pos == NULL)
+    return;
+
+  index = equipped_weapon_matrix_index(model);
+  if (index >= 0)
+    matrix_4x4_copy(&model->render_pos[index].pos, &obj->mtx);
+}
+
+static void save_equipped_weapon_matrices(PracticeRenderContext *context) {
+  PropRecord *prop;
+  PracticeEquippedWeaponMatrix *saved;
+  s32 count = 0;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    s32 hand;
+
+    if ((prop->type != PROP_TYPE_CHR && prop->type != PROP_TYPE_VIEWER) ||
+        prop->chr == NULL)
+      continue;
+
+    for (hand = 0; hand < 2; hand++) {
+      PropRecord *weapon_prop = prop->chr->weapons_held[hand];
+      ObjectRecord *obj = weapon_prop != NULL ? weapon_prop->obj : NULL;
+      Model *model = obj != NULL ? obj->model : NULL;
+      s32 index = equipped_weapon_matrix_index(model);
+
+      /* Only visible held weapons feed their rendered matrix back into NPC
+       * aiming and firing on the following gameplay tick. */
+      if (weapon_prop != NULL &&
+          (weapon_prop->flags & PROPFLAG_ONSCREEN) != 0 && index >= 0 &&
+          model->render_pos != NULL)
+        count++;
+    }
+  }
+
+  context->equipped_weapon_matrices = NULL;
+  context->equipped_weapon_matrix_count = count;
+  if (count == 0)
+    return;
+
+  saved = dynAllocate(count * sizeof(*saved));
+  context->equipped_weapon_matrices = saved;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    s32 hand;
+
+    if ((prop->type != PROP_TYPE_CHR && prop->type != PROP_TYPE_VIEWER) ||
+        prop->chr == NULL)
+      continue;
+
+    for (hand = 0; hand < 2; hand++) {
+      PropRecord *weapon_prop = prop->chr->weapons_held[hand];
+      ObjectRecord *obj = weapon_prop != NULL ? weapon_prop->obj : NULL;
+      Model *model = obj != NULL ? obj->model : NULL;
+      s32 index = equipped_weapon_matrix_index(model);
+
+      if (weapon_prop != NULL &&
+          (weapon_prop->flags & PROPFLAG_ONSCREEN) != 0 && index >= 0 &&
+          model->render_pos != NULL) {
+        saved->model = model;
+        saved->index = index;
+        bcopy(&model->render_pos[index].pos, &saved->matrix,
+              sizeof(saved->matrix));
+        saved++;
+      }
+    }
+  }
+}
+
+static void restore_equipped_weapon_matrices(
+    PracticeRenderContext *context) {
+  PracticeEquippedWeaponMatrix *saved = context->equipped_weapon_matrices;
+  s32 i;
+
+  for (i = 0; i < context->equipped_weapon_matrix_count; i++) {
+    Model *model = saved[i].model;
+
+    if (model != NULL && model->render_pos != NULL && model->obj != NULL &&
+        saved[i].index >= 0 && saved[i].index < model->obj->numMatrices) {
+      bcopy(&saved[i].matrix, &model->render_pos[saved[i].index].pos,
+            sizeof(saved[i].matrix));
+    }
+  }
+}
+
+static void save_watch_state(PracticeRenderContext *context) {
+  PracticeRenderWatchState *saved =
+      dynAllocate(sizeof(PracticeRenderWatchState));
+
+  context->watch_state = saved;
+
+  saved->unknown_40990 = D_80040990;
+  saved->screen_index = watch_screen_index;
+  saved->controller_options_index = controller_options_index;
+  saved->game_options_index = game_options_index;
+  saved->mission_brief_index = mission_brief_index;
+  saved->unknown_409A4 = D_800409A4;
+  saved->item_is_actively_selected = watch_item_is_actively_selected;
+  saved->unknown_409AC = D_800409AC;
+  saved->unknown_409B0 = D_800409B0;
+  saved->unknown_409B4 = D_800409B4;
+  saved->current_item_index = g_curWatchItemIndex;
+  saved->unknown_409BC = D_800409BC;
+  saved->unknown_409C0 = D_800409C0;
+  saved->unknown_409C4 = D_800409C4;
+  saved->unknown_409C8 = D_800409C8;
+  saved->unknown_409CC = D_800409CC;
+  saved->unknown_409D0 = D_800409D0;
+  saved->unknown_409D4 = D_800409D4;
+  saved->unknown_409D8 = D_800409D8;
+}
+
+static void restore_watch_state(PracticeRenderContext *context) {
+  PracticeRenderWatchState *saved = context->watch_state;
+
+  if (saved == NULL)
+    return;
+
+  D_80040990 = saved->unknown_40990;
+  watch_screen_index = saved->screen_index;
+  controller_options_index = saved->controller_options_index;
+  game_options_index = saved->game_options_index;
+  mission_brief_index = saved->mission_brief_index;
+  D_800409A4 = saved->unknown_409A4;
+  watch_item_is_actively_selected = saved->item_is_actively_selected;
+  D_800409AC = saved->unknown_409AC;
+  D_800409B0 = saved->unknown_409B0;
+  D_800409B4 = saved->unknown_409B4;
+  g_curWatchItemIndex = saved->current_item_index;
+  D_800409BC = saved->unknown_409BC;
+  D_800409C0 = saved->unknown_409C0;
+  D_800409C4 = saved->unknown_409C4;
+  D_800409C8 = saved->unknown_409C8;
+  D_800409CC = saved->unknown_409CC;
+  D_800409D0 = saved->unknown_409D0;
+  D_800409D4 = saved->unknown_409D4;
+  D_800409D8 = saved->unknown_409D8;
+}
+
+void practice_prepare_paused_render_state(PracticeRenderContext *context) {
+  g_IsRenderOnly = TRUE;
+  if (g_IsRenderStateInvalidated && g_HasLoadedProjectionMatrix &&
+      g_HasLoadedRoomProjectionMatrix) {
+    Mtx *projection = dynAllocateMatrix();
+    Mtx *room_projection = dynAllocateMatrix();
+
+    guMtxF2L(g_LoadedProjectionMatrix.m, projection);
+    bcopy(&g_LoadedRoomProjectionMatrix, room_projection,
+          sizeof(*room_projection));
+    g_CurrentPlayer->projmatrix = projection;
+    g_CurrentPlayer->field_10E0 = (s32)room_projection;
+  }
+  save_watch_state(context);
+}
 
 static s32 count_model_render_joints(Model *model) {
   ModelNode *node;
@@ -94,7 +364,7 @@ void practice_invalidate_render_state(void) {
 }
 
 bool practice_is_render_state_invalidated(void) {
-  return g_IsRenderStateInvalidated;
+  return g_IsRenderStateInvalidated != FALSE;
 }
 
 void practice_validate_render_state(void) {
@@ -152,11 +422,169 @@ static void restore_joint_pool(PracticeRenderContext *context) {
   D_80036060 = count > 0 ? order[0] : after;
 }
 
+static void save_model_render_positions(PracticeRenderContext *context,
+                                        bool all_models) {
+  PracticeRenderObject *saved;
+  PropRecord *prop;
+  s32 count = 0;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    bool include = all_models || (prop->flags & PROPFLAG_ONSCREEN);
+
+    if (include &&
+        (prop->type == PROP_TYPE_OBJ ||
+         prop->type == PROP_TYPE_WEAPON ||
+         prop->type == PROP_TYPE_DOOR) &&
+        prop->obj != NULL && prop->obj->model != NULL) {
+      count++;
+    } else if (include &&
+               (prop->type == PROP_TYPE_CHR ||
+                prop->type == PROP_TYPE_VIEWER) &&
+               prop->chr != NULL) {
+      ChrRecord *chr = prop->chr;
+      s32 i;
+
+      if (chr->model != NULL)
+        count++;
+
+      for (i = 0; i < 3; i++) {
+        PropRecord *held = chr->weapons_held[i];
+
+        if (held != NULL && held->obj != NULL && held->obj->model != NULL)
+          count++;
+      }
+
+      if (chr->handle_positiondata_hat != NULL &&
+          chr->handle_positiondata_hat->obj != NULL &&
+          chr->handle_positiondata_hat->obj->model != NULL) {
+        count++;
+      }
+    }
+  }
+
+  context->model_render_positions = NULL;
+  context->model_render_position_count = count;
+
+  if (count == 0)
+    return;
+
+  saved = dynAllocate(count * sizeof(*saved));
+  context->model_render_positions = saved;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    bool include = all_models || (prop->flags & PROPFLAG_ONSCREEN);
+
+    if (include &&
+        (prop->type == PROP_TYPE_OBJ ||
+         prop->type == PROP_TYPE_WEAPON ||
+         prop->type == PROP_TYPE_DOOR) &&
+        prop->obj != NULL && prop->obj->model != NULL) {
+      saved->model = prop->obj->model;
+      saved->render_pos = prop->obj->model->render_pos;
+      saved++;
+    } else if (include &&
+               (prop->type == PROP_TYPE_CHR ||
+                prop->type == PROP_TYPE_VIEWER) &&
+               prop->chr != NULL) {
+      ChrRecord *chr = prop->chr;
+      s32 i;
+
+      if (chr->model != NULL) {
+        saved->model = chr->model;
+        saved->render_pos = chr->model->render_pos;
+        saved++;
+      }
+
+      for (i = 0; i < 3; i++) {
+        PropRecord *held = chr->weapons_held[i];
+
+        if (held != NULL && held->obj != NULL && held->obj->model != NULL) {
+          saved->model = held->obj->model;
+          saved->render_pos = held->obj->model->render_pos;
+          saved++;
+        }
+      }
+
+      if (chr->handle_positiondata_hat != NULL &&
+          chr->handle_positiondata_hat->obj != NULL &&
+          chr->handle_positiondata_hat->obj->model != NULL) {
+        saved->model = chr->handle_positiondata_hat->obj->model;
+        saved->render_pos =
+            chr->handle_positiondata_hat->obj->model->render_pos;
+        saved++;
+      }
+    }
+  }
+}
+
+static void restore_model_render_positions(PracticeRenderContext *context) {
+  PracticeRenderObject *saved = context->model_render_positions;
+  s32 i;
+
+  for (i = 0; i < context->model_render_position_count; i++)
+    saved[i].model->render_pos = saved[i].render_pos;
+}
+
+static void copy_fixed_model_matrices(Model *model) {
+  RenderPosView *old_render_pos;
+  RenderPosView *new_render_pos;
+  u32 old_render_addr;
+  u32 render_pos_size;
+  u32 rdram_end;
+  bool old_render_pos_valid;
+  s32 matrix;
+
+  if (model == NULL || model->obj == NULL)
+    return;
+
+  old_render_pos = model->render_pos;
+  old_render_addr = (u32)old_render_pos;
+  render_pos_size = model->obj->numMatrices * sizeof(*new_render_pos);
+  rdram_end = 0x80000000 + osMemSize;
+  old_render_pos_valid =
+      (old_render_addr & 3) == 0 && old_render_addr >= 0x80000000 &&
+      old_render_addr + render_pos_size >= old_render_addr &&
+      old_render_addr + render_pos_size <= rdram_end;
+
+  new_render_pos = dynAllocate(render_pos_size);
+
+  for (matrix = 0; matrix < model->obj->numMatrices; matrix++) {
+    if (old_render_pos_valid) {
+      guMtxL2F(new_render_pos[matrix].pos.m,
+               (Mtx *)&old_render_pos[matrix].pos);
+    } else {
+      matrix_4x4_set_identity(&new_render_pos[matrix].pos);
+    }
+  }
+
+  model->render_pos = new_render_pos;
+}
+
+static void prepare_culled_character_matrices(ChrRecord *chr) {
+  s32 i;
+
+  copy_fixed_model_matrices(chr->model);
+
+  for (i = 0; i < 3; i++) {
+    PropRecord *held = chr->weapons_held[i];
+
+    if (held != NULL && held->obj != NULL)
+      copy_fixed_model_matrices(held->obj->model);
+  }
+
+  if (chr->handle_positiondata_hat != NULL &&
+      chr->handle_positiondata_hat->obj != NULL) {
+    copy_fixed_model_matrices(chr->handle_positiondata_hat->obj->model);
+  }
+}
+
 void practice_prepare_character_render(PracticeRenderContext *context) {
   PropRecord *prop;
   s32 max_joint_count = 0;
 
-  g_IsRenderOnly = TRUE;
+  context->rendered_all_characters = FALSE;
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
@@ -167,58 +595,43 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
   }
 
   save_joint_pool(context, max_joint_count);
+  save_model_render_positions(context, FALSE);
+  save_equipped_weapon_matrices(context);
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
+    if ((prop->flags & PROPFLAG_ONSCREEN) &&
+        (prop->type == PROP_TYPE_OBJ ||
+         prop->type == PROP_TYPE_WEAPON ||
+         prop->type == PROP_TYPE_DOOR) &&
+        prop->obj != NULL && prop->obj->model != NULL) {
+      /* Object rendering can replace the float model matrices with fixed-point
+       * room-relative matrices. Some paths also multiply by the view matrix
+       * and subtract the room origin. That transform is not reversible by a
+       * plain fixed-to-float conversion, so rebuild from authoritative object
+       * state on every paused frame instead of applying it cumulatively. */
+      object_interaction(prop);
+      continue;
+    }
+
     if (!(prop->flags & PROPFLAG_ONSCREEN))
       continue;
 
     if (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) {
       ChrRecord *chr = prop->chr;
-      RenderPosView *render_pos;
-      RenderPosView *held_render_pos[3] = {NULL, NULL, NULL};
-      RenderPosView *hat_render_pos = NULL;
       f32 z_depth;
-      s32 i;
 
       if (chr == NULL || chr->model == NULL)
         continue;
 
-      render_pos = chr->model->render_pos;
       z_depth = prop->zDepth;
-
-      for (i = 0; i < 3; i++) {
-        PropRecord *held = chr->weapons_held[i];
-
-        if (held != NULL && held->obj != NULL && held->obj->model != NULL)
-          held_render_pos[i] = held->obj->model->render_pos;
-      }
-
-      if (chr->handle_positiondata_hat != NULL &&
-          chr->handle_positiondata_hat->obj != NULL &&
-          chr->handle_positiondata_hat->obj->model != NULL) {
-        hat_render_pos = chr->handle_positiondata_hat->obj->model->render_pos;
-      }
 
       chrTickBeams(prop);
 
-      chr->model->render_pos = render_pos;
+      if (chr->field_20 == NULL)
+        prepare_culled_character_matrices(chr);
+
       prop->zDepth = z_depth;
-
-      for (i = 0; i < 3; i++) {
-        PropRecord *held = chr->weapons_held[i];
-
-        if (held_render_pos[i] != NULL && held != NULL && held->obj != NULL &&
-            held->obj->model != NULL) {
-          held->obj->model->render_pos = held_render_pos[i];
-        }
-      }
-
-      if (hat_render_pos != NULL && chr->handle_positiondata_hat != NULL &&
-          chr->handle_positiondata_hat->obj != NULL &&
-          chr->handle_positiondata_hat->obj->model != NULL) {
-        chr->handle_positiondata_hat->obj->model->render_pos = hat_render_pos;
-      }
     }
   }
 }
@@ -228,7 +641,7 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
   s32 max_joint_count = 0;
   s32 hand;
 
-  g_IsRenderOnly = TRUE;
+  context->rendered_all_characters = TRUE;
 
   /*
    * Hand render matrices live in the previous frame's dynamic arena. Reserve
@@ -242,9 +655,17 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
         (RenderPosView *)hand_state->field_B74;
 
     if (header != NULL && old_render_pos != NULL) {
-      RenderPosView *new_render_pos =
-          dynAllocate(header->numMatrices * sizeof(RenderPosView));
+      s32 render_pos_size = header->numMatrices * sizeof(RenderPosView);
+      u8 *active_buffer = g_VtxBuffers[g_GfxActiveBufferIndex];
+      RenderPosView *new_render_pos;
       s32 matrix;
+
+      if ((u8 *)old_render_pos >= active_buffer &&
+          (u8 *)old_render_pos + render_pos_size <= g_GfxMemPos) {
+        new_render_pos = old_render_pos;
+      } else {
+        new_render_pos = dynAllocate(render_pos_size);
+      }
 
       for (matrix = 0; matrix < header->numMatrices; matrix++) {
         Mtxf restored_matrix;
@@ -280,12 +701,17 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
   }
 
   save_joint_pool(context, max_joint_count);
+  save_model_render_positions(context, TRUE);
+  save_equipped_weapon_matrices(context);
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
     if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
         prop->chr != NULL && prop->chr->model != NULL) {
       chrTickBeams(prop);
+
+      if (prop->chr->field_20 == NULL)
+        prepare_culled_character_matrices(prop->chr);
     } else if ((prop->type == PROP_TYPE_OBJ ||
                 prop->type == PROP_TYPE_WEAPON ||
                 prop->type == PROP_TYPE_DOOR) &&
@@ -302,14 +728,32 @@ void practice_finish_character_render(PracticeRenderContext *context) {
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
-    if ((prop->flags & PROPFLAG_ONSCREEN) &&
+    if ((context->rendered_all_characters ||
+         (prop->flags & PROPFLAG_ONSCREEN)) &&
         (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
         prop->chr != NULL) {
+      /* A refreshed paused render ticks every character so newly restored
+       * model matrices exist. Each tick also attaches its temporary render
+       * joints to chr::field_20. Clear every such owner before putting the
+       * saved joint pool back; otherwise an offscreen character retains a
+       * pointer into the free list and creates a cycle on the next live tick.
+       */
       prop->chr->field_20 = NULL;
     }
   }
 
+  restore_model_render_positions(context);
+  /* Held-weapon matrices are gameplay inputs for offscreen NPC fire. The
+   * restored pointers can name graphics-arena storage reused by this paused
+   * render, so put their last live-render values back before gameplay resumes. */
+  restore_equipped_weapon_matrices(context);
   restore_joint_pool(context);
+  if (g_IsRenderStateInvalidated == TRUE) {
+    /* Keep using refreshed matrices for subsequent held-pause renders until
+     * the first live frame validates the reconstructed render state. */
+    g_IsRenderStateInvalidated = 2;
+  }
+  restore_watch_state(context);
   g_IsRenderOnly = FALSE;
 }
 
@@ -334,40 +778,7 @@ static void restore_model_matrices(Model *model) {
 }
 
 void practice_restore_render_matrices(void) {
-  PropRecord *prop;
   s32 i;
-
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    if (!(prop->flags & PROPFLAG_ONSCREEN))
-      continue;
-
-    if (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) {
-      ChrRecord *chr = prop->chr;
-
-      if (chr == NULL)
-        continue;
-
-      restore_model_matrices(chr->model);
-
-      for (i = 0; i < 3; i++) {
-        PropRecord *held = chr->weapons_held[i];
-
-        if (held != NULL && held->obj != NULL)
-          restore_model_matrices(held->obj->model);
-      }
-
-      if (chr->handle_positiondata_hat != NULL &&
-          chr->handle_positiondata_hat->obj != NULL) {
-        restore_model_matrices(chr->handle_positiondata_hat->obj->model);
-      }
-    } else if (prop->type == PROP_TYPE_OBJ ||
-               prop->type == PROP_TYPE_WEAPON ||
-               prop->type == PROP_TYPE_DOOR) {
-      if (prop->obj != NULL)
-        restore_model_matrices(prop->obj->model);
-    }
-  }
 
   for (i = 0; i < 2; i++) {
     struct hand *hand = &g_CurrentPlayer->hands[i];

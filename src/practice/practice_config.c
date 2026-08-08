@@ -311,7 +311,8 @@ void practice_config_save() {
 
 static u32 rom_config_checksum(const struct PracticeRomConfig *config) {
   return config->magic ^ config->version ^ config->size ^
-         (u32)config->test_case ^ (u32)config->boot_level ^ config->flags ^
+         (u32)config->test_case ^ (u32)config->boot_level ^
+         (u32)config->test_param ^ config->flags ^
          PRACTICE_ROM_CONFIG_CHECKSUM_SALT;
 }
 
@@ -337,7 +338,7 @@ static void apply_rom_config(void) {
   if (config->test_case != 0) {
     s32 test_boot_level;
 
-    practice_tests_set_case(config->test_case);
+    practice_tests_set_case(config->test_case, config->test_param);
     test_boot_level = practice_tests_boot_level(config->test_case);
     if (test_boot_level != LEVELID_NONE) {
       practice.boot_level = test_boot_level;

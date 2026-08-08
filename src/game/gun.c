@@ -27,6 +27,8 @@
 #include "fr.h"
 #include "assets/obseg/text/LgunE.h"
 #include "textrelated.h"
+#include "practice/practice_render.h"
+#include "practice/practice_timescale.h"
 
 #ifdef PRACTICE_ROM
 extern s32 speedgraphframes;
@@ -1261,6 +1263,15 @@ ITEM_IDS get_item_in_hand_or_watch_menu(GUNHAND hand) {
 }
 
 void sub_GAME_7F05DA8C(GUNHAND hand, ITEM_IDS weaponnum_watchmenu) {
+#ifdef PRACTICE_ROM
+    /* A zero-delta render must display the hand model restored by the last
+     * gameplay frame without advancing the watch's model-swap state. The next
+     * live tick will perform any pending swap normally. */
+    if (g_IsRenderOnly) {
+        return;
+    }
+
+#endif
     place_item_in_hand_swap_and_make_visible(hand, weaponnum_watchmenu);
 	g_CurrentPlayer->hands[hand].weaponnum_watchmenu = weaponnum_watchmenu;
 }
@@ -1446,6 +1457,16 @@ void gunSetBondWeaponSway(f32 breathing, f32 arg1, f32 arg2, f32 arg3)
     f32 sp4c;
     u32 stack2;
     f32 minbreathing;
+
+#ifdef PRACTICE_ROM
+    /* Gun sway owns persistent interpolation state and consumes RNG whenever a
+     * blend boundary is crossed. A zero-delta pause frame must not advance it;
+     * otherwise held pause can schedule an extra blend on the first live frame
+     * and desynchronise replay gameplay. */
+    if (g_IsTimePaused) {
+        return;
+    }
+#endif
 
     if (sp50 < 0.0f) { sp50 = -sp50; }
 

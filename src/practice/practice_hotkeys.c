@@ -22,7 +22,9 @@ u16 hotkey_trigger(void) {
   return practice.left_trigger_hotkeys ? L_TRIG : R_TRIG;
 }
 
-void practice_check_hotkeys(void) {
+static bool g_DeferredStateLoad = FALSE;
+
+void practice_check_hotkeys(s32 pending_gfx_tasks) {
   s32 controller;
   s32 action_controller = -1;
   bool trigger_held = FALSE;
@@ -49,6 +51,12 @@ void practice_check_hotkeys(void) {
   if (g_ReplayIsPlaying)
     joySetContDataIndex(1);
 
+  if (g_DeferredStateLoad && pending_gfx_tasks == 0) {
+    g_DeferredStateLoad = FALSE;
+    load_game_state();
+    return;
+  }
+
   if (!trigger_held) {
     if (g_IsTimePaused)
       unpause();
@@ -69,6 +77,10 @@ void practice_check_hotkeys(void) {
       return;
     }
     if (pressed & U_JPAD) {
+      if (pending_gfx_tasks != 0) {
+        g_DeferredStateLoad = TRUE;
+        return;
+      }
       load_game_state();
       return;
     }

@@ -75,6 +75,14 @@ test TEST_CASE:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test "{{ TEST_CASE }}"
 
+test-runway-save-states:
+    if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
+    docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-runway-save-states
+
+test-us-replay-save-states REPLAY_DIR:
+    if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
+    docker run --rm -e REPLAY_SAVE_STATE_FILTER -e REPLAY_SAVE_STATE_EXCLUDE -e REPLAY_SAVE_STATE_SKIP_BUILD -v "$(pwd):/home/dev" -v "{{ REPLAY_DIR }}:/replays:ro" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-us-replay-save-states /replays
+
 # Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
 profile-ares ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007": build-ares
     test -x "{{ ares_bin }}"

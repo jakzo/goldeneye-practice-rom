@@ -27,6 +27,7 @@ void joyConsumeSamplesWrapper(void);
 void joyConsumeRegularSamples(void);
 void joyConsumePlaybackSamples(void);
 void joyRecordSamples(void);
+void joyPrimePlaybackSample(u16 buttons, s8 stick_x, s8 stick_y);
 #endif
 void joyPoll(void);
 s8 joyGetStickX(s8 contpadnum);

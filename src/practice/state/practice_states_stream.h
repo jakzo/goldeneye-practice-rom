@@ -30,6 +30,7 @@ typedef struct {
   u32 current_page_addr;
   bool is_write;
   bool is_dirty;
+  bool error;
 } SramStream;
 
 void sram_stream_init_write(SramStream *stream, u32 sram_base);
