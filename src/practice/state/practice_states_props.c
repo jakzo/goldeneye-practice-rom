@@ -2025,10 +2025,17 @@ static void load_equipped_weapon_matrices(StateStream *stream,
   if (can_restore && saved_count > 0) {
     Mtxf identity_float;
     Mtx identity_fixed;
+    u32 render_pos_size =
+        model->obj->numMatrices * sizeof(RenderPosView);
 
     matrix_4x4_set_identity(&identity_float);
     guMtxF2L(identity_float.m, &identity_fixed);
-    render_pos = dynAllocate(model->obj->numMatrices * sizeof(RenderPosView));
+    if (model->render_pos != NULL &&
+        is_rdram_range(model->render_pos, render_pos_size)) {
+      render_pos = model->render_pos;
+    } else {
+      render_pos = dynAllocate(render_pos_size);
+    }
     for (matrix = 0; matrix < model->obj->numMatrices; matrix++) {
       bcopy(&identity_fixed, &render_pos[matrix], sizeof(identity_fixed));
     }
@@ -3750,12 +3757,7 @@ bool save_props_state(StateStream *stream) {
     }
     save_prop_links(stream, prop);
     if (!compactContainedObject) {
-      u8 roomCount = 0;
-      while (roomCount < 4 && prop->rooms[roomCount] != 0xff) {
-        roomCount++;
-      }
-      write_u8(stream, roomCount);
-      write_bytes(stream, prop->rooms, roomCount);
+      write_bytes(stream, prop->rooms, sizeof(prop->rooms));
       write_u32(stream, prop->unk30);
     }
     if (prop->type == PROP_TYPE_EXPLOSION) {
@@ -4363,16 +4365,9 @@ bool load_props_state(StateStream *stream) {
     load_prop_links(stream, &savedPropParentIdx, &savedPropChildIdx,
                     &savedPropPrevIdx, &savedPropNextIdx);
     u8 savedPropRooms[4] = {0xff, 0xff, 0xff, 0xff};
-    u8 savedPropRoomCount = 0;
     s32 savedPropUnk30 = 0;
     if (!compactContainedObject) {
-      savedPropRoomCount = read_u8(stream);
-      if (savedPropRoomCount > 4) {
-        practiceLogWarn("Invalid room count %d for saved prop %d",
-                        savedPropRoomCount, savedPropIndex);
-        return FALSE;
-      }
-      read_bytes(stream, savedPropRooms, savedPropRoomCount);
+      read_bytes(stream, savedPropRooms, sizeof(savedPropRooms));
       savedPropUnk30 = read_u32(stream);
     }
     ChrAllocationState savedChrAllocation;

@@ -1463,7 +1463,7 @@ void gunSetBondWeaponSway(f32 breathing, f32 arg1, f32 arg2, f32 arg3)
      * blend boundary is crossed. A zero-delta pause frame must not advance it;
      * otherwise held pause can schedule an extra blend on the first live frame
      * and desynchronise replay gameplay. */
-    if (g_IsTimePaused) {
+    if (g_TimeScaleDeltaFrames == 0) {
         return;
     }
 #endif

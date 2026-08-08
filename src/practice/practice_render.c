@@ -66,6 +66,9 @@ static Mtxf g_LoadedProjectionMatrix;
 static Mtx g_LoadedRoomProjectionMatrix;
 static bool g_HasLoadedProjectionMatrix;
 static bool g_HasLoadedRoomProjectionMatrix;
+static PracticeRenderWatchState g_PausedWatchState;
+
+static void restore_model_matrices(Model *model);
 
 void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
                                          Mtxf *matrix10e8, Mtxf *matrix10ec) {
@@ -226,8 +229,7 @@ static void restore_equipped_weapon_matrices(
 }
 
 static void save_watch_state(PracticeRenderContext *context) {
-  PracticeRenderWatchState *saved =
-      dynAllocate(sizeof(PracticeRenderWatchState));
+  PracticeRenderWatchState *saved = &g_PausedWatchState;
 
   context->watch_state = saved;
 
@@ -280,7 +282,6 @@ static void restore_watch_state(PracticeRenderContext *context) {
 }
 
 void practice_prepare_paused_render_state(PracticeRenderContext *context) {
-  g_IsRenderOnly = TRUE;
   if (g_IsRenderStateInvalidated && g_HasLoadedProjectionMatrix &&
       g_HasLoadedRoomProjectionMatrix) {
     Mtx *projection = dynAllocateMatrix();
@@ -580,11 +581,31 @@ static void prepare_culled_character_matrices(ChrRecord *chr) {
   }
 }
 
+static void restore_character_matrices(ChrRecord *chr) {
+  s32 i;
+
+  if (chr == NULL)
+    return;
+
+  restore_model_matrices(chr->model);
+  for (i = 0; i < 3; i++) {
+    PropRecord *held = chr->weapons_held[i];
+
+    if (held != NULL && held->obj != NULL)
+      restore_model_matrices(held->obj->model);
+  }
+  if (chr->handle_positiondata_hat != NULL &&
+      chr->handle_positiondata_hat->obj != NULL) {
+    restore_model_matrices(chr->handle_positiondata_hat->obj->model);
+  }
+}
+
 void practice_prepare_character_render(PracticeRenderContext *context) {
   PropRecord *prop;
   s32 max_joint_count = 0;
 
   context->rendered_all_characters = FALSE;
+  g_IsRenderOnly = TRUE;
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
@@ -605,12 +626,7 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
          prop->type == PROP_TYPE_WEAPON ||
          prop->type == PROP_TYPE_DOOR) &&
         prop->obj != NULL && prop->obj->model != NULL) {
-      /* Object rendering can replace the float model matrices with fixed-point
-       * room-relative matrices. Some paths also multiply by the view matrix
-       * and subtract the room origin. That transform is not reversible by a
-       * plain fixed-to-float conversion, so rebuild from authoritative object
-       * state on every paused frame instead of applying it cumulatively. */
-      object_interaction(prop);
+      restore_model_matrices(prop->obj->model);
       continue;
     }
 
@@ -625,6 +641,11 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
         continue;
 
       z_depth = prop->zDepth;
+
+      /* On-screen character matrices are left in fixed-point form by the
+       * preceding render. chrTickBeams and the next render both require the
+       * float representation. */
+      restore_character_matrices(chr);
 
       chrTickBeams(prop);
 
@@ -642,6 +663,7 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
   s32 hand;
 
   context->rendered_all_characters = TRUE;
+  g_IsRenderOnly = TRUE;
 
   /*
    * Hand render matrices live in the previous frame's dynamic arena. Reserve

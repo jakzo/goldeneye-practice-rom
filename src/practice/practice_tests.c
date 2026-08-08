@@ -1203,7 +1203,13 @@ void practice_tests_tick() {
           PropRecord *glass = get_prop_by_index(saved_indices[i]);
           if (glass == NULL || memcmp(glass->rooms, saved_rooms[i],
                                       sizeof(saved_rooms[i])) != 0) {
-            emu_log("TINTED_GLASS_ROOMS_CHANGED prop=%d", saved_indices[i]);
+            emu_log("TINTED_GLASS_ROOMS_CHANGED prop=%d saved=%02x,%02x,%02x,%02x live=%02x,%02x,%02x,%02x",
+                    saved_indices[i], saved_rooms[i][0], saved_rooms[i][1],
+                    saved_rooms[i][2], saved_rooms[i][3],
+                    glass != NULL ? glass->rooms[0] : 0,
+                    glass != NULL ? glass->rooms[1] : 0,
+                    glass != NULL ? glass->rooms[2] : 0,
+                    glass != NULL ? glass->rooms[3] : 0);
             rooms_match = FALSE;
           }
         }
