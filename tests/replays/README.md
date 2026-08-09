@@ -61,5 +61,11 @@ this sequence until the replay completes:
 
 The test fails on replay RNG divergence, an incomplete replay, or a replay
 cursor mismatch between the original and reloaded 25-frame segment. Run the
-Runway fixture headlessly in Docker with `just test-runway-save-states`, or run
-all US `.ram` files in a directory with `just test-us-replay-save-states DIR`.
+US Runway fixture headlessly in Docker with `just test-runway-save-states`, or
+run every `.ram` file in one regional directory with:
+
+```bash
+just test-replay-save-states us tests/replays/us
+just test-replay-save-states eu tests/replays/eu
+just test-replay-save-states jp tests/replays/jp
+```

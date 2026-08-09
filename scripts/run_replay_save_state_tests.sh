@@ -3,6 +3,7 @@
 set -euo pipefail
 
 replay_dir="${1:?replay directory required}"
+version="${2:-US}"
 filter="${REPLAY_SAVE_STATE_FILTER:-}"
 exclude="${REPLAY_SAVE_STATE_EXCLUDE:-}"
 skip_build="${REPLAY_SAVE_STATE_SKIP_BUILD:+--skip-build}"
@@ -28,6 +29,7 @@ for replay in "${replays[@]}"; do
     ./scripts/run_practice_tests.py \
         --test REPLAY_RUNWAY_SAVE_STATES \
         --replay-fixture "$replay" \
+        --version "$version" \
         --timeout 1200 \
         $skip_build
     skip_build="--skip-build"

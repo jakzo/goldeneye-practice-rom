@@ -45,8 +45,10 @@ fi
 export DISPLAY=":${display_number}"
 if [ "${1:-}" = "--test-runway-save-states" ]; then
     ./scripts/run_runway_save_state_tests.sh
-elif [ "${1:-}" = "--test-us-replay-save-states" ]; then
-    ./scripts/run_replay_save_state_tests.sh "${2:?replay directory required}"
+elif [ "${1:-}" = "--test-replay-save-states" ]; then
+    ./scripts/run_replay_save_state_tests.sh \
+        "${2:?replay directory required}" \
+        "${3:?ROM region required}"
 else
     ./scripts/run_practice_tests.py "$@"
 fi

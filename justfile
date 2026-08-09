@@ -79,9 +79,17 @@ test-runway-save-states:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-runway-save-states
 
-test-us-replay-save-states REPLAY_DIR:
+test-replay-save-states REGION REPLAY_DIR:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    region="$(printf '%s' "{{ REGION }}" | tr '[:lower:]' '[:upper:]')"
+    case "$region" in
+        US|EU|JP) ;;
+        *) echo "error: region must be one of: us, eu, jp" >&2; exit 2 ;;
+    esac
+    replay_dir="$(cd "{{ REPLAY_DIR }}" && pwd)"
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
-    docker run --rm -e REPLAY_SAVE_STATE_FILTER -e REPLAY_SAVE_STATE_EXCLUDE -e REPLAY_SAVE_STATE_SKIP_BUILD -v "$(pwd):/home/dev" -v "{{ REPLAY_DIR }}:/replays:ro" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-us-replay-save-states /replays
+    docker run --rm -e REPLAY_SAVE_STATE_FILTER -e REPLAY_SAVE_STATE_EXCLUDE -e REPLAY_SAVE_STATE_SKIP_BUILD -v "$(pwd):/home/dev" -v "$replay_dir:/replays:ro" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-replay-save-states /replays "$region"
 
 # Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
 profile-ares ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007": build-ares

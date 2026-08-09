@@ -911,11 +911,13 @@ def main():
     if args.version != "US" and (
         args.test_param
         or args.state_fixture
-        or args.replay_fixture
         or args.output_state
         or args.output_state_dir
     ):
-        print("error: parameterized save-state fixtures are US-only", file=sys.stderr)
+        print(
+            "error: test parameters and raw save-state options are US-only",
+            file=sys.stderr,
+        )
         return 2
 
     if args.state_fixture and not args.state_fixture.is_absolute():
