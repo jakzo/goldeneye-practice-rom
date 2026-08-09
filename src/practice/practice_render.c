@@ -26,12 +26,6 @@ typedef struct PracticeRenderObject {
   RenderPosView *render_pos;
 } PracticeRenderObject;
 
-typedef struct PracticeEquippedWeaponMatrix {
-  Model *model;
-  s32 index;
-  Mtx matrix;
-} PracticeEquippedWeaponMatrix;
-
 extern PracticeRenderJoint *D_80036060;
 extern u8 *g_GfxMemPos;
 extern u8 *g_VtxBuffers[3];
@@ -84,13 +78,22 @@ void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
   } else {
     g_CurrentPlayer->field_10D4 = NULL;
   }
-  if (matrix10e8 != NULL) {
+  /* Loading occurs before the saved frame's render. The uninterrupted path
+   * pushes each current camera matrix into its previous slot during that
+   * render, before gameplay resumes. Reproduce that derived transition here. */
+  if (matrix10cc != NULL) {
+    matrix_4x4_copy(matrix10cc, &g_LoadedCameraMatrix10E8);
+    g_CurrentPlayer->field_10E8 = &g_LoadedCameraMatrix10E8;
+  } else if (matrix10e8 != NULL) {
     matrix_4x4_copy(matrix10e8, &g_LoadedCameraMatrix10E8);
     g_CurrentPlayer->field_10E8 = &g_LoadedCameraMatrix10E8;
   } else {
     g_CurrentPlayer->field_10E8 = NULL;
   }
-  if (matrix10ec != NULL) {
+  if (matrix10d4 != NULL) {
+    matrix_4x4_copy(matrix10d4, &g_LoadedPreviousCameraMatrix);
+    g_CurrentPlayer->field_10EC = &g_LoadedPreviousCameraMatrix;
+  } else if (matrix10ec != NULL) {
     matrix_4x4_copy(matrix10ec, &g_LoadedPreviousCameraMatrix);
     g_CurrentPlayer->field_10EC = &g_LoadedPreviousCameraMatrix;
   } else {
@@ -137,7 +140,11 @@ void practice_cache_equipped_weapon_matrix(PropRecord *weapon_prop) {
   Model *model = obj != NULL ? obj->model : NULL;
   s32 index;
 
-  if (g_IsRenderOnly || weapon_prop == NULL ||
+  /* A post-load refresh is render-only, but its rebuilt attachment matrix is
+   * needed by the first live gameplay tick.  Ordinary held-pause renders must
+   * not replace the gameplay cache. */
+  if ((g_IsRenderOnly && !practice_is_render_state_invalidated()) ||
+      weapon_prop == NULL ||
       weapon_prop->type != PROP_TYPE_WEAPON ||
       weapon_prop->parent == NULL ||
       weapon_prop->parent->type != PROP_TYPE_CHR || model == NULL ||
@@ -145,86 +152,14 @@ void practice_cache_equipped_weapon_matrix(PropRecord *weapon_prop) {
     return;
 
   index = equipped_weapon_matrix_index(model);
-  if (index >= 0)
-    matrix_4x4_copy(&model->render_pos[index].pos, &obj->mtx);
-}
+  if (index >= 0) {
+    Mtx fixed_matrix;
 
-static void save_equipped_weapon_matrices(PracticeRenderContext *context) {
-  PropRecord *prop;
-  PracticeEquippedWeaponMatrix *saved;
-  s32 count = 0;
-
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    s32 hand;
-
-    if ((prop->type != PROP_TYPE_CHR && prop->type != PROP_TYPE_VIEWER) ||
-        prop->chr == NULL)
-      continue;
-
-    for (hand = 0; hand < 2; hand++) {
-      PropRecord *weapon_prop = prop->chr->weapons_held[hand];
-      ObjectRecord *obj = weapon_prop != NULL ? weapon_prop->obj : NULL;
-      Model *model = obj != NULL ? obj->model : NULL;
-      s32 index = equipped_weapon_matrix_index(model);
-
-      /* Only visible held weapons feed their rendered matrix back into NPC
-       * aiming and firing on the following gameplay tick. */
-      if (weapon_prop != NULL &&
-          (weapon_prop->flags & PROPFLAG_ONSCREEN) != 0 && index >= 0 &&
-          model->render_pos != NULL)
-        count++;
-    }
-  }
-
-  context->equipped_weapon_matrices = NULL;
-  context->equipped_weapon_matrix_count = count;
-  if (count == 0)
-    return;
-
-  saved = dynAllocate(count * sizeof(*saved));
-  context->equipped_weapon_matrices = saved;
-
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    s32 hand;
-
-    if ((prop->type != PROP_TYPE_CHR && prop->type != PROP_TYPE_VIEWER) ||
-        prop->chr == NULL)
-      continue;
-
-    for (hand = 0; hand < 2; hand++) {
-      PropRecord *weapon_prop = prop->chr->weapons_held[hand];
-      ObjectRecord *obj = weapon_prop != NULL ? weapon_prop->obj : NULL;
-      Model *model = obj != NULL ? obj->model : NULL;
-      s32 index = equipped_weapon_matrix_index(model);
-
-      if (weapon_prop != NULL &&
-          (weapon_prop->flags & PROPFLAG_ONSCREEN) != 0 && index >= 0 &&
-          model->render_pos != NULL) {
-        saved->model = model;
-        saved->index = index;
-        bcopy(&model->render_pos[index].pos, &saved->matrix,
-              sizeof(saved->matrix));
-        saved++;
-      }
-    }
-  }
-}
-
-static void restore_equipped_weapon_matrices(
-    PracticeRenderContext *context) {
-  PracticeEquippedWeaponMatrix *saved = context->equipped_weapon_matrices;
-  s32 i;
-
-  for (i = 0; i < context->equipped_weapon_matrix_count; i++) {
-    Model *model = saved[i].model;
-
-    if (model != NULL && model->render_pos != NULL && model->obj != NULL &&
-        saved[i].index >= 0 && saved[i].index < model->obj->numMatrices) {
-      bcopy(&saved[i].matrix, &model->render_pos[saved[i].index].pos,
-            sizeof(saved[i].matrix));
-    }
+    /* Gameplay normally reads this matrix after the renderer has quantized it
+     * to N64 fixed point. Keep the stable cache in float form, but round-trip
+     * it through Mtx so the invalidated first tick sees the identical value. */
+    guMtxF2L(model->render_pos[index].pos.m, &fixed_matrix);
+    guMtxL2F(obj->mtx.m, &fixed_matrix);
   }
 }
 
@@ -366,6 +301,10 @@ void practice_invalidate_render_state(void) {
 
 bool practice_is_render_state_invalidated(void) {
   return g_IsRenderStateInvalidated != FALSE;
+}
+
+bool practice_needs_refreshed_render(void) {
+  return g_IsRenderStateInvalidated == TRUE;
 }
 
 void practice_validate_render_state(void) {
@@ -528,75 +467,84 @@ static void restore_model_render_positions(PracticeRenderContext *context) {
     saved[i].model->render_pos = saved[i].render_pos;
 }
 
-static void copy_fixed_model_matrices(Model *model) {
-  RenderPosView *old_render_pos;
+static void restore_refreshed_render_matrices(void) {
+  PropRecord *prop;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    if (!(prop->flags & PROPFLAG_ONSCREEN)) {
+      continue;
+    }
+    if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL) {
+      ChrRecord *chr = prop->chr;
+      s32 hand;
+
+      restore_model_matrices(chr->model);
+      for (hand = 0; hand < 3; hand++) {
+        PropRecord *held = chr->weapons_held[hand];
+        s32 previous;
+        bool duplicate = FALSE;
+
+        for (previous = 0; previous < hand; previous++) {
+          if (chr->weapons_held[previous] == held) {
+            duplicate = TRUE;
+            break;
+          }
+        }
+        if (!duplicate && held != NULL && held->obj != NULL) {
+          restore_model_matrices(held->obj->model);
+        }
+      }
+      if (chr->handle_positiondata_hat != NULL &&
+          chr->handle_positiondata_hat->obj != NULL) {
+        restore_model_matrices(chr->handle_positiondata_hat->obj->model);
+      }
+    } else if ((prop->type == PROP_TYPE_OBJ ||
+                prop->type == PROP_TYPE_WEAPON ||
+                prop->type == PROP_TYPE_DOOR) &&
+               (prop->parent == NULL ||
+                (prop->parent->type != PROP_TYPE_CHR &&
+                 prop->parent->type != PROP_TYPE_VIEWER)) &&
+               prop->obj != NULL) {
+      restore_model_matrices(prop->obj->model);
+    }
+  }
+}
+
+static void initialize_model_matrices(Model *model) {
   RenderPosView *new_render_pos;
-  u32 old_render_addr;
   u32 render_pos_size;
-  u32 rdram_end;
-  bool old_render_pos_valid;
   s32 matrix;
 
   if (model == NULL || model->obj == NULL)
     return;
 
-  old_render_pos = model->render_pos;
-  old_render_addr = (u32)old_render_pos;
   render_pos_size = model->obj->numMatrices * sizeof(*new_render_pos);
-  rdram_end = 0x80000000 + osMemSize;
-  old_render_pos_valid =
-      (old_render_addr & 3) == 0 && old_render_addr >= 0x80000000 &&
-      old_render_addr + render_pos_size >= old_render_addr &&
-      old_render_addr + render_pos_size <= rdram_end;
-
   new_render_pos = dynAllocate(render_pos_size);
 
   for (matrix = 0; matrix < model->obj->numMatrices; matrix++) {
-    if (old_render_pos_valid) {
-      guMtxL2F(new_render_pos[matrix].pos.m,
-               (Mtx *)&old_render_pos[matrix].pos);
-    } else {
-      matrix_4x4_set_identity(&new_render_pos[matrix].pos);
-    }
+    matrix_4x4_set_identity(&new_render_pos[matrix].pos);
   }
 
   model->render_pos = new_render_pos;
 }
 
-static void prepare_culled_character_matrices(ChrRecord *chr) {
+static void initialize_character_matrices(ChrRecord *chr) {
   s32 i;
 
-  copy_fixed_model_matrices(chr->model);
+  initialize_model_matrices(chr->model);
 
   for (i = 0; i < 3; i++) {
     PropRecord *held = chr->weapons_held[i];
 
     if (held != NULL && held->obj != NULL)
-      copy_fixed_model_matrices(held->obj->model);
+      initialize_model_matrices(held->obj->model);
   }
 
   if (chr->handle_positiondata_hat != NULL &&
       chr->handle_positiondata_hat->obj != NULL) {
-    copy_fixed_model_matrices(chr->handle_positiondata_hat->obj->model);
-  }
-}
-
-static void restore_character_matrices(ChrRecord *chr) {
-  s32 i;
-
-  if (chr == NULL)
-    return;
-
-  restore_model_matrices(chr->model);
-  for (i = 0; i < 3; i++) {
-    PropRecord *held = chr->weapons_held[i];
-
-    if (held != NULL && held->obj != NULL)
-      restore_model_matrices(held->obj->model);
-  }
-  if (chr->handle_positiondata_hat != NULL &&
-      chr->handle_positiondata_hat->obj != NULL) {
-    restore_model_matrices(chr->handle_positiondata_hat->obj->model);
+    initialize_model_matrices(chr->handle_positiondata_hat->obj->model);
   }
 }
 
@@ -617,7 +565,6 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
 
   save_joint_pool(context, max_joint_count);
   save_model_render_positions(context, FALSE);
-  save_equipped_weapon_matrices(context);
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
@@ -626,7 +573,10 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
          prop->type == PROP_TYPE_WEAPON ||
          prop->type == PROP_TYPE_DOOR) &&
         prop->obj != NULL && prop->obj->model != NULL) {
-      restore_model_matrices(prop->obj->model);
+      /* Visibility flags can survive a load even when the referenced matrix
+       * buffer belonged to an older graphics-arena generation. Give the
+       * object renderer unambiguous current-frame float storage. */
+      initialize_model_matrices(prop->obj->model);
       continue;
     }
 
@@ -642,15 +592,11 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
 
       z_depth = prop->zDepth;
 
-      /* On-screen character matrices are left in fixed-point form by the
-       * preceding render. chrTickBeams and the next render both require the
-       * float representation. */
-      restore_character_matrices(chr);
-
+      /* Visibility can change while paused, so the previous render buffer may
+       * contain either float or fixed-point matrices. Rebuild from model state
+       * in an unambiguous current-arena float buffer. */
+      initialize_character_matrices(chr);
       chrTickBeams(prop);
-
-      if (chr->field_20 == NULL)
-        prepare_culled_character_matrices(chr);
 
       prop->zDepth = z_depth;
     }
@@ -662,6 +608,9 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
   s32 max_joint_count = 0;
   s32 hand;
 
+  /* Only visible models need matrix storage, but every restored character can
+   * retain a joint pointer into the rewound arena. Clear those pointers in the
+   * finish pass without rendering or allocating matrices for off-screen NPCs. */
   context->rendered_all_characters = TRUE;
   g_IsRenderOnly = TRUE;
 
@@ -716,28 +665,30 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
    */
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
-    if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+    if ((prop->flags & PROPFLAG_ONSCREEN) &&
+        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
         prop->chr != NULL) {
       max_joint_count += count_character_render_joints(prop->chr);
     }
   }
 
   save_joint_pool(context, max_joint_count);
-  save_model_render_positions(context, TRUE);
-  save_equipped_weapon_matrices(context);
+  save_model_render_positions(context, FALSE);
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
+    if (!(prop->flags & PROPFLAG_ONSCREEN))
+      continue;
+
     if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
         prop->chr != NULL && prop->chr->model != NULL) {
+      initialize_character_matrices(prop->chr);
       chrTickBeams(prop);
-
-      if (prop->chr->field_20 == NULL)
-        prepare_culled_character_matrices(prop->chr);
     } else if ((prop->type == PROP_TYPE_OBJ ||
                 prop->type == PROP_TYPE_WEAPON ||
                 prop->type == PROP_TYPE_DOOR) &&
                prop->obj != NULL && prop->obj->model != NULL) {
+      initialize_model_matrices(prop->obj->model);
       object_interaction(prop);
     }
   }
@@ -764,11 +715,14 @@ void practice_finish_character_render(PracticeRenderContext *context) {
     }
   }
 
-  restore_model_render_positions(context);
-  /* Held-weapon matrices are gameplay inputs for offscreen NPC fire. The
-   * restored pointers can name graphics-arena storage reused by this paused
-   * render, so put their last live-render values back before gameplay resumes. */
-  restore_equipped_weapon_matrices(context);
+  if (context->rendered_all_characters) {
+    /* Retain the rebuilt allocations instead of restoring stale pre-load
+     * arena pointers. Walk the live ownership graph because the saved pointer
+     * list itself lives in that arena and may be overwritten by rendering. */
+    restore_refreshed_render_matrices();
+  } else {
+    restore_model_render_positions(context);
+  }
   restore_joint_pool(context);
   if (g_IsRenderStateInvalidated == TRUE) {
     /* Keep using refreshed matrices for subsequent held-pause renders until

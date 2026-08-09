@@ -988,13 +988,6 @@ static void load_current_player_state(StateStream *stream) {
 #ifdef DEV
   validate_current_player_model_invariant(saved_had_model);
 #endif
-  if (g_CurrentPlayer->ptr_char_objectinstance != NULL) {
-    setsuboffset(g_CurrentPlayer->ptr_char_objectinstance,
-                 &g_CurrentPlayer->pos);
-    setsubroty(g_CurrentPlayer->ptr_char_objectinstance,
-               get_curplay_horizontal_rotation_in_degrees());
-  }
-
   if (read_u8(stream)) {
     /* The intro can reuse the first-person weapon buffer that backs the live
      * gait model before a late-level state is loaded. Rebuild the embedded
@@ -1009,6 +1002,15 @@ static void load_current_player_state(StateStream *stream) {
   if (read_u8(stream)) {
     practice_states_load_model_animation(
         stream, g_CurrentPlayer->ptr_char_objectinstance);
+  }
+  if (g_CurrentPlayer->ptr_char_objectinstance != NULL) {
+    /* The animation payload includes root position data, so bind the restored
+     * third-person model to the physical viewer prop after loading it. During
+     * intro cameras player->pos is the camera, not Bond's world position. */
+    setsuboffset(g_CurrentPlayer->ptr_char_objectinstance,
+                 &g_CurrentPlayer->prop->pos);
+    setsubroty(g_CurrentPlayer->ptr_char_objectinstance,
+               get_curplay_horizontal_rotation_in_degrees());
   }
 
   {

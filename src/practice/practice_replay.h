@@ -50,6 +50,11 @@ typedef struct ReplayHeader {
   u32 reserved2;             /* 0x2c */
 } ReplayHeader;
 
+typedef struct PracticeReplayCheckpoint {
+  u32 timestamp;
+  f32 elapsed_video_frames;
+} PracticeReplayCheckpoint;
+
 /*
  * Entry encoding:
  *   u8 delta/type (0 = options frame, 1-255 = input frame)
@@ -84,6 +89,7 @@ u32 practice_replay_get_duration(void);
 
 s32 practice_replay_override_delta(s32 delta_frames);
 void practice_replay_on_frame_start(void);
-s32 practice_replay_seek(u32 timestamp);
+void practice_replay_get_checkpoint(PracticeReplayCheckpoint *checkpoint);
+s32 practice_replay_seek(const PracticeReplayCheckpoint *checkpoint);
 
 #endif /* PRACTICE_REPLAY_H */

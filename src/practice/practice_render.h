@@ -29,8 +29,6 @@ typedef struct PracticeRenderContext {
   s32 joint_pool_count;
   void *model_render_positions;
   s32 model_render_position_count;
-  void *equipped_weapon_matrices;
-  s32 equipped_weapon_matrix_count;
   s32 rendered_all_characters;
   PracticeRenderWatchState *watch_state;
 } PracticeRenderContext;
@@ -49,6 +47,7 @@ void practice_set_loaded_projection_matrix(Mtxf *projection);
 void practice_set_loaded_room_projection_matrix(Mtx *room_projection);
 void practice_invalidate_render_state(void);
 bool practice_is_render_state_invalidated(void);
+bool practice_needs_refreshed_render(void);
 void practice_validate_render_state(void);
 
 #endif /* PRACTICE_RENDER_H */

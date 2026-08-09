@@ -350,6 +350,8 @@ def select_test(test_case, rom, test_param=0, boot_level=None):
         test_case,
         "--test-param",
         str(test_param),
+        "--flags",
+        "1" if boot_level is not None else "0",
     ]
     if boot_level is not None:
         command.extend(("--boot-level", str(boot_level)))

@@ -3036,6 +3036,7 @@ void chrUpdateAimProperties( ChrRecord *self)
     self->aimuprshoulder = self->aimendrshoulder;
     self->aimupback = self->aimendback;
     self->aimsideback = self->aimendsideback;
+
 }
 
 
@@ -4396,9 +4397,6 @@ after_position_update:
         }
 #endif
 
-#if PRACTICE_ROM
-        if (speedgraphframes != 0)
-#endif
         D_80036090 = (u32)sub_GAME_7F02083C;
         dword_CODE_bss_80069B60 = (u32)chr;
 

@@ -335,6 +335,11 @@ static void apply_rom_config(void) {
     practice.boot_level = config->boot_level;
   }
 
+  if (config->flags & PRACTICE_ROM_CONFIG_FLAG_BASE_REPLAY) {
+    practice.dam_gate_intro_enabled = TRUE;
+    practice.grenade_cam = FALSE;
+  }
+
   if (config->test_case != 0) {
     s32 test_boot_level;
 

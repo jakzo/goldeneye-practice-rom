@@ -2,8 +2,11 @@
 
 The `us`, `eu`, and `jp` directories contain the same regional SRAM recordings
 used by the base-ROM ares tests. Every `.ram` recording has a `.state` sidecar
-whose header currently tracks `g_randomSeed` and `g_chrObjRandomSeed` and whose
-binary payload contains their expected value for every frame.
+whose header tracks both random seeds plus the upstream character-selection,
+intro-camera, global-timer, clock-timer, and frame-timing state. Its binary
+payload contains the expected values for every frame. Keeping these compact
+inputs alongside the seeds makes the first cause of a divergence visible
+without recording larger state that can be derived from them.
 
 ## Whole-ROM replay tests
 
@@ -54,14 +57,14 @@ this sequence until the replay completes:
 
 1. Hold the pause-hotkey trigger for three frames, save, hold for three more
    frames, and release.
-2. Play 25 replay frames, hold the trigger for one frame, then load while
+2. Play 60 replay frames, hold the trigger for one frame, then load while
    seeking the replay cursor back to the saved timestamp.
-3. Hold the trigger for three more frames, release, replay the same 25 frames,
+3. Hold the trigger for three more frames, release, replay the same 60 frames,
    then begin the next save cycle.
 
 The test fails on replay RNG divergence, an incomplete replay, or a replay
-cursor mismatch between the original and reloaded 25-frame segment. Run the
-US Runway fixture headlessly in Docker with `just test-runway-save-states`, or
+cursor mismatch between the original and reloaded 60-frame segment. Run the
+US Runway fixture with `just test-runway-save-states`, or
 run every `.ram` file in one regional directory with:
 
 ```bash

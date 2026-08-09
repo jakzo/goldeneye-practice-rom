@@ -584,10 +584,16 @@ u32 practice_replay_get_duration(void) {
   return g_ActiveReplayHeader.duration_video_frames;
 }
 
-s32 practice_replay_seek(u32 timestamp) {
+void practice_replay_get_checkpoint(PracticeReplayCheckpoint *checkpoint) {
+  checkpoint->timestamp = g_ReplayTimestamp;
+  checkpoint->elapsed_video_frames = g_PlaybackElapsedVideoFrames;
+}
+
+s32 practice_replay_seek(const PracticeReplayCheckpoint *checkpoint) {
   ReplayDmaReader *reader = &g_ReplayDma.reader;
   ReplayFrame previous_frame;
   bool has_previous_frame = FALSE;
+  u32 timestamp = checkpoint->timestamp;
 
   if (!g_ReplayIsPlaying || timestamp >= g_ActiveReplayHeader.duration_video_frames)
     return FALSE;
@@ -615,7 +621,7 @@ s32 practice_replay_seek(u32 timestamp) {
   if (g_ReplayTimestamp != timestamp || !load_playback_frame())
     return FALSE;
 
-  g_PlaybackElapsedVideoFrames = (f32)g_ReplayTimestamp;
+  g_PlaybackElapsedVideoFrames = checkpoint->elapsed_video_frames;
   g_PlaybackAdvanceFrame = FALSE;
   if (has_previous_frame) {
     joyPrimePlaybackSample(previous_frame.buttons, previous_frame.stick_x,

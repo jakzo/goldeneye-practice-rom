@@ -939,6 +939,96 @@ static void read_animation_zero_rle(StateStream *stream, u8 *dst, u32 size) {
   }
 }
 
+static bool model_rw_scalar_value(Model *model, ModelNode *node,
+                                  u32 **value) {
+  union ModelRwData *rwdata = modelGetNodeRwData(model, node);
+
+  switch (node->Opcode & 0xff) {
+  case MODELNODE_OPCODE_OP07:
+    *value = (u32 *)&rwdata->Op07.index;
+    return TRUE;
+  case MODELNODE_OPCODE_LOD:
+    *value = (u32 *)&rwdata->LOD.visible;
+    return TRUE;
+  case MODELNODE_OPCODE_SWITCH:
+    *value = (u32 *)&rwdata->Switch.visible;
+    return TRUE;
+  case MODELNODE_OPCODE_BSP:
+    *value = (u32 *)&rwdata->BSP.visible;
+    return TRUE;
+  case MODELNODE_OPCODE_OP11:
+    *value = (u32 *)&rwdata->Op11.unk00;
+    return TRUE;
+  case MODELNODE_OPCODE_GUNFIRE:
+    *value = (u32 *)&rwdata->Gunfire.visible;
+    return TRUE;
+  default:
+    return FALSE;
+  }
+}
+
+static s32 count_model_rw_scalars(ModelNode *node, s32 depth) {
+  s32 count = 0;
+
+  if (node == NULL || depth >= 64) {
+    return 0;
+  }
+  while (node != NULL) {
+    switch (node->Opcode & 0xff) {
+    case MODELNODE_OPCODE_OP07:
+    case MODELNODE_OPCODE_LOD:
+    case MODELNODE_OPCODE_SWITCH:
+    case MODELNODE_OPCODE_BSP:
+    case MODELNODE_OPCODE_OP11:
+    case MODELNODE_OPCODE_GUNFIRE:
+      count++;
+      break;
+    }
+    if ((node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
+      count += count_model_rw_scalars(node->Child, depth + 1);
+    }
+    node = node->Next;
+  }
+  return count;
+}
+
+static void save_model_rw_scalars(StateStream *stream, Model *model,
+                                  ModelNode *node, s32 depth) {
+  if (node == NULL || depth >= 64) {
+    return;
+  }
+  while (node != NULL) {
+    u32 *value;
+    if (model_rw_scalar_value(model, node, &value)) {
+      write_u32(stream, *value);
+    }
+    if ((node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
+      save_model_rw_scalars(stream, model, node->Child, depth + 1);
+    }
+    node = node->Next;
+  }
+}
+
+static void load_model_rw_scalars(StateStream *stream, Model *model,
+                                  ModelNode *node, s32 depth,
+                                  s32 saved_count, s32 *loaded_count) {
+  if (node == NULL || depth >= 64 || *loaded_count >= saved_count) {
+    return;
+  }
+  while (node != NULL && *loaded_count < saved_count) {
+    u32 *value;
+    if (model_rw_scalar_value(model, node, &value)) {
+      *value = read_u32(stream);
+      (*loaded_count)++;
+    }
+    if ((node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
+      load_model_rw_scalars(stream, model, node->Child, depth + 1,
+                            saved_count, loaded_count);
+    }
+    node = node->Next;
+  }
+}
+
 void practice_states_save_model_animation(StateStream *stream,
                                           const Model *model) {
   SavedModelAnimation saved;
@@ -1005,6 +1095,15 @@ void practice_states_save_model_animation(StateStream *stream,
         (Model *)model, model->obj->RootNode);
     write_animation_zero_rle(stream, (u8 *)root_data, sizeof(*root_data));
   }
+  {
+    s32 scalar_count = model->obj != NULL
+                           ? count_model_rw_scalars(model->obj->RootNode, 0)
+                           : 0;
+    write_u16(stream, scalar_count);
+    if (scalar_count > 0) {
+      save_model_rw_scalars(stream, (Model *)model, model->obj->RootNode, 0);
+    }
+  }
 }
 
 void practice_states_load_model_animation(StateStream *stream, Model *model) {
@@ -1014,6 +1113,20 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
   read_animation_zero_rle(stream, (u8 *)&saved, sizeof(saved));
   if (saved.has_root_data) {
     read_animation_zero_rle(stream, (u8 *)&root_data, sizeof(root_data));
+  }
+
+  {
+    s32 scalar_count = read_u16(stream);
+    s32 loaded_count = 0;
+
+    if (model != NULL && model->obj != NULL) {
+      load_model_rw_scalars(stream, model, model->obj->RootNode, 0,
+                            scalar_count, &loaded_count);
+    }
+    while (loaded_count < scalar_count) {
+      read_u32(stream);
+      loaded_count++;
+    }
   }
 
   if (model == NULL) {
@@ -1075,6 +1188,7 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
                                                        model->obj->RootNode);
     *dst = root_data;
   }
+
 }
 
 typedef struct ModelBloodNode {

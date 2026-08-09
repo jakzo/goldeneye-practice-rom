@@ -665,6 +665,15 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   saved_perspfovy = g_CurrentPlayer->c_perspfovy;
   saved_perspaspect = g_CurrentPlayer->c_perspaspect;
 
+  /* The synthetic view allocates from the same rotating vertex arena as the
+   * main view. Preserve camera values in stable practice storage rather than
+   * retaining arena pointers which a PIP model can reuse. */
+  practice_set_loaded_camera_matrices(
+      g_CurrentPlayer->field_10CC, g_CurrentPlayer->field_10D4,
+      g_CurrentPlayer->field_10E8, g_CurrentPlayer->field_10EC);
+  g_CurrentPlayer->field_64 = (s32)g_CurrentPlayer->field_10CC;
+  g_CurrentPlayer->field_68 = (s32)g_CurrentPlayer->field_10D4;
+
   saved_field_5C = g_CurrentPlayer->field_5C;
   saved_field_60 = g_CurrentPlayer->field_60;
   saved_field_64 = g_CurrentPlayer->field_64;
@@ -896,7 +905,10 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     // object and door collisions, so restore the real-view flags below. This
     // preserves tricks which intentionally unload a door by looking away.
     gdl = bgLevelRender_practice(gdl);
-    gdl = sub_GAME_7F049B58(gdl);
+    /* Beam/tracer caches are authored for the gameplay camera. Projecting a
+     * long restored tracer through a synthetic view can exceed the N64's
+     * signed 16.16 matrix range; the main view already renders this transient
+     * effect, so do not duplicate it in PIPs. */
 #if defined(VERSION_EU)
     sub_GAME_7F0A46A0(&gdl, 1);
 #else

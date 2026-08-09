@@ -82,9 +82,8 @@ def parse_selection(value, names, prefix, default):
         return names[name]
 
 
-def encode_config(test_case, boot_level, test_param):
+def encode_config(test_case, boot_level, test_param, flags=0):
     size = ROM_CONFIG_SIZE
-    flags = 0
     checksum = (
         ROM_CONFIG_MAGIC
         ^ ROM_CONFIG_VERSION
@@ -141,6 +140,7 @@ def main():
     parser.add_argument("--test-case", default="")
     parser.add_argument("--boot-level", default="")
     parser.add_argument("--test-param", type=lambda value: int(value, 0), default=0)
+    parser.add_argument("--flags", type=lambda value: int(value, 0), default=0)
     args = parser.parse_args()
 
     try:
@@ -151,7 +151,7 @@ def main():
             args.boot_level, parse_level_ids(), "LEVELID_", NO_BOOT_LEVEL
         )
         changed = patch_rom(
-            args.rom, encode_config(test_case, boot_level, args.test_param)
+            args.rom, encode_config(test_case, boot_level, args.test_param, args.flags)
         )
     except (OSError, ValueError) as error:
         parser.error(str(error))
@@ -159,7 +159,8 @@ def main():
     status = "patched" if changed else "unchanged"
     print(
         f"Runtime config {status}: test_case={test_case}, "
-        f"boot_level={boot_level}, test_param={args.test_param}"
+        f"boot_level={boot_level}, test_param={args.test_param}, "
+        f"flags=0x{args.flags:x}"
     )
 
 

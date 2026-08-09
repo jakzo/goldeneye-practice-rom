@@ -45,11 +45,6 @@ extern AIRecord *ailistFindById(s32 ID);
 extern void projectileFree(Projectile *projectile);
 extern void embedmentFree(Embedment *embedment);
 extern void projectileReset(Projectile *projectile);
-extern s32 modelFindNodeMtxIndex(ModelNode *node, s32 arg1);
-
-#define MAX_SAVED_EQUIPPED_WEAPON_MATRICES 256
-#define MAX_SAVED_EQUIPPED_WEAPON_KEY_MATRICES 1
-#define MAX_EQUIPPED_WEAPON_SWITCH_CANDIDATES 2
 extern void chrpropDelist(PropRecord *prop);
 extern void chrpropDetach(PropRecord *prop);
 extern void redarken_lights_in_room(s32 room_index);
@@ -1969,90 +1964,6 @@ static void load_object_deformation(StateStream *stream, ObjectRecord *obj,
   rwdata->Vertices = vertices;
 }
 
-/* Offscreen guards can aim using their equipped weapon's matrices from the
- * previous render. Those matrices live in the rotating graphics arena and are
- * not recreated by the paused post-load render when the guard is culled. */
-static void save_equipped_weapon_matrices(StateStream *stream,
-                                          ObjectRecord *obj) {
-  PropRecord *prop = obj != NULL ? obj->prop : NULL;
-  Model *model = obj != NULL ? obj->model : NULL;
-  s32 indices[MAX_SAVED_EQUIPPED_WEAPON_KEY_MATRICES];
-  s32 count = 0;
-  s32 switch_index;
-
-  if (prop != NULL && prop->type == PROP_TYPE_WEAPON &&
-      prop->parent != NULL && prop->parent->type == PROP_TYPE_CHR &&
-      model != NULL && model->obj != NULL && model->render_pos != NULL &&
-      model->obj->numMatrices > 0 &&
-      model->obj->numMatrices <= MAX_SAVED_EQUIPPED_WEAPON_MATRICES &&
-      is_rdram_range(model->render_pos,
-                     model->obj->numMatrices * sizeof(RenderPosView))) {
-    for (switch_index = 0;
-         switch_index < model->obj->numSwitches &&
-         switch_index < MAX_EQUIPPED_WEAPON_SWITCH_CANDIDATES && count == 0;
-         switch_index++) {
-      s32 index = modelFindNodeMtxIndex(
-          model->obj->Switches[switch_index], 0);
-
-      if (index >= 0 && index < model->obj->numMatrices) {
-        indices[count++] = index;
-      }
-    }
-  }
-
-  write_u8(stream, count);
-  for (switch_index = 0; switch_index < count; switch_index++) {
-    Mtx saved_matrix;
-
-    write_u8(stream, indices[switch_index]);
-    bcopy(&model->render_pos[indices[switch_index]], &saved_matrix,
-          sizeof(saved_matrix));
-    write_bytes(stream, &saved_matrix, sizeof(saved_matrix));
-  }
-}
-
-static void load_equipped_weapon_matrices(StateStream *stream,
-                                          ObjectRecord *obj) {
-  s32 saved_count = read_u8(stream);
-  Model *model = obj != NULL ? obj->model : NULL;
-  bool can_restore =
-      saved_count <= MAX_SAVED_EQUIPPED_WEAPON_KEY_MATRICES &&
-      model != NULL && model->obj != NULL && model->obj->numMatrices > 0 &&
-      model->obj->numMatrices <= MAX_SAVED_EQUIPPED_WEAPON_MATRICES;
-  RenderPosView *render_pos = NULL;
-  s32 matrix;
-
-  if (can_restore && saved_count > 0) {
-    Mtxf identity_float;
-    Mtx identity_fixed;
-    u32 render_pos_size =
-        model->obj->numMatrices * sizeof(RenderPosView);
-
-    matrix_4x4_set_identity(&identity_float);
-    guMtxF2L(identity_float.m, &identity_fixed);
-    if (model->render_pos != NULL &&
-        is_rdram_range(model->render_pos, render_pos_size)) {
-      render_pos = model->render_pos;
-    } else {
-      render_pos = dynAllocate(render_pos_size);
-    }
-    for (matrix = 0; matrix < model->obj->numMatrices; matrix++) {
-      bcopy(&identity_fixed, &render_pos[matrix], sizeof(identity_fixed));
-    }
-    model->render_pos = render_pos;
-  }
-
-  for (matrix = 0; matrix < saved_count; matrix++) {
-    s32 index = read_u8(stream);
-    Mtx saved_matrix;
-
-    read_bytes(stream, &saved_matrix, sizeof(saved_matrix));
-    if (render_pos != NULL && index < model->obj->numMatrices) {
-      bcopy(&saved_matrix, &render_pos[index], sizeof(saved_matrix));
-    }
-  }
-}
-
 static void save_affine_matrix(StateStream *stream, const Mtxf *matrix,
                                const coord3d *position) {
   bool is_affine = matrix->m[0][3] == 0.0f && matrix->m[1][3] == 0.0f &&
@@ -2753,13 +2664,11 @@ static void load_decals_state(StateStream *stream) {
   }
 }
 
-// Airborne explosion shrapnel/debris (`g_FlyingParticlesBuffer`, ring cursor
-// `g_NumParticleEntries`, capacity `max_particles`). Each entry is a fully
-// world-space, pointer-free quad; `unk00 > 0` marks it live and counts down its
-// lifetime, while `vertex_list` holds the per-particle local geometry/colour
-// set once at spawn (the renderer rebuilds the world matrix from
-// position/rotation each frame). An interleaved occupancy bitmap preserves the
-// exact buffer slots without spending a byte on every live particle index.
+// Airborne explosion debris is visual, but its age and vertical position
+// determine which live entries consume RNG while expiring. Preserve those
+// gameplay-relevant values, the ring slots, and linear motion; rebuild a small
+// generic quad instead of spending scarce SRAM on per-particle rotation and
+// vertex appearance which do not feed back into gameplay.
 static void save_flying_particles_state(StateStream *stream) {
   s32 block;
 
@@ -2783,81 +2692,13 @@ static void save_flying_particles_state(StateStream *stream) {
 
         if (g_FlyingParticlesBuffer[i].unk00 > 0) {
           struct FlyingParticles *particle = &g_FlyingParticlesBuffer[i];
-          Vtx *vertices = particle->vertex_list;
-          s32 vertex;
-          u32 geometry = 0;
-          u32 shades = 0;
-          u32 appearance;
-          bool bright_shades;
-          bool vertices_are_compact = TRUE;
-
-          for (vertex = 0; vertex < 4; vertex++) {
-            vertices_are_compact &= vertices[vertex].v.ob[1] == 0;
-            vertices_are_compact &= vertices[vertex].v.ob[0] >= -15 &&
-                                    vertices[vertex].v.ob[0] <= 15 &&
-                                    vertices[vertex].v.ob[2] >= -15 &&
-                                    vertices[vertex].v.ob[2] <= 15;
-            vertices_are_compact &=
-                vertices[vertex].v.cn[0] == vertices[vertex].v.cn[1] &&
-                vertices[vertex].v.cn[0] == vertices[vertex].v.cn[2] &&
-                vertices[vertex].v.cn[3] == vertices[0].v.cn[3];
-          }
-          vertices_are_compact &=
-              particle->unk00 > 0 && particle->unk00 <= 0xffff &&
-              vertices[0].v.ob[0] >= 0 && vertices[0].v.ob[2] >= 0 &&
-              vertices[1].v.ob[0] >= 0 && vertices[1].v.ob[2] <= 0 &&
-              vertices[2].v.ob[0] <= 0 && vertices[2].v.ob[2] <= 0 &&
-              vertices[3].v.ob[0] <= 0 && vertices[3].v.ob[2] >= 0 &&
-              vertices[2].v.tc[0] >= 0 && vertices[2].v.tc[0] <= 0x300 &&
-              vertices[2].v.tc[1] >= 0 && vertices[2].v.tc[1] <= 0x300 &&
-              (vertices[2].v.tc[0] & 0xff) == 0 &&
-              (vertices[2].v.tc[1] & 0xff) == 0 &&
-              vertices[0].v.cn[3] == 0xdc &&
-              vertices[0].v.tc[0] == (s16)(vertices[2].v.tc[0] + 0xe0) &&
-              vertices[0].v.tc[1] == (s16)(vertices[2].v.tc[1] + 0xe0) &&
-              vertices[1].v.tc[0] == (s16)(vertices[2].v.tc[0] + 0xe0) &&
-              vertices[1].v.tc[1] == vertices[2].v.tc[1] &&
-              vertices[3].v.tc[0] == vertices[2].v.tc[0] &&
-              vertices[3].v.tc[1] == (s16)(vertices[2].v.tc[1] + 0xe0);
-          bright_shades = vertices[0].v.cn[0] >= 0xc0;
-          for (vertex = 0; vertex < 4; vertex++) {
-            vertices_are_compact &=
-                bright_shades ? (vertices[vertex].v.cn[0] >= 0xc0)
-                              : (vertices[vertex].v.cn[0] <= 0x3f);
-          }
-          if (!vertices_are_compact) {
-            practiceLogError("Flying particle %d vertex invariant failed", i);
+          if (particle->unk00 > 0xffff) {
+            practiceLogError("Flying particle %d age is invalid", i);
             assert(FALSE);
           }
-
+          write_u16(stream, particle->unk00);
           write_bytes(stream, &particle->position, sizeof(coord3d));
-          write_bytes(stream, &particle->rotation, sizeof(coord3d));
           write_bytes(stream, &particle->position_drift, sizeof(coord3d));
-          write_bytes(stream, &particle->rotation_drift, sizeof(coord3d));
-          for (vertex = 0; vertex < 4; vertex++) {
-            s32 x = vertices[vertex].v.ob[0];
-            s32 z = vertices[vertex].v.ob[2];
-
-            geometry |= (x < 0 ? -x : x) << (vertex * 8);
-            geometry |= (z < 0 ? -z : z) << (vertex * 8 + 4);
-          }
-          write_u32(stream, geometry);
-
-          appearance = particle->unk00 & 0xff;
-          appearance |= (vertices[2].v.tc[0] >> 8) << 8;
-          appearance |= (vertices[2].v.tc[1] >> 8) << 10;
-          appearance |= bright_shades << 12;
-          appearance |= (particle->unk00 > 0xff) << 13;
-          for (vertex = 0; vertex < 4; vertex++) {
-            shades |= (vertices[vertex].v.cn[0] & 0x3f) << (vertex * 6);
-          }
-          write_u16(stream, appearance);
-          if (particle->unk00 > 0xff) {
-            write_u8(stream, particle->unk00 >> 8);
-          }
-          write_u8(stream, shades);
-          write_u8(stream, shades >> 8);
-          write_u8(stream, shades >> 16);
         }
       }
     }
@@ -2880,66 +2721,31 @@ static void load_flying_particles_state(StateStream *stream) {
     for (bit = 0; bit < 8 && block + bit < max_particles; bit++) {
       struct FlyingParticles tmp;
       s32 index = block + bit;
-      s16 texture_s;
-      s16 texture_t;
       s32 vertex;
-      u32 geometry;
-      u32 shades;
-      u32 appearance;
-      bool bright_shades;
 
       if (!(occupied & (1 << bit))) {
         continue;
       }
 
+      bzero(&tmp, sizeof(tmp));
+      tmp.unk00 = read_u16(stream);
       read_bytes(stream, &tmp.position, sizeof(coord3d));
-      read_bytes(stream, &tmp.rotation, sizeof(coord3d));
       read_bytes(stream, &tmp.position_drift, sizeof(coord3d));
-      read_bytes(stream, &tmp.rotation_drift, sizeof(coord3d));
-      tmp.unk34 = 0;
-      geometry = read_u32(stream);
       for (vertex = 0; vertex < 4; vertex++) {
-        s32 x = (geometry >> (vertex * 8)) & 0xf;
-        s32 z = (geometry >> (vertex * 8 + 4)) & 0xf;
-
-        tmp.vertex_list[vertex].v.ob[0] = vertex >= 2 ? -x : x;
+        tmp.vertex_list[vertex].v.ob[0] = vertex >= 2 ? -5 : 5;
         tmp.vertex_list[vertex].v.ob[1] = 0;
         tmp.vertex_list[vertex].v.ob[2] =
-            vertex == 1 || vertex == 2 ? -z : z;
+            vertex == 1 || vertex == 2 ? -5 : 5;
         tmp.vertex_list[vertex].v.flag = 0;
-      }
-      appearance = read_u16(stream);
-      tmp.unk00 = appearance & 0xff;
-      if (appearance & (1 << 13)) {
-        tmp.unk00 |= read_u8(stream) << 8;
-      }
-      shades = read_u8(stream);
-      shades |= (u32)read_u8(stream) << 8;
-      shades |= (u32)read_u8(stream) << 16;
-      texture_s = ((appearance >> 8) & 3) << 8;
-      texture_t = ((appearance >> 10) & 3) << 8;
-      bright_shades = (appearance >> 12) & 1;
-      tmp.vertex_list[0].v.tc[0] = texture_s + 0xe0;
-      tmp.vertex_list[0].v.tc[1] = texture_t + 0xe0;
-      tmp.vertex_list[1].v.tc[0] = texture_s + 0xe0;
-      tmp.vertex_list[1].v.tc[1] = texture_t;
-      tmp.vertex_list[2].v.tc[0] = texture_s;
-      tmp.vertex_list[2].v.tc[1] = texture_t;
-      tmp.vertex_list[3].v.tc[0] = texture_s;
-      tmp.vertex_list[3].v.tc[1] = texture_t + 0xe0;
-      for (vertex = 0; vertex < 4; vertex++) {
-        u8 shade = (shades >> (vertex * 6)) & 0x3f;
-
-        if (bright_shades) {
-          shade |= 0xc0;
-        }
-        tmp.vertex_list[vertex].v.cn[0] = shade;
-        tmp.vertex_list[vertex].v.cn[1] = shade;
-        tmp.vertex_list[vertex].v.cn[2] = shade;
-      }
-      for (vertex = 0; vertex < 4; vertex++) {
+        tmp.vertex_list[vertex].v.cn[0] = 0x30;
+        tmp.vertex_list[vertex].v.cn[1] = 0x30;
+        tmp.vertex_list[vertex].v.cn[2] = 0x30;
         tmp.vertex_list[vertex].v.cn[3] = 0xdc;
       }
+      tmp.vertex_list[0].v.tc[0] = 0xe0;
+      tmp.vertex_list[0].v.tc[1] = 0xe0;
+      tmp.vertex_list[1].v.tc[0] = 0xe0;
+      tmp.vertex_list[3].v.tc[1] = 0xe0;
       if (g_FlyingParticlesBuffer != NULL && index < (u32)max_particles) {
         g_FlyingParticlesBuffer[index] = tmp;
       }
@@ -3647,9 +3453,6 @@ static void skip_prop_data(StateStream *stream, u8 type,
       load_compact_contained_object_base(stream, &temp_obj.base, NULL);
       load_object_subtype(stream, &temp_obj.base);
     } else if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
-      if (type == PROP_TYPE_WEAPON) {
-        load_equipped_weapon_matrices(stream, NULL);
-      }
       load_object_subtype(stream, &temp_obj.base);
     }
   } else if (type == PROP_TYPE_EXPLOSION) {
@@ -3824,10 +3627,6 @@ bool save_props_state(StateStream *stream) {
         } else {
           save_object_base(stream, obj);
         }
-        if (prop->type == PROP_TYPE_WEAPON && !compactContainedObject) {
-          save_equipped_weapon_matrices(stream, obj);
-        }
-
         switch (obj->type) {
         case PROPDEF_PROP:
         case PROPDEF_ALARM:
@@ -4664,9 +4463,6 @@ bool load_props_state(StateStream *stream) {
           load_compact_contained_object_base(stream, &temp_obj.base, NULL);
           load_object_subtype(stream, &temp_obj.base);
         } else if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
-          if (savedPropType == PROP_TYPE_WEAPON) {
-            load_equipped_weapon_matrices(stream, NULL);
-          }
           load_object_subtype(stream, &temp_obj.base);
         }
         break;
@@ -4693,9 +4489,6 @@ bool load_props_state(StateStream *stream) {
         if (!load_object_base(stream, obj, prop,
                               &savedLinks[i].attachmentNode)) {
           return FALSE;
-        }
-        if (savedPropType == PROP_TYPE_WEAPON) {
-          load_equipped_weapon_matrices(stream, obj);
         }
       }
 

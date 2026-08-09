@@ -974,14 +974,29 @@ Gfx* lvlRender(Gfx* DL)
     }
     else
     {
+#ifdef PRACTICE_ROM
+        /* A zero-tick frame reuses the previous framebuffer. The original
+         * renderers mutate model matrices and consume the rotating graphics
+         * arena, so rerunning them without gameplay advancing can corrupt
+         * both paused saves and freshly loaded state. The first live frame
+         * performs the normal complete rebuild and validates loaded render
+         * state below. */
+        if (speedgraphframes == 0)
+        {
+            return DL;
+        }
+#endif
         s32 i;
         s32 pcount;
 #ifdef PRACTICE_ROM
         PracticeRenderContext render_context;
         bool render_state_invalidated = practice_is_render_state_invalidated();
         bool refresh_render_state =
-            speedgraphframes == 0 && render_state_invalidated;
+            speedgraphframes == 0 && practice_needs_refreshed_render();
         if (speedgraphframes == 0) {
+            if (!refresh_render_state) {
+                practice_restore_render_matrices();
+            }
             practice_prepare_paused_render_state(&render_context);
         }
 #endif
@@ -1039,7 +1054,6 @@ Gfx* lvlRender(Gfx* DL)
             } else if (refresh_render_state) {
                 practice_prepare_refreshed_render(&render_context);
             } else {
-                practice_restore_render_matrices();
                 practice_prepare_character_render(&render_context);
             }
 #endif
@@ -1152,7 +1166,14 @@ Gfx* lvlRender(Gfx* DL)
 
             if (get_debug_render_raster() == DEB_BOND_VIEW)
             {
+#ifdef PRACTICE_ROM
+                if (speedgraphframes != 0)
+                {
+                    DL = maybe_mp_interface(DL);
+                }
+#else
                 DL = maybe_mp_interface(DL);
+#endif
             }
             else
             {

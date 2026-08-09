@@ -30,6 +30,7 @@
 #include "bondhead.h"
 #include "unk_0A1DA0.h"
 #include "practice/practice_frigate_fast_guard_death.h"
+#include "practice/practice_render.h"
 
 
 
@@ -6489,9 +6490,31 @@ s32 chrlvUpdateAimendsideback(ChrRecord *self, struct weapon_firing_animation_ta
 
                 if (weapon_prop_model->obj->Switches[0])
                 {
+#ifdef PRACTICE_ROM
+                    if (practice_is_render_state_invalidated())
+                    {
+                        temp_a0 = &obj->mtx;
+                    }
+                    else
+                    {
+                        temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[0], 0);
+                    }
+#else
                     temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[0], 0);
+#endif
                     spB8 = weapon_prop_model->obj->Switches[0]->Data;
+#ifdef PRACTICE_ROM
+                    if (practice_is_render_state_invalidated())
+                    {
+                        matrix_4x4_copy(temp_a0, &spBC);
+                    }
+                    else
+                    {
+                        sub_GAME_7F058E78(temp_a0, &spBC);
+                    }
+#else
                     sub_GAME_7F058E78(temp_a0, &spBC);
+#endif
 
                     matrix_4x4_multiply_homogeneous_in_place(currentPlayerGetMatrix10EC(), &spBC);
 
@@ -6509,8 +6532,30 @@ s32 chrlvUpdateAimendsideback(ChrRecord *self, struct weapon_firing_animation_ta
                 }
                 else if (weapon_prop_model->obj->Switches[1])
                 {
+#ifdef PRACTICE_ROM
+                    if (practice_is_render_state_invalidated())
+                    {
+                        temp_a0 = &obj->mtx;
+                    }
+                    else
+                    {
+                        temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[1], 0);
+                    }
+#else
                     temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[1], 0);
+#endif
+#ifdef PRACTICE_ROM
+                    if (practice_is_render_state_invalidated())
+                    {
+                        matrix_4x4_copy(temp_a0, &sp68);
+                    }
+                    else
+                    {
+                        sub_GAME_7F058E78(temp_a0, &sp68);
+                    }
+#else
                     sub_GAME_7F058E78(temp_a0, &sp68);
+#endif
                     matrix_4x4_multiply_homogeneous_in_place(currentPlayerGetMatrix10EC(), &sp68);
                     sp104.f[0] = sp68.m[3][0];
                     sp104.f[1] = sp68.m[3][1];
@@ -6984,7 +7029,18 @@ s32 sub_GAME_7F02D630(ChrRecord *self, GUNHAND hand, coord3d *arg2)
         {
             if (weapon_prop_model->obj->Switches[0])
             {
+#ifdef PRACTICE_ROM
+                if (practice_is_render_state_invalidated())
+                {
+                    temp_a0 = &obj->mtx;
+                }
+                else
+                {
+                    temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[0], 0);
+                }
+#else
                 temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[0], 0);
+#endif
                 spB8 = weapon_prop_model->obj->Switches[0]->Data;
 
                 arg2->f[0] = spB8[0];
@@ -6998,7 +7054,18 @@ s32 sub_GAME_7F02D630(ChrRecord *self, GUNHAND hand, coord3d *arg2)
             }
             else if (weapon_prop_model->obj->Switches[1])
             {
+#ifdef PRACTICE_ROM
+                if (practice_is_render_state_invalidated())
+                {
+                    temp_a0_2 = &obj->mtx;
+                }
+                else
+                {
+                    temp_a0_2 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[1], 0);
+                }
+#else
                 temp_a0_2 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[1], 0);
+#endif
                 matrix_4x4_multiply_homogeneous(currentPlayerGetMatrix10D4(), temp_a0_2, &sp68);
 
                 arg2->f[0] = sp68.m[3][0];
