@@ -323,7 +323,8 @@ jobs:
               --timeout 600 \
               --jobs 1 \
               --junit-xml "$RUNNER_TEMP/practice-test-artifacts/performance-results.xml"
-          test -s "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives-001-game-frames.csv"
+          python3 scripts/performance/select_profile_capture.py \
+            "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives"
 
       - name: Summarize Archives performance (${{ matrix.region.version }})
         if: matrix.region.version != 'JP'
@@ -338,7 +339,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye \
             python3 scripts/performance/profile_summary.py \
             --elf "build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf" \
-            --csv "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives-001-game-frames.csv" \
+            --csv "$(python3 scripts/performance/select_profile_capture.py "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives")-game-frames.csv" \
             --phase "Tested ${{ matrix.build.mode }} ${{ matrix.region.version }}" \
             --build-mode "${{ matrix.build.mode }}" \
             --region "${{ matrix.region.version }}" \

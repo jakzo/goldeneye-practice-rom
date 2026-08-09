@@ -46,7 +46,7 @@ make-clean: reset
 
 # Incrementally build the custom ares submodule used by host-side recipes.
 build-ares:
-    if [ ! -f ares/build_macos/CMakeCache.txt ]; then cd ares && DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --preset macos; fi
+    cd ares && DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --preset macos
     DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --build ares/build_macos --config Release --parallel {{ num_cpus() }}
 
 ares: build-ares
@@ -97,8 +97,8 @@ profile-release-us OUTPUT="build/profile/archives-release-us" LABEL="Current rel
     docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=0 VERSION=US COMPARE=0 TEST_CASE=REPLAY_ARCHIVES
     cp tests/replays/archives.ram build/u/ge007.u.ram
     ARES_N64_PROFILE_REPLAY=1 just profile-ares build/u/ge007.u.z64 build/u/ge007.u.elf "{{ OUTPUT }}"
-    just profile-ares-flamegraph "{{ OUTPUT }}-001.folded" "{{ OUTPUT }}-001.html"
-    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/performance/profile_summary.py --elf build/u/ge007.u.elf --csv "{{ OUTPUT }}-001-game-frames.csv" --phase "{{ LABEL }}" --build-mode release --region US --baseline src/practice/docs/performance_baselines.json --output "{{ OUTPUT }}-performance.json"
+    just profile-ares-flamegraph "$(python3 scripts/performance/select_profile_capture.py "{{ OUTPUT }}").folded" "{{ OUTPUT }}.html"
+    docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/performance/profile_summary.py --elf build/u/ge007.u.elf --csv "$(python3 scripts/performance/select_profile_capture.py "{{ OUTPUT }}")-game-frames.csv" --phase "{{ LABEL }}" --build-mode release --region US --baseline src/practice/docs/performance_baselines.json --output "{{ OUTPUT }}-performance.json"
 
 # Render one profiler .folded capture as an interactive HTML flame graph.
 profile-ares-flamegraph INPUT OUTPUT="":
