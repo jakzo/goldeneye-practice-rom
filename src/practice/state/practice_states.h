@@ -2,12 +2,12 @@
 #define PRACTICE_STATES_H
 
 #include "../practice_sram.h"
+#include "practice_storage.h"
 #include "practice_states_stream.h"
 #include <bondtypes.h>
 #include <ultra64.h>
 
 #define SAVE_STATE_MAGIC 0x47455353 // "GESS"
-#define TEST_SAVE_STATE_SRAM_OFFSET SAVE_STATE_SRAM_OFFSET
 
 /**
  * Increment this version number before releasing a new version of the ROM with
@@ -45,7 +45,10 @@ extern bool g_HasSavedState;
 void init_save_state_system(void);
 void save_game_state(void);
 void load_game_state(void);
-void practice_states_set_test_storage(bool enabled);
+bool practice_states_set_storage_location(PracticeStorageLocation location);
+PracticeStorageLocation practice_states_get_storage_location(void);
+void practice_states_notify_sram_overwritten(void);
+void practice_states_set_test_minimum_size(u32 minimum_size);
 void practice_states_log_test_fixture(void);
 
 #endif /* PRACTICE_STATES_H */

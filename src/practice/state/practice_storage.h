@@ -1,27 +1,39 @@
 #ifndef PRACTICE_STORAGE_H
 #define PRACTICE_STORAGE_H
 
+#include <bondtypes.h>
 #include <ultra64.h>
 
 /**
  * Storage abstraction layer for save state persistence.
  *
- * Currently backed by SRAM, but designed so that alternative backends
- * (e.g. Summercart SD, internet) can be dropped in by replacing the
- * implementation in practice_storage.c.
+ * Backed by either cartridge SRAM or the extra 4 MiB supplied by an Expansion
+ * Pak. Expansion RAM is volatile and is only available when osMemSize reports
+ * the full 8 MiB of RDRAM.
  *
  * Data is read/written sequentially via a cursor that auto-advances.
  * The cursor tracks an absolute offset within the storage medium.
  */
 
+typedef enum {
+  PRACTICE_STORAGE_SRAM,
+  PRACTICE_STORAGE_EXPANSION_RAM
+} PracticeStorageLocation;
+
 typedef struct {
+  PracticeStorageLocation location;
   u32 offset;
+  bool error;
 } StorageCursor;
+
+bool storage_location_is_available(PracticeStorageLocation location);
+u32 storage_location_size(PracticeStorageLocation location);
 
 /**
  * Initialize a storage cursor at the given base offset.
  */
-void storage_cursor_init(StorageCursor *cur, u32 base_offset);
+void storage_cursor_init(StorageCursor *cur, PracticeStorageLocation location,
+                         u32 base_offset);
 
 /**
  * Write `size` bytes from `data` to storage at the cursor's current

@@ -340,8 +340,8 @@ static void start_recording(s32 stage_id, s32 force_frame_seeds) {
   ReplayDmaWriter *writer = &g_ReplayDma.writer;
 
   practice_replay_invalidate_saved();
-  g_HasSavedState = FALSE;
   sram_write(SAVE_STATE_SRAM_OFFSET, &invalid_magic, sizeof(invalid_magic));
+  practice_states_notify_sram_overwritten();
 
   bzero(&g_ActiveReplayHeader, sizeof(g_ActiveReplayHeader));
   g_ActiveReplayHeader.version = REPLAY_VERSION;

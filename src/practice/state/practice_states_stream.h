@@ -3,13 +3,14 @@
 
 #include <bondtypes.h>
 #include <ultra64.h>
+#include "practice_storage.h"
 
 #ifndef __GNUC__
 #define __attribute__(x)
 #define inline
 #endif
 
-#define SRAM_PAGE_SIZE 512
+#define STORAGE_PAGE_SIZE 512
 
 typedef struct StateStream StateStream;
 
@@ -24,17 +25,22 @@ struct StateStream {
 
 typedef struct {
   StateStream base;
-  u8 page[SRAM_PAGE_SIZE]
+  u8 page[STORAGE_PAGE_SIZE]
       __attribute__((aligned(16))); // 16 byte alignment for D-cache
+  PracticeStorageLocation location;
   u32 page_offset;
   u32 current_page_addr;
   bool is_write;
   bool is_dirty;
   bool error;
-} SramStream;
+} StorageStream;
 
-void sram_stream_init_write(SramStream *stream, u32 sram_base);
-void sram_stream_init_read(SramStream *stream, u32 sram_base);
+void storage_stream_init_write(StorageStream *stream,
+                               PracticeStorageLocation location,
+                               u32 base_address);
+void storage_stream_init_read(StorageStream *stream,
+                              PracticeStorageLocation location,
+                              u32 base_address);
 
 // Generic stream helpers
 static inline void write_u32(StateStream *stream, u32 val) {

@@ -286,17 +286,18 @@ def read_test_cases():
 
 def emulator_command():
     extra_args = shlex.split(os.environ.get("ARES_ARGS", ""))
+    required_args = ["--setting", "Nintendo64/ExpansionPak=true"]
     configured_emulator = os.environ.get("ARES")
     if configured_emulator:
-        return [configured_emulator, *extra_args]
+        return [configured_emulator, *required_args, *extra_args]
 
     emulator = shutil.which("ares")
     if emulator:
-        return [emulator, *extra_args]
+        return [emulator, *required_args, *extra_args]
 
     macos_emulator = Path("/Applications/ares.app/Contents/MacOS/ares")
     if macos_emulator.is_file():
-        return [str(macos_emulator), *extra_args]
+        return [str(macos_emulator), *required_args, *extra_args]
 
     return None
 

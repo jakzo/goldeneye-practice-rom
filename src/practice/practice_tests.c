@@ -228,7 +228,12 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
 
   if (test_case == REPLAY_RUNWAY_SAVE_STATES) {
     practice_replay_use_test_rom_fixture();
-    practice_states_set_test_storage(TRUE);
+    if (!practice_states_set_storage_location(
+            PRACTICE_STORAGE_EXPANSION_RAM)) {
+      emu_log("EXPANSION_RAM_NOT_AVAILABLE");
+      emu_log("TEST_FAILED");
+    }
+    practice_states_set_test_minimum_size(132 * 1024);
   }
 
   practice.grenade_cam =
@@ -1918,6 +1923,14 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_ReplaySaveChrFlagsHash = replay_chr_flags_hash();
     g_ReplaySaveChrHiddenHash = replay_chr_hidden_hash();
     practice_replay_get_checkpoint(&g_ReplaySaveCheckpoint);
+    if (g_ReplayTestPlaybackCount == 0) {
+      save_game_state();
+      load_game_state();
+      save_game_state();
+      load_game_state();
+      g_ReplayTestPlaybackCount = 2;
+      emu_log("RUNWAY_STATE_STORAGE_ROUND_TRIPS_COMPLETE saves=2 loads=2");
+    }
     g_SimulatedButtons = trigger | D_JPAD;
     g_SimulatedButtonsPressed = D_JPAD;
     g_RunwaySaveStatePausedFrames = 0;

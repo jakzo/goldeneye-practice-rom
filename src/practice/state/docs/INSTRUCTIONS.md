@@ -268,6 +268,16 @@ Add any general advice helpful for future agents working on this feature here. B
   grow below `sp_main`; initializing the overflowing node table to `-1` then
   fills the adjacent scheduler stack with `0xffffffff`, making thread 2 return
   to that address.
+- **Storage Is Independent From Serialization**: Save-state fields serialize
+  through `StateStream`; the concrete `StorageStream` can target cartridge SRAM
+  or volatile Expansion Pak RAM. Select it in code with
+  `practice_states_set_storage_location`. SRAM is the default and starts at
+  `SAVE_STATE_SRAM_OFFSET`; Expansion Pak storage uses the upper 2 MiB starting
+  at uncached alias `0xa0600000` (physical `0x00600000`), clear of the
+  framebuffer boundary and graphics scratch use, and is available only when
+  `osMemSize` reports the full 8 MiB.
+  Replay-file save-state tests select Expansion Pak RAM so their state data
+  cannot overwrite the replay fixture.
 
 ## Struct Analysis
 

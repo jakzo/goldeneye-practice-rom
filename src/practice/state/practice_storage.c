@@ -1,5 +1,6 @@
 #include "practice_storage.h"
 #include "../practice_sram.h"
+#include "../practice_ui.h"
 #include "emu_log.h"
 
 extern void *memcpy(void *dst, const void *src, size_t count);
@@ -10,27 +11,68 @@ static u8 debug_written[20000];
 #endif
 
 /**
- * SRAM-backed storage implementation.
- *
- * All reads/writes go through the SRAM PI DMA helpers in practice_sram.c.
- * To add a new backend (Summercart SD, internet, etc.), replace the
- * body of storage_write() and storage_read() — or introduce a function-
- * pointer table if multiple backends must coexist at runtime.
+ * Use an uncached KSEG1 window in the upper half of Expansion Pak memory. The
+ * original game does not allocate from this region, and direct uncached copies
+ * avoid needing cache maintenance for the volatile backend.
  */
+static u8 *get_expansion_storage_start(void) {
+  return (u8 *)0xa0600000;
+}
 
-void storage_cursor_init(StorageCursor *cur, u32 base_offset) {
+bool storage_location_is_available(PracticeStorageLocation location) {
+  if (location == PRACTICE_STORAGE_SRAM) {
+    return TRUE;
+  }
+  if (location == PRACTICE_STORAGE_EXPANSION_RAM) {
+    return osMemSize >= 8 * 1024 * 1024;
+  }
+  return FALSE;
+}
+
+u32 storage_location_size(PracticeStorageLocation location) {
+  if (location == PRACTICE_STORAGE_SRAM) {
+    return SRAM_SIZE_BYTES;
+  }
+  if (location == PRACTICE_STORAGE_EXPANSION_RAM &&
+      storage_location_is_available(location)) {
+    return osMemSize - 0x00600000;
+  }
+  return 0;
+}
+
+void storage_cursor_init(StorageCursor *cur, PracticeStorageLocation location,
+                         u32 base_offset) {
+  cur->location = location;
   cur->offset = base_offset;
+  cur->error = FALSE;
 }
 
 void storage_write(StorageCursor *cur, const void *data, u32 size) {
-  /* sram_write's dramAddr is non-const because the PI DMA helper is
-     bidirectional; the buffer is never modified for writes. */
-  sram_write(cur->offset, (void *)data, size);
+  u32 capacity = storage_location_size(cur->location);
+
+  if (cur->offset > capacity || size > capacity - cur->offset) {
+    practiceLogWarn("Storage write out of bounds: offset %d, size %d",
+                    cur->offset, size);
+    cur->error = TRUE;
+    return;
+  }
+
+  if (cur->location == PRACTICE_STORAGE_SRAM) {
+    /* sram_write's dramAddr is non-const because the PI DMA helper is
+       bidirectional; the buffer is never modified for writes. */
+    if (sram_write(cur->offset, (void *)data, size) != 0) {
+      cur->error = TRUE;
+      return;
+    }
+  } else {
+    memcpy(get_expansion_storage_start() + cur->offset, data, size);
+  }
   cur->offset += size;
 
 #ifdef SRAM_CONSISTENCY_CHECK
   // Save data in memory to compare when reading
-  if (cur->offset <= sizeof(debug_data)) {
+  if (cur->location == PRACTICE_STORAGE_SRAM &&
+      cur->offset <= sizeof(debug_data)) {
     memcpy(&debug_data[cur->offset - size], data, size);
 
     // Mark bytes as written in this session
@@ -44,12 +86,29 @@ void storage_write(StorageCursor *cur, const void *data, u32 size) {
 }
 
 void storage_read(StorageCursor *cur, void *data, u32 size) {
-  sram_read(cur->offset, data, size);
+  u32 capacity = storage_location_size(cur->location);
+
+  if (cur->offset > capacity || size > capacity - cur->offset) {
+    practiceLogWarn("Storage read out of bounds: offset %d, size %d",
+                    cur->offset, size);
+    cur->error = TRUE;
+    return;
+  }
+
+  if (cur->location == PRACTICE_STORAGE_SRAM) {
+    if (sram_read(cur->offset, data, size) != 0) {
+      cur->error = TRUE;
+      return;
+    }
+  } else {
+    memcpy(data, get_expansion_storage_start() + cur->offset, size);
+  }
   cur->offset += size;
 
 #ifdef SRAM_CONSISTENCY_CHECK
   // Check consistency of storage against data saved in memory
-  if (cur->offset <= sizeof(debug_data)) {
+  if (cur->location == PRACTICE_STORAGE_SRAM &&
+      cur->offset <= sizeof(debug_data)) {
     u32 i;
     u32 m = cur->offset - size;
     for (i = 0; i < size; i++) {
