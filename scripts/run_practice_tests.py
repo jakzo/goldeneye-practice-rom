@@ -44,22 +44,23 @@ TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 REPLAY_FIXTURES = {
     "US": {
-        "REPLAY_DAM": ROOT / "tests/replays/dam.ram",
-        "REPLAY_RUNWAY": ROOT / "tests/replays/runway.ram",
-        "REPLAY_RUNWAY_SAVE_STATES": ROOT / "tests/replays/runway.ram",
-        "REPLAY_FRIGATE": ROOT / "tests/replays/frigate_00.ram",
-        "REPLAY_GRENADE_CAM": ROOT / "tests/replays/runway_agent_grenade.ram",
-        "REPLAY_ARCHIVES": ROOT / "tests/replays/archives.ram",
-        "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives.ram",
-        "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives.ram",
+        "REPLAY_DAM": ROOT / "tests/replays/us/01-dam.ram",
+        "REPLAY_RUNWAY": ROOT / "tests/replays/us/03-runway.ram",
+        "REPLAY_RUNWAY_SAVE_STATES": ROOT / "tests/replays/us/03-runway.ram",
+        "REPLAY_FRIGATE": ROOT / "tests/replays/us/07-frigate.ram",
+        "REPLAY_GRENADE_CAM": ROOT / "tests/replays/us/03-runway.ram",
+        "REPLAY_ARCHIVES": ROOT / "tests/replays/us/11-archives.ram",
+        "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/us/11-archives.ram",
+        "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/us/11-archives.ram",
     },
     "EU": {
-        "REPLAY_ARCHIVES": ROOT / "tests/replays/archives_eu.ram",
-        "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/archives_eu.ram",
-        "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/archives_eu.ram",
+        "REPLAY_ARCHIVES": ROOT / "tests/replays/eu/11-archives.ram",
+        "REPLAY_ARCHIVES_04X": ROOT / "tests/replays/eu/11-archives.ram",
+        "REPLAY_ARCHIVES_HOTKEYS": ROOT / "tests/replays/eu/11-archives.ram",
     },
     "JP": {
-        "REPLAY_RUNWAY": ROOT / "tests/replays/runway_jp.ram",
+        "REPLAY_DAM": ROOT / "tests/replays/jp/01-dam.ram",
+        "REPLAY_RUNWAY": ROOT / "tests/replays/jp/03-runway.ram",
     },
 }
 MANUAL_TEST_CASES = {"REPLAY_RUNWAY_SAVE_STATES"}

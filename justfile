@@ -95,7 +95,7 @@ profile-ares ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/p
 profile-release-us OUTPUT="build/profile/archives-release-us" LABEL="Current release US":
     if test -z "$(docker images -q {{ image }})"; then just setup; fi
     docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} DEV=0 VERSION=US COMPARE=0 TEST_CASE=REPLAY_ARCHIVES
-    cp tests/replays/archives.ram build/u/ge007.u.ram
+    cp tests/replays/us/11-archives.ram build/u/ge007.u.ram
     ARES_N64_PROFILE_REPLAY=1 just profile-ares build/u/ge007.u.z64 build/u/ge007.u.elf "{{ OUTPUT }}"
     just profile-ares-flamegraph "$(python3 scripts/performance/select_profile_capture.py "{{ OUTPUT }}").folded" "{{ OUTPUT }}.html"
     docker run --rm -v "$(pwd):/home/dev" {{ image }} python3 scripts/performance/profile_summary.py --elf build/u/ge007.u.elf --csv "$(python3 scripts/performance/select_profile_capture.py "{{ OUTPUT }}")-game-frames.csv" --phase "{{ LABEL }}" --build-mode release --region US --baseline src/practice/docs/performance_baselines.json --output "{{ OUTPUT }}-performance.json"
@@ -107,6 +107,28 @@ profile-ares-flamegraph INPUT OUTPUT="":
 test-all JOBS="":
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" -e PRACTICE_TEST_JOBS="{{ JOBS }}" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --build-mode release
+
+# Run every regional SRAM replay against a release practice ROM using ares'
+# host-side state comparison. Known practice-ROM divergences remain failures.
+test-practice-replays REGION="us" ARTIFACTS="build/practice-replay-results": build-ares
+    #!/usr/bin/env bash
+    set -euo pipefail
+    region="$(printf '%s' "{{ REGION }}" | tr '[:upper:]' '[:lower:]')"
+    case "$region" in
+        us) version="US"; outcode="u" ;;
+        eu) version="EU"; outcode="e" ;;
+        jp) version="JP"; outcode="j" ;;
+        *) echo "error: region must be one of: us, eu, jp" >&2; exit 2 ;;
+    esac
+    if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
+    docker run --rm -v "$(pwd):/home/dev" -w /home/dev {{ test_image }} make -j{{ num_cpus() }} DEV=0 VERSION="$version" COMPARE=0 TEST_CASE=
+    python3 ares/tests/n64-replay/run.py \
+        --ares "{{ ares_bin }}" \
+        --rom "build/$outcode/ge007.$outcode.z64" \
+        --elf "build/$outcode/ge007.$outcode.elf" \
+        --fixture-dir tests/replays \
+        --region "$region" \
+        --artifacts "{{ ARTIFACTS }}/$region"
 
 sc64-dev BOOT_LEVEL="TITLE":
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}

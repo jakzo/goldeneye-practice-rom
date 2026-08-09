@@ -1,45 +1,50 @@
-# Replay test fixtures
+# Practice-ROM replay test fixtures
 
-Replay tests boot directly into the stage recorded in an SRAM dump, play its
-inputs and frame timings, and fail if the replay ends early or its recorded RNG
-seeds diverge from the game state.
+The `us`, `eu`, and `jp` directories contain the same regional SRAM recordings
+used by the base-ROM ares tests. Every `.ram` recording has a `.state` sidecar
+whose header currently tracks `g_randomSeed` and `g_chrObjRandomSeed` and whose
+binary payload contains their expected value for every frame.
 
-## Adding a replay test from an SRAM dump
+## Whole-ROM replay tests
 
-1. Record the replay with seed recording enabled. Finish the recording cleanly,
-   then close the emulator or dump the cartridge SRAM so all pending writes are
-   flushed. The resulting file must be a complete 128 KiB SRAM image.
-2. Copy the dump into this directory with a descriptive `.ram` name. Keep the
-   original dump intact until the new fixture has passed.
-3. Add a unique test constant between the test-case markers in
-   `src/practice/practice_tests.c`.
-4. In that file, include the new constant in:
-   - the playback request in `practice_tests_set_case`;
-   - the recorded stage in `practice_tests_boot_level`;
-   - `practice_tests_should_disable_intro`, so the replay controls the normal
-     stage startup; and
-   - the fixture-replay completion check in `practice_tests_frame`.
-5. Map the test constant to the `.ram` fixture for the recording's region in
-   `REPLAY_FIXTURES` in `scripts/run_practice_tests.py`. If a replay is long
-   enough to exceed the default test timeout, also add it to
-   `MINIMUM_TEST_TIMEOUT_SECONDS`.
-6. Run the test:
+Run every fixture for one practice-ROM region through the new ares host-side
+replay and state comparison:
 
-   ```bash
-   just test REPLAY_YOUR_TEST
-   ```
+```bash
+just test-practice-replays us
+just test-practice-replays eu
+just test-practice-replays jp
+```
 
-The runner copies the matching regional fixture beside its temporary ROM and
-validates that the replay header identifies the selected ROM region. Full-suite
-runs skip replay tests which have no fixture for that region; explicitly
-requesting such a replay is an error. Playback restores the replay's initial
-seeds, checks the per-frame seeds when the recording contains them, and reports
-`TEST_FAILED` on divergence or incomplete playback. A passing run ends with
-`TEST_COMPLETE`.
+The recipe builds the release practice ROM and matching ELF, then passes the
+regional `.ram` and `.state` files to ares. Each run writes its observed state
+and profiler reports under `build/practice-replay-results/<region>`. A populated
+state sidecar replaces the replay's embedded seed check. The first differing
+frame reports every differing variable with its actual and expected bytes.
 
-For interactive debugging, use `just test-debug REPLAY_YOUR_TEST`. To exercise a
-specific ROM region, pass it as the second argument, for example
-`just test-debug REPLAY_YOUR_TEST eu`.
+These fixtures were recorded against the base ROM. Practice-ROM divergences are
+reported as failures and are not suppressed by the harness.
+
+## Existing guest replay tests
+
+The in-ROM replay feature tests remain available through commands such as:
+
+```bash
+just test REPLAY_DAM
+just test-debug REPLAY_RUNWAY jp
+```
+
+`REPLAY_FIXTURES` in `scripts/run_practice_tests.py` maps those existing test
+cases to the new regional recordings. The runner copies the selected SRAM image
+beside its temporary ROM, validates its recorded region, and relocates legacy
+`0x600` replay data to the practice replay slot when necessary. Full-suite runs
+skip guest replay tests which have no fixture for that region; explicitly
+requesting one is an error.
+
+To add another whole-ROM fixture, add its `.ram` and populated `.state` files to
+the appropriate regional directory. To add a new guest feature test as well,
+add its test constant and behavior in `src/practice/practice_tests.c`, then map
+the constant to the regional `.ram` file in `REPLAY_FIXTURES`.
 
 ## Replay save/load-state test
 
