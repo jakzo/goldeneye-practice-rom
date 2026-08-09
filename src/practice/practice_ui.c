@@ -113,7 +113,8 @@ extern void *memcpy(void *dst, const void *src, size_t count);
 #define SLIDE_RATE_PER_S 640.0f
 #define SLIDE_DURATION 1.0f
 #define MARGIN_BOTTOM 9
-#define MARGIN_RIGHT 5
+#define MARGIN_LEFT 5
+#define MARGIN_RIGHT 9
 #define LINE_SPACING 0
 #define GAME_UNITS_PER_METER 100.0f
 #define GAME_TICKS_PER_SECOND 60.0f
@@ -307,10 +308,9 @@ void practiceLogError(const char *fmt, ...) {
 static s32 g_PillStackY;
 
 Gfx *practice_render_text_with_shadow(Gfx *gdl, s32 *x, s32 *y, s8 *text,
-                                      s32 font_chars, s32 font,
-                                      s32 text_color, u32 shadow_color,
-                                      s16 view_x, s16 view_y, s32 arg_a,
-                                      s32 arg_b) {
+                                      s32 font_chars, s32 font, s32 text_color,
+                                      u32 shadow_color, s16 view_x, s16 view_y,
+                                      s32 arg_a, s32 arg_b) {
   s32 shadow_x = *x + 1;
   s32 shadow_y = *y + 1;
 
@@ -322,9 +322,9 @@ Gfx *practice_render_text_with_shadow(Gfx *gdl, s32 *x, s32 *y, s8 *text,
 
 Gfx *renderText(Gfx *gdl, s32 *x, s32 *y, char *text, s32 fontChars, s32 font,
                 u32 color, s16 viewX, s16 viewY) {
-  return practice_render_text_with_shadow(
-      gdl, x, y, (s8 *)text, fontChars, font, (s32)color, 0x000000FF, viewX,
-      viewY, 0, 0);
+  return practice_render_text_with_shadow(gdl, x, y, (s8 *)text, fontChars,
+                                          font, (s32)color, 0x000000FF, viewX,
+                                          viewY, 0, 0);
 }
 
 Gfx *practice_ui_render_pill(Gfx *gdl, const char *text, u32 text_color,
@@ -434,7 +434,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
     struct fontchar *fontCharsZurich =
         (struct fontchar *)ptrFontZurichBoldChars;
     struct fontchar *charP = &fontCharsZurich['P'];
-    s32 hud_x = MARGIN_RIGHT;
+    s32 hud_x = MARGIN_LEFT;
     s32 hud_y = viGetY() - charP->baseline - charP->height - MARGIN_BOTTOM;
 #if DEV
     u32 p_color = 0xCC9900FF;
