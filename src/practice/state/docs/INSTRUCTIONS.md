@@ -87,8 +87,11 @@ Add any general advice helpful for future agents working on this feature here. B
   `sub_GAME_7F0BD8F0`, while `g_ControlsLockedFlag` makes `lvlManageMpGame` set
   `g_ClockTimer` to zero. Restore both through their accessors so loading a
   gameplay state while the watch is open immediately resumes rendering,
-  controls, and timers. `g_ClockTimer` itself is derived each frame and does not
-  need serialization.
+  controls, and timers. The frame containing a deferred load is not equivalent
+  to the saved frame's ordinary timing setup, so restore `g_GlobalTimer`,
+  `g_ClockTimer`, `g_GlobalTimerDelta`, the JP/EU fractional delta when present,
+  and `D_80048380` exactly. CHR perception timestamps, weapon timers, movement,
+  effects, and AI all consume this shared timing state before it is recomputed.
 - **Level Exit State**: `stop_time_flag` is the global latch used by
   `AI_TriggerFadeAndExitLevelOnButtonPress`: `0` is inactive, `1` waits for
   player input, and `2` is fading to the title stage. Restore its exact value;
@@ -129,6 +132,26 @@ Add any general advice helpful for future agents working on this feature here. B
   then restores each slot on resume. The active sound graph keeps running
   silently, so continuous effects such as sliding doors, alarms, vehicles, and
   toxic gas remain available without maintaining an owner-by-owner list.
+- **A Practice-Paused Frame Is Render-Only**: Loading through the hotkey is
+  deferred until graphics tasks have drained, then the restored state is shown
+  while practice time remains paused. Do not run gameplay side effects during
+  this frame merely because their timer delta is zero. In particular, an
+  explosive weapon can trigger when its timer equals a threshold without first
+  decrementing it, so `chrobjWeaponTick` and paused NPC object-hit detonation
+  must wait for the first resumed gameplay tick. This guard is specific to
+  `g_IsTimePaused`; ordinary base-game zero-delta frames remain part of normal
+  simulation.
+- **Render-Only Refresh Must Be Transactional**: Rendering mutates gameplay-
+  visible caches even with a zero clock delta: prop onscreen flags, CHR onscreen
+  counts, watch UI state, model `render_pos` pointers and root RW data, the
+  render-joint free list, room-transform mappings, and float matrices converted
+  in place to N64 fixed point. Snapshot and restore these around practice-only
+  renders. After a load, preserve the serialized current and previous camera
+  matrices plus projection matrices until the live frame consumes them; do not
+  replace a CHR weapon's saved gameplay matrix from a render-only refresh.
+  When a gameplay matrix must be reconstructed, use the game's 65535-based
+  `matrix_4x4_f32_to_s32`/`sub_GAME_7F058E78` round trip, not libultra's 16.16
+  `guMtxF2L`/`guMtxL2F` pair.
 - **Transient Gun Effects**: The global impact-flare/spark/dust pools
   (`dword_CODE_bss_8007A170`, plus
   `dword_CODE_bss_8007A4E0` outside EU) are independent of props. Serialize
@@ -147,10 +170,13 @@ Add any general advice helpful for future agents working on this feature here. B
   `g_BgRoomInfo[room].model_bin_loaded` as the authoritative residency flag;
   `ptr_point_index` should also be non-null before touching vertices. Leave
   entries for unloaded rooms in the table; the normal BG load path calls
-  `redarken_lights_in_room` when those vertices become resident again. Do not
-  reload the BG room allocation while loading state: an in-flight render task
-  can still reference its display lists, and the BG point-table loader uses the
-  room allocation tail as scratch. Airborne glass shards from these lights are
+  `redarken_lights_in_room` when those vertices become resident again. Hotkey
+  loads are deferred until all graphics tasks have drained, so it is then safe
+  to reconcile BG allocations: free rooms absent from the save, discard partial
+  allocations, and synchronously reload every saved-resident room. Keeping all
+  later-timeline allocations can exhaust the BG allocator; restoring only the
+  logical `model_bin_loaded` flag leaves blue voids, unloaded rooms, or invalid
+  display-list/texture metadata. Airborne glass shards from these lights are
   emitted through `sub_GAME_7F0A2160` into the broken-window shard pool
   (`ptr_shattered_window_pieces` and `g_NextShardNum`), not the flying-particle
   pool. Serialize this as an optional tail after the pre-existing props tail
@@ -245,6 +271,20 @@ Add any general advice helpful for future agents working on this feature here. B
   makes the final active-list rebuild skip it; the preceding prop keeps
   `next == NULL`, orphaning every later prop from rendering. Detach any current
   parent before restoring a saved active record.
+- **Player/Viewer Children Need Allocation Reconciliation**: Bond's third-
+  person/viewer model and first-person weapon buffers can be rebuilt while
+  loading a different lifecycle point. Detach saved children before that
+  rebuild, remove any replacement children created by `solo_char_load`, then
+  transfer the generated model allocation to the saved weapon prop and rebuild
+  the saved attachment graph. Reusing only the old prop/object payload leaves
+  stale model-buffer pointers; keeping both children duplicates the held weapon
+  and corrupts ownership links.
+- **Dynamic Collision Coefficients Are Authoritative**: Object collision
+  geometry is rebuilt from the restored transform, but the cached coefficient
+  words at `collision_data::unk24` are not reproduced bit-identically. Save the
+  0x20-byte coefficient tail when dynamic collision data exists and apply it
+  after `chrobjCollisionRelated`; otherwise the next hit/LOS query can diverge
+  despite matching visible geometry.
 - **NULL Prop Handling (Cutscenes vs Gameplay)**: The player's world physical presence `g_CurrentPlayer->prop` is `NULL` during intro cutscenes, level loading, or death. When loading a saved state:
     - Track whether the saved state had a valid prop using a `has_prop` boolean flag.
     - If the saved state has a prop but the current player does not (e.g., loading gameplay into a cutscene), allocate a new prop using `chrpropAllocate()`, initialize its fields, activate it, enable it, and register it to its rooms.
@@ -272,12 +312,19 @@ Add any general advice helpful for future agents working on this feature here. B
   through `StateStream`; the concrete `StorageStream` can target cartridge SRAM
   or volatile Expansion Pak RAM. Select it in code with
   `practice_states_set_storage_location`. SRAM is the default and starts at
-  `SAVE_STATE_SRAM_OFFSET`; Expansion Pak storage uses the upper 2 MiB starting
-  at uncached alias `0xa0600000` (physical `0x00600000`), clear of the
-  framebuffer boundary and graphics scratch use, and is available only when
-  `osMemSize` reports the full 8 MiB.
+  `SAVE_STATE_SRAM_OFFSET`, leaving exactly
+  `SRAM_SIZE_BYTES - SAVE_STATE_SRAM_OFFSET` bytes for the serialized state.
+  Expansion Pak storage uses the upper 2 MiB starting at uncached alias
+  `0xa0600000` (physical `0x00600000`), clear of the framebuffer boundary and
+  graphics scratch use, and is available only when `osMemSize` reports the full
+  8 MiB. The stream reports an error rather than overrunning either backend.
+  Prefer stable IDs, seeds, occupancy maps, compact deltas, and state from which
+  larger buffers can be reproduced; do not serialize allocator padding or
+  renderer output merely because Expansion Pak tests have more capacity.
   Replay-file save-state tests select Expansion Pak RAM so their state data
-  cannot overwrite the replay fixture.
+  cannot overwrite the replay fixture. The much larger host `.state` replay
+  sidecars are per-frame diagnostic timelines and do not consume runtime save
+  storage.
 
 ## Struct Analysis
 

@@ -656,10 +656,10 @@ struct player {
   // field_60: Pointer to a dynamically allocated fixed-point 4x4 matrix (Mtx). Allocated via dynAllocateMatrix(). Data is copied from field_5C via sub_GAME_7F059334 (matrix copy). Stored in field_10C4 via currentPlayerSetMatrix10C4. NOT saved for the same reasons as field_5C — recomputed each frame from saved camera/position state.
   s32 field_60;
   // Saved: no (unsaved, recomputed each frame)
-  // field_64: Pointer to a dynamically allocated float 4x4 matrix (Mtxf). Built via matrix_4x4_7F059424 which constructs a camera-to-world (inverse view) transformation matrix from cam_pos, cam_look, cam_up. Stored in field_10CC via currentPlayerSetMatrix10CC. NOT saved because the matrix is recomputed each frame from camera parameters that are already preserved through position/angle state.
+  // field_64: Pointer to a dynamically allocated float 4x4 matrix (Mtxf). Built via matrix_4x4_7F059424 which constructs a camera-to-world (inverse view) transformation matrix from cam_pos, cam_look, cam_up. This pointer is not saved, but the value later installed in field_10CC is serialized separately because gameplay can consume it before the next render.
   s32 field_64;
   // Saved: no (unsaved, recomputed each frame)
-  // field_68: Pointer to a dynamically allocated float 4x4 matrix (Mtxf). Built via matrix_4x4_7F059708 which constructs a world-to-camera (view) transformation matrix from cam_pos, cam_look, cam_up. Stored in field_10D4 via currentPlayerSetMatrix10D4. NOT saved because the matrix is recomputed each frame from camera parameters that are already preserved through position/angle state.
+  // field_68: Pointer to a dynamically allocated float 4x4 matrix (Mtxf). Built via matrix_4x4_7F059708 which constructs a world-to-camera (view) transformation matrix from cam_pos, cam_look, cam_up. This pointer is not saved, but the value later installed in field_10D4 is serialized separately because gameplay can consume it before the next render.
   s32 field_68;
 
   // Saved: yes
@@ -996,40 +996,40 @@ struct player {
   // field_10C8: Pointer to a dynamically allocated RSP fixed-point 4x4 matrix (Mtx) used for secondary viewport projection. NOT saved because the memory pointer is volatile. Recalculated automatically on the next frame.
   Mtx* field_10C8;
 
-  // Saved: no (unsaved, recomputed each frame)
-  // field_10CC: Pointer to the camera's float view matrix (Mtxf) representing the world-to-camera projection. NOT saved because it is re-derived dynamically every frame from current camera parameters.
+  // Saved: pointee value only; pointer relocated on load
+  // field_10CC: Pointer to the camera's current float view matrix (Mtxf). Gameplay can read it before the next render rebuilds it, so the matrix value is serialized and copied into stable practice storage on load. The graphics-arena address itself is never serialized.
   Mtxf* field_10CC;
 
   // Saved: no (unsaved, recomputed each frame)
   // field_10D0: Pointer to dynamically allocated viewport or camera matrix metadata. NOT saved; automatically re-initialized and re-evaluated by the camera pipeline on the next frame.
   s32 field_10D0;
 
-  // Saved: no (unsaved, recomputed each frame)
-  // field_10D4: Pointer to the camera's active view float matrix (Mtxf). NOT saved as it is recalculated on the next frame from camera parameters.
+  // Saved: pointee value only; pointer relocated on load
+  // field_10D4: Pointer to the camera's other current float transform. Its matrix value is serialized because gameplay consumes it before the following render; the volatile pointer is replaced with stable practice storage.
   Mtxf* field_10D4;
 
   // Saved: no (unsaved, recomputed each frame)
   // projmatrix: Pointer to the dynamically allocated RSP fixed-point perspective projection matrix (Mtx). NOT saved because it is recomputed based on screen aspect ratio and FOV.
   Mtx* projmatrix;
 
-  // Saved: no (unsaved, recomputed each frame)
-  // projmatrixf: Pointer to the float perspective projection matrix (Mtxf). NOT saved because it is re-derived dynamically every frame from current camera parameters.
+  // Saved: pointee value only; pointer relocated on load
+  // projmatrixf: Pointer to the float perspective projection matrix (Mtxf). The value is serialized for the first post-load render and installed in stable practice storage; the graphics-arena pointer is not retained.
   Mtxf* projmatrixf;
 
-  // Saved: no (unsaved, recomputed each frame)
-  // field_10E0: Pointer to dynamically allocated viewport or camera projection metadata. NOT saved; dynamically allocated and set during camera viewport initialization.
+  // Saved: optional 64-byte Mtx pointee; pointer relocated on render
+  // field_10E0: Integer-stored pointer to the fixed-point room projection matrix. Its matrix bytes are serialized. The post-load render allocates a fresh graphics-arena matrix and copies the saved value into it.
   s32 field_10E0;
 
   // Saved: no (unsaved, recomputed each frame)
   // field_10E4: Pointer to dynamically allocated viewport or camera projection metadata. NOT saved; dynamically allocated and set during camera viewport initialization.
   s32 field_10E4;
 
-  // Saved: no (unsaved, recomputed each frame)
-  // field_10E8: Pointer to the previous frame's float view matrix (Mtxf) (pushed from field_10CC). NOT saved as it is updated when field_10CC is set on the next frame.
+  // Saved: pointee value only; pointer relocated on load
+  // field_10E8: Pointer to the previous frame's float view matrix (Mtxf), normally pushed from field_10CC. Gameplay reads this history before rendering, so the exact saved value is restored rather than substituting the current matrix.
   Mtxf* field_10E8;
 
-  // Saved: no (unsaved, recomputed each frame)
-  // field_10EC: Pointer to the previous frame's float matrix (Mtxf) (pushed from field_10D4). NOT saved as it is updated when field_10D4 is set on the next frame.
+  // Saved: pointee value only; pointer relocated on load
+  // field_10EC: Pointer to the previous frame's other float matrix (Mtxf), normally pushed from field_10D4. Its exact saved value is restored into stable practice storage for the first resumed gameplay tick.
   Mtxf* field_10EC;
 
   // Inventory & Ammo Arrays

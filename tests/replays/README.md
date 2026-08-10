@@ -28,6 +28,30 @@ frame reports every differing variable with its actual and expected bytes.
 These fixtures were recorded against the base ROM. Practice-ROM divergences are
 reported as failures and are not suppressed by the harness.
 
+### Regenerating `.state` fixtures
+
+Regenerate the fixtures only when their text header (the tracked symbol/range
+list on the first line) changes. Gameplay or save-state implementation changes
+do not require regeneration when that header is unchanged.
+
+First replace the headers and resize their placeholder payloads:
+
+```bash
+python3 scripts/set_replay_state_fields.py
+```
+
+Then run `ares/tests/n64-replay/run.py --regenerate-state` separately for each
+region, supplying the untouched regional base ROM and its matching base-build
+ELF. Never supply a modified practice ROM: the resulting payload is the
+reference timeline against which the practice ROM is checked. The runner keeps
+the header, records every listed range for every replay frame, and replaces the
+tracked sidecar only after that replay reports `TEST_COMPLETE`. `--jobs 3` runs
+three headed emulator instances concurrently.
+
+After a save/load fix, run the ordinary practice-ROM replay suite against these
+unchanged fixtures first. Once it passes, run the replay save/load-state suite
+to find the next load-specific failure or regression.
+
 ## Existing guest replay tests
 
 The in-ROM replay feature tests remain available through commands such as:
