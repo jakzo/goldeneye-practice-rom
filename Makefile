@@ -145,6 +145,11 @@ CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 
 PRACTICEFILES_C := $(sort $(shell find src/practice -type f -name '*.c'))
 PRACTICEOBJECTS := $(foreach file,$(PRACTICEFILES_C),$(BUILD_DIR)/$(file:.c=.o))
+FLASHCARTSDFILES_C := libdragon/src/fatfs/ff.c \
+	libdragon/src/fatfs/ffunicode.c \
+	libdragon/src/libcart/cart.c
+FLASHCARTSDOBJECTS := $(foreach file,$(FLASHCARTSDFILES_C),$(BUILD_DIR)/$(file:.c=.o))
+PRACTICE_LINK_OBJECTS := $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS)
 PRACTICE_LINK_OBJECT := $(BUILD_DIR)/src/practice.o
 OBSEG_C_SOURCE_FILES := $(sort $(shell find assets/obseg -type f -name '*.c' \
 	! -name '*.inc.c' ! -path 'assets/obseg/prop/*/Model.c'))
@@ -188,6 +193,7 @@ OBJECTS := $(RSPOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(OBSEGMENT)
 ## Command Line args for builders ##
 
 INCLUDE := -I . -I include -I include/ultra64 -I include/PR -I src -I src/game -I src/inflate -I src/practice -I src/practice/state
+LIBDRAGON_STORAGE_INCLUDE := -I libdragon/include -I libdragon/src
 
 CC_GCC := $(TOOLCHAIN)gcc
 GCC_ABI_FLAGS := -march=vr4300 -mabi=32 -fno-pic -mno-abicalls -G 0
@@ -245,7 +251,7 @@ COMPILER_MANIFEST := $(BUILD_DIR)/metadata/compiler-manifest.json
 .SECONDARY:
 	$(APPELF) $(APPROM) $(APPBIN) $(ULTRAOBJECTS) $(BUILD_DIR)/ge007.$(OUTCODE).map \
 	$(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) \
-	$(OBSEG_OBJECTS) $(OBSEG_RZ) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS) $(MUSIC_RZ_FILES) $(PRACTICEOBJECTS) $(PRACTICE_LINK_OBJECT)
+	$(OBSEG_OBJECTS) $(OBSEG_RZ) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS) $(MUSIC_RZ_FILES) $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS) $(PRACTICE_LINK_OBJECT)
 
 # Dont delete these intermediate targets on make cancelation.
 .PRECIOUS: %.bin  %.o
@@ -264,7 +270,7 @@ include src/libultrare/Makefile.libultrare
 ORIGINAL_C_FILES := $(sort $(CODEFILES) $(GAMEFILES_C) $(RZ_SOURCE_FILES) \
 	$(ASSET_DATAFILES) $(FONTFILES_C) $(LIBULTRA_C_SOURCE_FILES))
 ORIGINAL_C_OBJECTS := $(foreach file,$(ORIGINAL_C_FILES),$(BUILD_DIR)/$(file:.c=.o))
-ALL_LINKED_C_FILES := $(sort $(ORIGINAL_C_FILES) $(PRACTICEFILES_C))
+ALL_LINKED_C_FILES := $(sort $(ORIGINAL_C_FILES) $(PRACTICEFILES_C) $(FLASHCARTSDFILES_C))
 
 original-cc = sh scripts/build/quiet_on_success.sh $(CC_GCC)
 original-flags = $(CFLAGS_GCC_ORIGINAL)
@@ -277,10 +283,13 @@ CONFIG_SENSITIVE_OBJECTS := \
 	$(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) \
 	$(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) \
 	$(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) $(PRACTICEOBJECTS) \
+	$(FLASHCARTSDOBJECTS) \
 	$(ULTRAOBJECTS)
 NON_ORIGINAL_CONFIG_SENSITIVE_OBJECTS := $(filter-out $(ORIGINAL_C_OBJECTS),$(CONFIG_SENSITIVE_OBJECTS))
 
 $(NON_ORIGINAL_CONFIG_SENSITIVE_OBJECTS): $(OBJECT_CONFIG_STAMP)
+$(FLASHCARTSDOBJECTS): src/practice/state/practice_fatfs_config.h \
+	src/practice/state/practice_libdragon_compat.h
 $(APPELF): $(BUILD_CONFIG_STAMP) $(COMPILER_MANIFEST)
 
 # Per-source stamps track the effective GCC command for each translation unit.
@@ -347,7 +356,7 @@ $(COMPILER_MANIFEST): FORCE scripts/build/compiler_manifest.py
 		--gcc-practice-flags '$(CFLAGS_GCC_PRACTICE)' \
 		--gcc-original-flags '$(CFLAGS_GCC_ORIGINAL)' \
 		--original $(ORIGINAL_C_FILES) \
-		--practice $(PRACTICEFILES_C) \
+		--practice $(PRACTICEFILES_C) $(FLASHCARTSDFILES_C) \
 		--generated-assets $(OBSEG_C_SOURCE_FILES) \
 		--region-code $(COUNTRYCODE)
 
@@ -378,12 +387,24 @@ $(BUILD_DIR)/$(OBSEGMENT): $(OBSEG_RZ) $(IMAGE_OBJS)
 
 
 # Build C files in src/practice/ using GCC
+$(BUILD_DIR)/src/practice/state/practice_sd_card.o: src/practice/state/practice_sd_card.c
+	@mkdir -p $(@D)
+	$(CC_GCC) -c $(CFLAGS_GCC_PRACTICE) -std=gnu99 -o $@ $<
+
 $(BUILD_DIR)/src/practice/%.o: src/practice/%.c
 	@mkdir -p $(@D)
 	$(CC_GCC) -c $(CFLAGS_GCC_PRACTICE) -o $@ $<
 
+# Build the subset of libdragon used for flashcart SD and FatFs storage.
+$(BUILD_DIR)/libdragon/src/%.o: libdragon/src/%.c
+	@mkdir -p $(@D)
+	$(CC_GCC) -c $(LIBDRAGON_STORAGE_INCLUDE) $(GCC_COMMON_FLAGS) \
+		-std=gnu99 -Dmemset=practice_fatfs_memset \
+		-include src/practice/state/practice_fatfs_config.h \
+		-include src/practice/state/practice_libdragon_compat.h -o $@ $<
+
 # Combine practice objects so the linker script does not need to know their directory depth.
-$(PRACTICE_LINK_OBJECT): $(PRACTICEOBJECTS)
+$(PRACTICE_LINK_OBJECT): $(PRACTICE_LINK_OBJECTS)
 	$(LD) -r -o $@ $^
 
 BUILD_CHECK_DIR := $(BUILD_DIR)/checks
@@ -519,7 +540,7 @@ libultraclean: commonclean
 	rm -f $(ULTRAOBJECTS)
 
 codeclean: commonclean libultraclean
-	rm -f $(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(RSPOBJECTS) $(PRACTICEOBJECTS) $(PRACTICE_LINK_OBJECT)
+	rm -f $(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(RSPOBJECTS) $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS) $(PRACTICE_LINK_OBJECT)
 
 clean: codeclean dataclean
 	@echo "\nAll Code and Asset Binaries Cleared! Make will Re-Build these next time.\n"

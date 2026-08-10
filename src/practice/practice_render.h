@@ -1,6 +1,9 @@
 #ifndef PRACTICE_RENDER_H
 #define PRACTICE_RENDER_H
 
+#include <bondtypes.h>
+#include <ultra64.h>
+
 typedef struct PracticeRenderWatchState {
   u32 unknown_40990;
   u32 screen_index;

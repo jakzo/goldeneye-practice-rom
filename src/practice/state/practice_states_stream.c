@@ -43,7 +43,9 @@ static void storage_stream_flush_impl(StateStream *stream) {
   if (storage->is_write && storage->is_dirty) {
     StorageCursor cursor;
     u32 capacity = storage_location_size(storage->location);
-    u32 size = STORAGE_PAGE_SIZE;
+    u32 size = storage->location == PRACTICE_STORAGE_FLASHCART_SD
+                   ? storage->page_offset
+                   : STORAGE_PAGE_SIZE;
 
     if (storage->current_page_addr >= capacity) {
       storage->error = TRUE;

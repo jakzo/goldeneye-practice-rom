@@ -1,4 +1,5 @@
 #include "practice_storage.h"
+#include "practice_sd_card.h"
 #include "../practice_sram.h"
 #include "../practice_ui.h"
 #include "emu_log.h"
@@ -26,6 +27,9 @@ bool storage_location_is_available(PracticeStorageLocation location) {
   if (location == PRACTICE_STORAGE_EXPANSION_RAM) {
     return osMemSize >= 8 * 1024 * 1024;
   }
+  if (location == PRACTICE_STORAGE_FLASHCART_SD) {
+    return practice_sd_card_is_available();
+  }
   return FALSE;
 }
 
@@ -37,7 +41,39 @@ u32 storage_location_size(PracticeStorageLocation location) {
       storage_location_is_available(location)) {
     return osMemSize - 0x00600000;
   }
+  if (location == PRACTICE_STORAGE_FLASHCART_SD &&
+      storage_location_is_available(location)) {
+    return 0xffffffff;
+  }
   return 0;
+}
+
+bool storage_begin_save(PracticeStorageLocation location,
+                        const char *level_name, s32 max_save_states) {
+  if (location == PRACTICE_STORAGE_FLASHCART_SD) {
+    return practice_sd_card_begin_write(level_name, max_save_states);
+  }
+  return storage_location_is_available(location);
+}
+
+bool storage_finish_save(PracticeStorageLocation location, bool success) {
+  if (location == PRACTICE_STORAGE_FLASHCART_SD) {
+    return practice_sd_card_finish_write(success);
+  }
+  return success;
+}
+
+bool storage_begin_load(PracticeStorageLocation location) {
+  if (location == PRACTICE_STORAGE_FLASHCART_SD) {
+    return practice_sd_card_begin_read();
+  }
+  return storage_location_is_available(location);
+}
+
+void storage_finish_load(PracticeStorageLocation location) {
+  if (location == PRACTICE_STORAGE_FLASHCART_SD) {
+    practice_sd_card_finish_read();
+  }
 }
 
 void storage_cursor_init(StorageCursor *cur, PracticeStorageLocation location,
@@ -64,8 +100,12 @@ void storage_write(StorageCursor *cur, const void *data, u32 size) {
       cur->error = TRUE;
       return;
     }
-  } else {
+  } else if (cur->location == PRACTICE_STORAGE_EXPANSION_RAM) {
     memcpy(get_expansion_storage_start() + cur->offset, data, size);
+  } else if (!practice_sd_card_seek(cur->offset) ||
+             !practice_sd_card_write(data, size)) {
+    cur->error = TRUE;
+    return;
   }
   cur->offset += size;
 
@@ -100,8 +140,12 @@ void storage_read(StorageCursor *cur, void *data, u32 size) {
       cur->error = TRUE;
       return;
     }
-  } else {
+  } else if (cur->location == PRACTICE_STORAGE_EXPANSION_RAM) {
     memcpy(data, get_expansion_storage_start() + cur->offset, size);
+  } else if (!practice_sd_card_seek(cur->offset) ||
+             !practice_sd_card_read(data, size)) {
+    cur->error = TRUE;
+    return;
   }
   cur->offset += size;
 

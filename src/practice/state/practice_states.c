@@ -1,6 +1,8 @@
 #include "practice_states.h"
 #include "../practice_replay.h"
 #include "../practice_grenade_cam.h"
+#include "../practice_config.h"
+#include "../practice_level.h"
 #include "../practice_render.h"
 #include "../practice_sfx.h"
 #include "../practice_sram.h"
@@ -62,6 +64,9 @@ void practice_states_log_test_fixture(void) {
   if (!g_HasSavedState)
     return;
 
+  if (!storage_begin_load(g_SaveStateStorage))
+    return;
+
   storage_stream_init_read(&stream, g_SaveStateStorage,
                            get_save_state_storage_offset());
   emu_log("RUNWAY_STATE_BEGIN size=%d", get_saved_state_size());
@@ -81,6 +86,7 @@ void practice_states_log_test_fixture(void) {
     offset += chunk;
   }
   emu_log("RUNWAY_STATE_END");
+  storage_finish_load(g_SaveStateStorage);
 }
 
 void init_save_state_system(void) {
@@ -92,9 +98,16 @@ void init_save_state_system(void) {
     return;
   }
 
+  if (!storage_begin_load(g_SaveStateStorage)) {
+    g_SavedHeader.magic = 0;
+    g_HasSavedState = FALSE;
+    return;
+  }
+
   storage_cursor_init(&cursor, g_SaveStateStorage,
                       get_save_state_storage_offset());
   storage_read(&cursor, &g_SavedHeader, sizeof(g_SavedHeader));
+  storage_finish_load(g_SaveStateStorage);
 
   g_HasSavedState = !cursor.error &&
                     g_SavedHeader.magic == SAVE_STATE_MAGIC &&
@@ -119,6 +132,13 @@ void save_game_state(void) {
     practice_replay_invalidate_saved();
   }
 
+  if (!storage_begin_save(g_SaveStateStorage,
+                          practice_level_short_name(g_CurrentStageToLoad),
+                          practice.max_save_states)) {
+    practiceLogWarn("Could not start save state write");
+    return;
+  }
+
   storage_stream_init_write(&stream, g_SaveStateStorage,
                             get_save_state_storage_offset());
 
@@ -138,6 +158,8 @@ void save_game_state(void) {
 
   /* 3. Write props and their associated player state. */
   if (!save_props_state(&stream.base)) {
+    storage_finish_save(g_SaveStateStorage, FALSE);
+    g_HasSavedState = FALSE;
     practiceLogWarn("Failed to save state");
     return;
   }
@@ -156,6 +178,7 @@ void save_game_state(void) {
   stream_flush(&stream.base);
 
   if (stream.error) {
+    storage_finish_save(g_SaveStateStorage, FALSE);
     g_HasSavedState = FALSE;
     practiceLogWarn("Save state is too large for selected storage");
     return;
@@ -172,8 +195,15 @@ void save_game_state(void) {
                       get_save_state_storage_offset());
   storage_write(&header_cursor, &g_SavedHeader, sizeof(g_SavedHeader));
   if (header_cursor.error) {
+    storage_finish_save(g_SaveStateStorage, FALSE);
     g_HasSavedState = FALSE;
     practiceLogWarn("Failed to write save state header");
+    return;
+  }
+
+  if (!storage_finish_save(g_SaveStateStorage, TRUE)) {
+    g_HasSavedState = FALSE;
+    practiceLogWarn("Failed to finish save state write");
     return;
   }
 
@@ -224,6 +254,11 @@ void load_game_state(void) {
     return;
   }
 
+  if (!storage_begin_load(g_SaveStateStorage)) {
+    practiceLogWarn("Could not open save state");
+    return;
+  }
+
   /* Stop all active sound effects before loading state. */
   sndDeactivateAllSfxByFlag_1();
 
@@ -237,15 +272,19 @@ void load_game_state(void) {
 
   /* 3. Load props, followed by their associated player state. */
   if (!load_props_state(&stream.base)) {
+    storage_finish_load(g_SaveStateStorage);
     practiceLogWarn("Failed to load state");
     return;
   }
 
   /* 4. Resolve prop-dependent globals and restore the current player. */
   if (!load_global_state_post_props()) {
+    storage_finish_load(g_SaveStateStorage);
     practiceLogWarn("Failed to restore post-prop globals");
     return;
   }
+
+  storage_finish_load(g_SaveStateStorage);
 
   freeze_current_frame_after_load(paused_resume_delta);
 

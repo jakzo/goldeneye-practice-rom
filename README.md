@@ -27,6 +27,13 @@
 - **Save states**
     - During gameplay press `L + D-Down` to save current state
     - During gameplay press `L + D-Up` to load current state
+    - On a level's briefing screen, `Save state storage` selects SRAM, volatile Expansion Pak RAM, or flashcart SD
+        - Flashcart SD works with EverDrive 64 and SummerCart64 and creates numbered files such as `012-runway.sav` in `/goldeneye_practice_rom/save_states`
+            - `Max save states` limits the directory to 1–99 files; creating another save deletes the oldest numbered save
+        - Expansion Pak saves in memory to the extra RAM
+            - Note that saves to here will NOT persist after rebooting the console
+        - SRAM saves to the cartridge
+            - IMPORTANT: SRAM size is limited and many levels and situations will be too big to save
     - There are several minor visual/audio pieces of state which are not saved or loaded but should not affect gameplay
         - If there is some state not saved that DOES affect gameplay, let me know (@jakzo on Discord)
     - Not fully stable, expect occassional crashes
@@ -37,7 +44,7 @@
     - On a level's briefing screen, set `Replay next level` to `Record` to record the next attempt
     - After a recording exists for that level, set it to `Playback` to replay the saved inputs, frame timing, control option changes, and initial random seeds
     - Practice hotkeys remain available during playback; other button presses cancel playback and resume normal control
-    - Replays and save states use the same SRAM space, so saving either one overwrites the other and only one replay can be saved at a time
+    - Replays and SRAM save states use the same space, so saving either one overwrites the other and only one replay can be saved at a time
     - 2.x control styles are not currently supported
 - **Grenade camera**
     - When throwing most projectiles, shows a picture-in-picture view that follows it so you can see where it landed

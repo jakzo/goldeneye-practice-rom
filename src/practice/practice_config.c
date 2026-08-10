@@ -1,15 +1,15 @@
 #include "practice/practice_config.h"
 #include "emu_log.h"
-#include "front.h"
+#include "practice_level.h"
 #include "practice_replay.h"
 #include "practice_splits.h"
 #include "practice_sram.h"
 #include "practice_tests.h"
 #include "practice_ui.h"
+#include "state/practice_states.h"
 #include <bondconstants.h>
 #include <fr.h>
 #include <joy.h>
-#include <lvl_text.h>
 #include <ramrom.h>
 #include <textrelated.h>
 #include <ultra64.h>
@@ -39,6 +39,8 @@ struct PracticeConfig practice = {
     FALSE,                    // frigate_ideal_hostage_pads
     FALSE,                    // frigate_fast_guard_death
     1,                        // max_external_cameras
+    PRACTICE_STORAGE_SRAM,    // save_state_storage
+    99,                       // max_save_states
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -81,7 +83,8 @@ struct StoredPracticeConfig {
 
 typedef enum PracticeSettingType {
   PRACTICE_SETTING_OPTIONS,
-  PRACTICE_SETTING_FLOAT_SLIDER
+  PRACTICE_SETTING_FLOAT_SLIDER,
+  PRACTICE_SETTING_INT_SLIDER
 } PracticeSettingType;
 
 typedef s32 (*PracticeSettingAppliesFn)(s32 stage_id);
@@ -131,6 +134,12 @@ struct PracticeSetting {
       .slider = { min, max, step }                                             \
     }                                                                          \
   }
+#define INT_SLIDER_SETTING(label, member, min, max)                            \
+  {                                                                            \
+    label, CONFIG_OFFSET(member), PRACTICE_SETTING_INT_SLIDER, NULL, {         \
+      .slider = {min, max, 1.0f}                                               \
+    }                                                                          \
+  }
 
 typedef char StoredPracticeConfigMustFitReservedSpace
     [sizeof(struct StoredPracticeConfig) <= CONFIG_SRAM_SIZE ? 1 : -1];
@@ -151,28 +160,49 @@ static const struct PracticeOption s_max_external_cameras[] = {
     {"1", 1},
     {"2 (crashes likely)", 2},
 };
+static const struct PracticeOption s_save_state_storage[] = {
+    {"SRAM", PRACTICE_STORAGE_SRAM},
+    {"Ex-Pak", PRACTICE_STORAGE_EXPANSION_RAM},
+    {"SD", PRACTICE_STORAGE_FLASHCART_SD},
+};
 
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
 static s32 frigate_apply(s32 stage_id) { return stage_id == LEVELID_FRIGATE; }
 
 static s32 s_boot_level_option = LEVELID_TITLE;
+static s32 s_storage_availability_checked;
+static s32 s_flashcart_storage_available;
 
-static const char *level_name(s32 stage_id) {
+static s32 save_state_storage_options(s32 stage_id, s32 option_index,
+                                      const char **option_name,
+                                      s32 *option_value) {
+  s32 available_index = 0;
   s32 i;
 
-  if (stage_id == LEVELID_TITLE || stage_id == LEVELID_NONE) {
-    return "Menu";
+  if (!s_storage_availability_checked) {
+    s_flashcart_storage_available =
+        storage_location_is_available(PRACTICE_STORAGE_FLASHCART_SD);
+    s_storage_availability_checked = TRUE;
   }
 
-  for (i = 0; mission_folder_setup_entries[i].folder_text_preset != 0; i++) {
-    if (mission_folder_setup_entries[i].stage_id == stage_id) {
-      return langGet(mission_folder_setup_entries[i].icon_text_preset != 0
-                         ? mission_folder_setup_entries[i].icon_text_preset
-                         : mission_folder_setup_entries[i].folder_text_preset);
+  for (i = 0; i < ARRAY_COUNT(s_save_state_storage); i++) {
+    s32 location = s_save_state_storage[i].value;
+    s32 available = location == PRACTICE_STORAGE_FLASHCART_SD
+                        ? s_flashcart_storage_available
+                        : storage_location_is_available(location);
+
+    if (!available) {
+      continue;
     }
+    if (available_index == option_index) {
+      *option_name = s_save_state_storage[i].name;
+      *option_value = location;
+      return TRUE;
+    }
+    available_index++;
   }
 
-  return "Unknown";
+  return FALSE;
 }
 
 static s32 boot_level_options(s32 stage_id, s32 option_index,
@@ -196,7 +226,7 @@ static s32 boot_level_options(s32 stage_id, s32 option_index,
     return FALSE;
   }
 
-  *option_name = level_name(*option_value);
+  *option_name = practice_level_short_name(*option_value);
   return TRUE;
 }
 
@@ -241,6 +271,9 @@ static const struct PracticeSetting s_level_settings[] = {
 };
 
 static const struct PracticeSetting s_global_settings[] = {
+    DYNAMIC_OPTIONS_SETTING("Save state storage", save_state_storage,
+                            save_state_storage_options),
+    INT_SLIDER_SETTING("Max save states", max_save_states, 1, 99),
     DYNAMIC_OPTIONS_SETTING("Replay mode", replay_mode, replay_mode_options),
 #if DEV
     OPTIONS_SETTING("Record replay seeds", record_replay_seeds, s_off_on, NULL),
@@ -266,6 +299,7 @@ static const struct PracticeSetting s_global_settings[] = {
 #undef OPTIONS_SETTING
 #undef DYNAMIC_OPTIONS_SETTING
 #undef SLIDER_SETTING
+#undef INT_SLIDER_SETTING
 
 static s32 s_focused_visible_setting;
 static s32 s_focused_option;
@@ -372,6 +406,10 @@ void practice_config_load(void) {
     }
   }
 
+  if (practice.max_save_states < 1 || practice.max_save_states > 99) {
+    practice.max_save_states = 99;
+  }
+  practice_states_set_storage_location(practice.save_state_storage);
   apply_rom_config();
 }
 
@@ -454,7 +492,7 @@ static void sync_focused_option(s32 stage_id) {
   s32 i;
 
   s_focused_option = 0;
-  if (setting == NULL || setting->type == PRACTICE_SETTING_FLOAT_SLIDER) {
+  if (setting == NULL || setting->type != PRACTICE_SETTING_OPTIONS) {
     return;
   }
 
@@ -526,6 +564,15 @@ static void change_setting(s32 direction, s32 stage_id) {
     *value =
         setting->data.slider.minimum + steps * setting->data.slider.increment;
     s_config_dirty = TRUE;
+  } else if (setting->type == PRACTICE_SETTING_INT_SLIDER) {
+    s32 *value = setting_value(setting);
+    *value += direction;
+    if (*value < (s32)setting->data.slider.minimum) {
+      *value = (s32)setting->data.slider.minimum;
+    } else if (*value > (s32)setting->data.slider.maximum) {
+      *value = (s32)setting->data.slider.maximum;
+    }
+    s_config_dirty = TRUE;
   } else {
     const char *name;
     s32 value;
@@ -541,6 +588,9 @@ static void change_setting(s32 direction, s32 stage_id) {
     }
     s_focused_option = next;
     *(s32 *)setting_value(setting) = value;
+    if (setting->value_offset == CONFIG_OFFSET(save_state_storage)) {
+      practice_states_set_storage_location(value);
+    }
     s_config_dirty = TRUE;
   }
 }
@@ -553,6 +603,7 @@ void practice_config_menu_reset(void) {
   s_slider_hold_frames = 0;
   s_slider_hold_button = 0;
   s_last_stage = LEVELID_NONE;
+  s_storage_availability_checked = FALSE;
 }
 
 void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
@@ -620,7 +671,7 @@ void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
     const struct PracticeSetting *setting =
         visible_setting(s_focused_visible_setting, stage_id);
     change_setting(direction, stage_id);
-    if (setting->type != PRACTICE_SETTING_FLOAT_SLIDER && s_config_dirty) {
+    if (setting->type == PRACTICE_SETTING_OPTIONS && s_config_dirty) {
       practice_config_save();
     }
     s_slider_hold_button = direction_button;
@@ -630,8 +681,8 @@ void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {
 
   held = joyGetButtons(PLAYER_1, L_CBUTTONS | R_CBUTTONS);
   if (held == s_slider_hold_button && held != 0 &&
-      visible_setting(s_focused_visible_setting, stage_id)->type ==
-          PRACTICE_SETTING_FLOAT_SLIDER) {
+      visible_setting(s_focused_visible_setting, stage_id)->type !=
+          PRACTICE_SETTING_OPTIONS) {
     s_slider_hold_frames++;
     if (s_slider_hold_frames >= SLIDER_REPEAT_DELAY &&
         (s_slider_hold_frames - SLIDER_REPEAT_DELAY) % SLIDER_REPEAT_RATE ==
@@ -702,9 +753,11 @@ static Gfx *render_setting(Gfx *gdl, const struct PracticeSetting *setting,
 
   gdl = print_text(gdl, SETTINGS_X, y, setting->name, TEXT_COLOR);
 
-  if (setting->type == PRACTICE_SETTING_FLOAT_SLIDER) {
+  if (setting->type != PRACTICE_SETTING_OPTIONS) {
     char slider[32];
-    f32 value = *(f32 *)setting_value(setting);
+    f32 value = setting->type == PRACTICE_SETTING_FLOAT_SLIDER
+                    ? *(f32 *)setting_value(setting)
+                    : (f32) * (s32 *)setting_value(setting);
     s32 position =
         (s32)(((value - setting->data.slider.minimum) * 10.0f) /
               (setting->data.slider.maximum - setting->data.slider.minimum));
@@ -720,7 +773,11 @@ static Gfx *render_setting(Gfx *gdl, const struct PracticeSetting *setting,
       slider[i + 1] = i == position ? '|' : '-';
     }
     slider[12] = ']';
-    sprintf(&slider[13], " %.1f", value);
+    if (setting->type == PRACTICE_SETTING_FLOAT_SLIDER) {
+      sprintf(&slider[13], " %.1f", value);
+    } else {
+      sprintf(&slider[13], " %d", *(s32 *)setting_value(setting));
+    }
     gdl = print_option(gdl, OPTIONS_X, y, slider, TRUE, focused);
   } else {
     const char *name;

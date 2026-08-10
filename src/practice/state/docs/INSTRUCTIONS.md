@@ -309,18 +309,20 @@ Add any general advice helpful for future agents working on this feature here. B
   fills the adjacent scheduler stack with `0xffffffff`, making thread 2 return
   to that address.
 - **Storage Is Independent From Serialization**: Save-state fields serialize
-  through `StateStream`; the concrete `StorageStream` can target cartridge SRAM
-  or volatile Expansion Pak RAM. Select it in code with
+  through `StateStream`; the concrete `StorageStream` can target cartridge SRAM,
+  volatile Expansion Pak RAM, or a flashcart SD card. Select it with
   `practice_states_set_storage_location`. SRAM is the default and starts at
   `SAVE_STATE_SRAM_OFFSET`, leaving exactly
   `SRAM_SIZE_BYTES - SAVE_STATE_SRAM_OFFSET` bytes for the serialized state.
   Expansion Pak storage uses the upper 2 MiB starting at uncached alias
   `0xa0600000` (physical `0x00600000`), clear of the framebuffer boundary and
   graphics scratch use, and is available only when `osMemSize` reports the full
-  8 MiB. The stream reports an error rather than overrunning either backend.
-  Prefer stable IDs, seeds, occupancy maps, compact deltas, and state from which
-  larger buffers can be reproduced; do not serialize allocator padding or
-  renderer output merely because Expansion Pak tests have more capacity.
+  8 MiB. Flashcart storage streams each state to a numbered file under
+  `/goldeneye_practice_rom/save_states` and retains the configured maximum of
+  1–99 files. The stream reports an error rather than overrunning a fixed-size
+  backend. Prefer stable IDs, seeds, occupancy maps, compact deltas, and state
+  from which larger buffers can be reproduced; do not serialize allocator
+  padding or renderer output merely because a larger backend is available.
   Replay-file save-state tests select Expansion Pak RAM so their state data
   cannot overwrite the replay fixture. The much larger host `.state` replay
   sidecars are per-frame diagnostic timelines and do not consume runtime save

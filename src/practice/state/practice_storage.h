@@ -7,9 +7,9 @@
 /**
  * Storage abstraction layer for save state persistence.
  *
- * Backed by either cartridge SRAM or the extra 4 MiB supplied by an Expansion
- * Pak. Expansion RAM is volatile and is only available when osMemSize reports
- * the full 8 MiB of RDRAM.
+ * Backed by cartridge SRAM, the extra 4 MiB supplied by an Expansion Pak, or a
+ * save-state file on a supported flashcart SD card. Expansion RAM is volatile
+ * and is only available when osMemSize reports the full 8 MiB of RDRAM.
  *
  * Data is read/written sequentially via a cursor that auto-advances.
  * The cursor tracks an absolute offset within the storage medium.
@@ -17,7 +17,8 @@
 
 typedef enum {
   PRACTICE_STORAGE_SRAM,
-  PRACTICE_STORAGE_EXPANSION_RAM
+  PRACTICE_STORAGE_EXPANSION_RAM,
+  PRACTICE_STORAGE_FLASHCART_SD
 } PracticeStorageLocation;
 
 typedef struct {
@@ -28,6 +29,11 @@ typedef struct {
 
 bool storage_location_is_available(PracticeStorageLocation location);
 u32 storage_location_size(PracticeStorageLocation location);
+bool storage_begin_save(PracticeStorageLocation location,
+                        const char *level_name, s32 max_save_states);
+bool storage_finish_save(PracticeStorageLocation location, bool success);
+bool storage_begin_load(PracticeStorageLocation location);
+void storage_finish_load(PracticeStorageLocation location);
 
 /**
  * Initialize a storage cursor at the given base offset.
