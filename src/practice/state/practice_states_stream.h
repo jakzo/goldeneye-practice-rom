@@ -25,8 +25,6 @@ struct StateStream {
 
 typedef struct {
   StateStream base;
-  u8 page[STORAGE_PAGE_SIZE]
-      __attribute__((aligned(16))); // 16 byte alignment for D-cache
   PracticeStorageLocation location;
   u32 capacity;
   u32 page_offset;
@@ -34,7 +32,17 @@ typedef struct {
   bool is_write;
   bool is_dirty;
   bool error;
+  u8 page[STORAGE_PAGE_SIZE]
+      __attribute__((aligned(16))); // 16 byte alignment for D-cache
 } StorageStream;
+
+typedef struct {
+  StateStream base;
+  PracticeStorageLocation location;
+  u32 capacity;
+  u32 current_offset;
+  bool error;
+} MemoryStream;
 
 void storage_stream_init_write(StorageStream *stream,
                                PracticeStorageLocation location,
@@ -42,6 +50,12 @@ void storage_stream_init_write(StorageStream *stream,
 void storage_stream_init_read(StorageStream *stream,
                               PracticeStorageLocation location,
                               u32 base_address, u32 size);
+void memory_stream_init_write(MemoryStream *stream,
+                              PracticeStorageLocation location,
+                              u32 base_address);
+void memory_stream_init_read(MemoryStream *stream,
+                             PracticeStorageLocation location,
+                             u32 base_address, u32 size);
 
 // Generic stream helpers
 static inline void write_u32(StateStream *stream, u32 val) {

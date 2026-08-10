@@ -6,33 +6,48 @@ extern void *memcpy(void *dst, const void *src, size_t count);
 
 static void memory_stream_write_bytes_impl(StateStream *stream,
                                            const void *src, u32 size) {
-  StorageStream *storage = (StorageStream *)stream;
+  MemoryStream *storage = (MemoryStream *)stream;
   StorageCursor cursor;
-  storage_cursor_init(&cursor, storage->location, storage->current_page_addr);
+  if (storage->current_offset > storage->capacity ||
+      size > storage->capacity - storage->current_offset) {
+    storage->error = TRUE;
+    return;
+  }
+  storage_cursor_init(&cursor, storage->location, storage->current_offset);
   storage_write(&cursor, src, size);
   storage->error |= cursor.error;
   if (!cursor.error) {
-    storage->current_page_addr += size;
+    storage->current_offset += size;
     stream->total_processed += size;
   }
 }
 
 static void memory_stream_read_bytes_impl(StateStream *stream, void *dst,
                                           u32 size) {
-  StorageStream *storage = (StorageStream *)stream;
+  MemoryStream *storage = (MemoryStream *)stream;
   StorageCursor cursor;
-  storage_cursor_init(&cursor, storage->location, storage->current_page_addr);
+  if (storage->current_offset > storage->capacity ||
+      size > storage->capacity - storage->current_offset) {
+    storage->error = TRUE;
+    return;
+  }
+  storage_cursor_init(&cursor, storage->location, storage->current_offset);
   storage_read(&cursor, dst, size);
   storage->error |= cursor.error;
   if (!cursor.error) {
-    storage->current_page_addr += size;
+    storage->current_offset += size;
     stream->total_processed += size;
   }
 }
 
 static void memory_stream_seek_impl(StateStream *stream, u32 absolute_offset) {
-  StorageStream *storage = (StorageStream *)stream;
-  storage->current_page_addr = absolute_offset;
+  MemoryStream *storage = (MemoryStream *)stream;
+  if (absolute_offset < stream->base_address ||
+      absolute_offset > storage->capacity) {
+    storage->error = TRUE;
+    return;
+  }
+  storage->current_offset = absolute_offset;
   stream->total_processed = absolute_offset - stream->base_address;
 }
 
@@ -220,14 +235,6 @@ static void storage_stream_init(StorageStream *stream,
     }
   }
 
-  if (location == PRACTICE_STORAGE_EXPANSION_RAM) {
-    stream->base.write_bytes = memory_stream_write_bytes_impl;
-    stream->base.read_bytes = memory_stream_read_bytes_impl;
-    stream->base.seek = memory_stream_seek_impl;
-    stream->base.flush = memory_stream_flush_impl;
-    return;
-  }
-
   if (!stream->error && (!is_write || base_address % STORAGE_PAGE_SIZE != 0)) {
     u32 capacity = stream->capacity;
     u32 size = STORAGE_PAGE_SIZE;
@@ -250,4 +257,41 @@ void storage_stream_init_read(StorageStream *stream,
                               PracticeStorageLocation location,
                               u32 base_address, u32 size) {
   storage_stream_init(stream, location, base_address, size, FALSE);
+}
+
+static void memory_stream_init(MemoryStream *stream,
+                               PracticeStorageLocation location,
+                               u32 base_address, u32 size, bool is_write) {
+  u32 capacity = storage_location_size(location);
+
+  stream->base.write_bytes = memory_stream_write_bytes_impl;
+  stream->base.read_bytes = memory_stream_read_bytes_impl;
+  stream->base.seek = memory_stream_seek_impl;
+  stream->base.flush = memory_stream_flush_impl;
+  stream->base.total_processed = 0;
+  stream->base.base_address = base_address;
+  stream->location = location;
+  stream->capacity = capacity;
+  stream->current_offset = base_address;
+  stream->error = !storage_location_is_available(location);
+
+  if (!is_write) {
+    if (base_address > capacity || size > capacity - base_address) {
+      stream->error = TRUE;
+    } else {
+      stream->capacity = base_address + size;
+    }
+  }
+}
+
+void memory_stream_init_write(MemoryStream *stream,
+                              PracticeStorageLocation location,
+                              u32 base_address) {
+  memory_stream_init(stream, location, base_address, 0, TRUE);
+}
+
+void memory_stream_init_read(MemoryStream *stream,
+                             PracticeStorageLocation location,
+                             u32 base_address, u32 size) {
+  memory_stream_init(stream, location, base_address, size, FALSE);
 }

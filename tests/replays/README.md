@@ -96,3 +96,18 @@ just test-replay-save-states us tests/replays/us
 just test-replay-save-states eu tests/replays/eu
 just test-replay-save-states jp tests/replays/jp
 ```
+
+The timings and optional external cameras can be varied through environment
+variables. Values omitted here retain the one-second spacing, three-frame wait,
+and one-second pre-load duration defaults:
+
+```bash
+REPLAY_SAVE_STATE_SPACING_SECONDS=10 \
+REPLAY_SAVE_STATE_WAIT_FRAMES=4 \
+REPLAY_SAVE_STATE_DURATION_SECONDS=30 \
+just test-replay-save-states us tests/replays/us
+
+REPLAY_SAVE_STATE_GRENADE_CAM=1 \
+REPLAY_SAVE_STATE_HOSTAGE_CAM=1 \
+just test-replay-save-states us tests/replays/us
+```

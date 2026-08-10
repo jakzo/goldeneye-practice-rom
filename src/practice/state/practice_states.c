@@ -56,7 +56,7 @@ void practice_states_set_test_minimum_size(u32 minimum_size) {
 
 void practice_states_log_test_fixture(void) {
   static const char hex[] = "0123456789abcdef";
-  StorageStream stream;
+  StorageCursor cursor;
   u8 bytes[128];
   char encoded[sizeof(bytes) * 2 + 1];
   u32 offset = 0;
@@ -67,9 +67,8 @@ void practice_states_log_test_fixture(void) {
   if (!storage_begin_load(g_SaveStateStorage))
     return;
 
-  storage_stream_init_read(&stream, g_SaveStateStorage,
-                           get_save_state_storage_offset(),
-                           get_saved_state_size());
+  storage_cursor_init(&cursor, g_SaveStateStorage,
+                      get_save_state_storage_offset());
   emu_log("RUNWAY_STATE_BEGIN size=%d", get_saved_state_size());
   while (offset < get_saved_state_size()) {
     u32 chunk = get_saved_state_size() - offset;
@@ -77,7 +76,9 @@ void practice_states_log_test_fixture(void) {
 
     if (chunk > sizeof(bytes))
       chunk = sizeof(bytes);
-    read_bytes(&stream.base, bytes, chunk);
+    storage_read(&cursor, bytes, chunk);
+    if (cursor.error)
+      break;
     for (i = 0; i < chunk; i++) {
       encoded[i * 2] = hex[bytes[i] >> 4];
       encoded[i * 2 + 1] = hex[bytes[i] & 0xf];
@@ -88,6 +89,71 @@ void practice_states_log_test_fixture(void) {
   }
   emu_log("RUNWAY_STATE_END");
   storage_finish_load(g_SaveStateStorage);
+}
+
+typedef struct SaveSerializationResult {
+  u32 size;
+  bool props_saved;
+  bool stream_error;
+} SaveSerializationResult;
+
+static SaveSerializationResult serialize_game_state(StateStream *stream,
+                                                     bool *stream_error) {
+  SaveSerializationResult result;
+
+  result.size = 0;
+  result.props_saved = FALSE;
+  result.stream_error = FALSE;
+
+  /* 1. Write placeholder header (magic, version, level_id, size=0). */
+  {
+    SaveStateHeader header;
+    header.magic = SAVE_STATE_MAGIC;
+    header.version = SAVE_STATE_VERSION;
+    header.level_id = g_CurrentStageToLoad;
+    header.size = 0; /* patched below */
+    header.full_size = 0;
+    write_bytes(stream, &header, sizeof(header));
+  }
+
+  /* 2. Write globals. */
+  save_global_state(stream);
+
+  /* 3. Write props and their associated player state. */
+  if (!save_props_state(stream)) {
+    result.stream_error = *stream_error;
+    return result;
+  }
+  result.props_saved = TRUE;
+
+  if (g_SaveStateTestMinimumSize > stream->total_processed) {
+    static const u8 padding[128] = {0};
+    while (stream->total_processed < g_SaveStateTestMinimumSize) {
+      u32 remaining = g_SaveStateTestMinimumSize - stream->total_processed;
+      u32 chunk = remaining < sizeof(padding) ? remaining : sizeof(padding);
+      write_bytes(stream, padding, chunk);
+    }
+  }
+
+  /* Flush the remaining bytes in the storage stream. */
+  stream_flush(stream);
+  result.size = stream->total_processed;
+  result.stream_error = *stream_error;
+  return result;
+}
+
+static SaveSerializationResult serialize_game_state_to_memory(void) {
+  MemoryStream stream;
+  memory_stream_init_write(&stream, g_SaveStateStorage,
+                           get_save_state_storage_offset());
+  return serialize_game_state(&stream.base, &stream.error);
+}
+
+static SaveSerializationResult serialize_game_state_to_storage(void) {
+  StorageStream stream;
+  storage_stream_init_write(&stream, g_SaveStateStorage,
+                            get_save_state_storage_offset());
+  return serialize_game_state(&stream.base, &stream.error);
 }
 
 void init_save_state_system(void) {
@@ -116,7 +182,7 @@ void init_save_state_system(void) {
 }
 
 void save_game_state(void) {
-  StorageStream stream;
+  SaveSerializationResult result;
   StorageCursor header_cursor;
 
   if (g_CurrentPlayer == NULL)
@@ -140,45 +206,18 @@ void save_game_state(void) {
     return;
   }
 
-  storage_stream_init_write(&stream, g_SaveStateStorage,
-                            get_save_state_storage_offset());
+  result = g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM
+               ? serialize_game_state_to_memory()
+               : serialize_game_state_to_storage();
 
-  /* 1. Write placeholder header (magic, version, level_id, size=0). */
-  {
-    SaveStateHeader header;
-    header.magic = SAVE_STATE_MAGIC;
-    header.version = SAVE_STATE_VERSION;
-    header.level_id = g_CurrentStageToLoad;
-    header.size = 0; /* patched below */
-    header.full_size = 0;
-    write_bytes(&stream.base, &header, sizeof(header));
-  }
-
-  /* 2. Write globals. */
-  save_global_state(&stream.base);
-
-  /* 3. Write props and their associated player state. */
-  if (!save_props_state(&stream.base)) {
+  if (!result.props_saved) {
     storage_finish_save(g_SaveStateStorage, FALSE);
     g_HasSavedState = FALSE;
     practiceLogWarn("Failed to save state");
     return;
   }
 
-  if (g_SaveStateTestMinimumSize > stream.base.total_processed) {
-    static const u8 padding[128] = {0};
-    while (stream.base.total_processed < g_SaveStateTestMinimumSize) {
-      u32 remaining =
-          g_SaveStateTestMinimumSize - stream.base.total_processed;
-      u32 chunk = remaining < sizeof(padding) ? remaining : sizeof(padding);
-      write_bytes(&stream.base, padding, chunk);
-    }
-  }
-
-  /* Flush the remaining bytes in the storage stream. */
-  stream_flush(&stream.base);
-
-  if (stream.error) {
+  if (result.stream_error) {
     storage_finish_save(g_SaveStateStorage, FALSE);
     g_HasSavedState = FALSE;
     if (g_SaveStateStorage == PRACTICE_STORAGE_FLASHCART_SD) {
@@ -193,8 +232,8 @@ void save_game_state(void) {
   g_SavedHeader.magic = SAVE_STATE_MAGIC;
   g_SavedHeader.version = SAVE_STATE_VERSION;
   g_SavedHeader.level_id = g_CurrentStageToLoad;
-  g_SavedHeader.size = stream.base.total_processed;
-  g_SavedHeader.full_size = stream.base.total_processed;
+  g_SavedHeader.size = result.size;
+  g_SavedHeader.full_size = result.size;
 
   storage_cursor_init(&header_cursor, g_SaveStateStorage,
                       get_save_state_storage_offset());
@@ -219,8 +258,49 @@ void save_game_state(void) {
                   (get_saved_state_size() + 1023) / 1024);
 }
 
-void load_game_state(void) {
+enum LoadSerializationResult {
+  LOAD_SERIALIZATION_OK,
+  LOAD_SERIALIZATION_DATA_FAILED,
+  LOAD_SERIALIZATION_POST_PROPS_FAILED
+};
+
+static s32 deserialize_game_state(StateStream *stream, bool *stream_error) {
+  /* 1. Skip header (already validated from g_SavedHeader). */
+  stream_seek(stream,
+              get_save_state_storage_offset() + sizeof(SaveStateHeader));
+
+  /* 2. Load scalar globals and cache prop-dependent global references. */
+  load_global_state_pre_props(stream);
+
+  /* 3. Load props, followed by their associated player state. */
+  if (!load_props_state(stream) || *stream_error) {
+    return LOAD_SERIALIZATION_DATA_FAILED;
+  }
+
+  /* 4. Resolve prop-dependent globals and restore the current player. */
+  if (!load_global_state_post_props()) {
+    return LOAD_SERIALIZATION_POST_PROPS_FAILED;
+  }
+
+  return LOAD_SERIALIZATION_OK;
+}
+
+static s32 deserialize_game_state_from_memory(u32 storage_offset,
+                                              u32 size) {
+  MemoryStream stream;
+  memory_stream_init_read(&stream, g_SaveStateStorage, storage_offset, size);
+  return deserialize_game_state(&stream.base, &stream.error);
+}
+
+static s32 deserialize_game_state_from_storage(u32 storage_offset,
+                                               u32 size) {
   StorageStream stream;
+  storage_stream_init_read(&stream, g_SaveStateStorage, storage_offset, size);
+  return deserialize_game_state(&stream.base, &stream.error);
+}
+
+void load_game_state(void) {
+  s32 load_result;
   s32 paused_resume_delta = g_IsTimePaused ? g_ForcedDeltaFrames : -1;
   u32 storage_offset = get_save_state_storage_offset();
 
@@ -267,24 +347,19 @@ void load_game_state(void) {
   /* Stop all active sound effects before loading state. */
   sndDeactivateAllSfxByFlag_1();
 
-  storage_stream_init_read(&stream, g_SaveStateStorage, storage_offset,
-                           get_saved_state_size());
+  load_result =
+      g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM
+          ? deserialize_game_state_from_memory(storage_offset,
+                                               get_saved_state_size())
+          : deserialize_game_state_from_storage(storage_offset,
+                                                get_saved_state_size());
 
-  /* 1. Skip header (already validated from g_SavedHeader). */
-  stream_seek(&stream.base, storage_offset + sizeof(SaveStateHeader));
-
-  /* 2. Load scalar globals and cache prop-dependent global references. */
-  load_global_state_pre_props(&stream.base);
-
-  /* 3. Load props, followed by their associated player state. */
-  if (!load_props_state(&stream.base) || stream.error) {
+  if (load_result == LOAD_SERIALIZATION_DATA_FAILED) {
     storage_finish_load(g_SaveStateStorage);
     practiceLogWarn("Failed to load state");
     return;
   }
-
-  /* 4. Resolve prop-dependent globals and restore the current player. */
-  if (!load_global_state_post_props()) {
+  if (load_result == LOAD_SERIALIZATION_POST_PROPS_FAILED) {
     storage_finish_load(g_SaveStateStorage);
     practiceLogWarn("Failed to restore post-prop globals");
     return;

@@ -912,7 +912,7 @@ def main():
         return 2
 
     if args.version != "US" and (
-        args.test_param
+        (args.test_param and args.test != "REPLAY_RUNWAY_SAVE_STATES")
         or args.state_fixture
         or args.output_state
         or args.output_state_dir

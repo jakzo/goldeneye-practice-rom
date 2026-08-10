@@ -99,6 +99,16 @@ extern void __ull_divremi(unsigned long long *quotient,
 #define REPLAY_RUNWAY_SAVE_STATES 29
 // --- end test cases ---
 
+#define REPLAY_STATE_PARAM_WAIT_SHIFT 8
+#define REPLAY_STATE_PARAM_DURATION_SHIFT 16
+#define REPLAY_STATE_PARAM_GRENADE_CAM 0x01000000
+#define REPLAY_STATE_PARAM_HOSTAGE_CAM 0x02000000
+#if defined(VERSION_EU)
+#define REPLAY_STATE_FRAMES_PER_SECOND 50
+#else
+#define REPLAY_STATE_FRAMES_PER_SECOND 60
+#endif
+
 // Left out of test cases since it cannot assert
 #define CRASH 999
 
@@ -197,7 +207,7 @@ static u32 replay_chr_hidden_hash(void) {
 #define g_RunwaySaveStateLastTimestamp g_ReplayTestInitialInvert
 
 enum ReplaySaveStatePhase {
-  REPLAY_STATE_WAIT_ONE_SECOND,
+  REPLAY_STATE_WAIT_TO_SAVE,
   REPLAY_STATE_HOLD_TO_SAVE,
   REPLAY_STATE_PRESS_SAVE,
   REPLAY_STATE_HOLD_AFTER_SAVE,
@@ -208,6 +218,24 @@ enum ReplaySaveStatePhase {
   REPLAY_STATE_PLAY_BEFORE_SAVE,
   REPLAY_STATE_DONE
 };
+
+static s32 replay_state_param_value(s32 shift, s32 default_value) {
+  s32 value = (g_ReplayTestPlaybackCount >> shift) & 0xff;
+  return value != 0 ? value : default_value;
+}
+
+static s32 replay_state_spacing_frames(void) {
+  return replay_state_param_value(0, 1) * REPLAY_STATE_FRAMES_PER_SECOND;
+}
+
+static s32 replay_state_wait_frames(void) {
+  return replay_state_param_value(REPLAY_STATE_PARAM_WAIT_SHIFT, 3);
+}
+
+static s32 replay_state_duration_frames(void) {
+  return replay_state_param_value(REPLAY_STATE_PARAM_DURATION_SHIFT, 1) *
+         REPLAY_STATE_FRAMES_PER_SECOND;
+}
 
 void practice_tests_set_case(s32 test_case, s32 test_param) {
   g_practice_test_case = test_case;
@@ -226,6 +254,7 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
   g_PausedStateLoadTestPhase = 0;
 
   if (test_case == REPLAY_RUNWAY_SAVE_STATES) {
+    g_ReplayTestPlaybackCount = test_param;
     practice_replay_use_test_rom_fixture();
     if (!practice_states_set_storage_location(
             PRACTICE_STORAGE_EXPANSION_RAM)) {
@@ -236,10 +265,15 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
   }
 
   practice.grenade_cam =
-      test_case == REPLAY_GRENADE_CAM || test_case == REPLAY_FRIGATE;
+      test_case == REPLAY_GRENADE_CAM || test_case == REPLAY_FRIGATE ||
+      (test_case == REPLAY_RUNWAY_SAVE_STATES &&
+       (test_param & REPLAY_STATE_PARAM_GRENADE_CAM));
 
   // Crashes...
-  practice.frigate_hostage_cam = test_case == REPLAY_FRIGATE;
+  practice.frigate_hostage_cam =
+      test_case == REPLAY_FRIGATE ||
+      (test_case == REPLAY_RUNWAY_SAVE_STATES &&
+       (test_param & REPLAY_STATE_PARAM_HOSTAGE_CAM));
 
   if (test_case == REPLAY) {
     practice_replay_request_seeded_recording();
@@ -1909,7 +1943,7 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_SimulatedButtons = trigger;
     g_SimulatedButtonsPressed =
         g_RunwaySaveStatePausedFrames == 0 ? trigger : 0;
-    if (++g_RunwaySaveStatePausedFrames >= 3) {
+    if (++g_RunwaySaveStatePausedFrames >= replay_state_wait_frames()) {
       g_RunwaySaveStatePhase = REPLAY_STATE_PRESS_SAVE;
     }
     break;
@@ -2059,7 +2093,7 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     }
     g_SimulatedButtons = trigger;
     g_SimulatedButtonsPressed = 0;
-    if (++g_RunwaySaveStatePausedFrames >= 3) {
+    if (++g_RunwaySaveStatePausedFrames >= replay_state_wait_frames()) {
       g_RunwaySaveStateLastTimestamp = g_RunwaySaveStateTarget;
       g_RunwaySaveStatePhase = REPLAY_STATE_PLAY_BEFORE_SAVE;
     }
@@ -2159,8 +2193,8 @@ void practice_tests_frame() {
       emu_log("RUNWAY_STATE_REPLAY_COMPLETE timestamp=%d", replay_timestamp);
       emu_log("TEST_COMPLETE");
       g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
-    } else if (g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_ONE_SECOND &&
-               replay_timestamp >= 60) {
+    } else if (g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_TO_SAVE &&
+               replay_timestamp >= (u32)replay_state_spacing_frames()) {
       g_RunwaySaveStatePausedFrames = 0;
       g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_SAVE;
     } else if ((g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_LOAD ||
@@ -2168,7 +2202,8 @@ void practice_tests_frame() {
                replay_timestamp != (u32)g_RunwaySaveStateLastTimestamp) {
       g_RunwaySaveStateLastTimestamp = replay_timestamp;
       if ((g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_LOAD &&
-           replay_timestamp >= (u32)g_RunwaySaveStateTarget + 60) ||
+           replay_timestamp >= (u32)g_RunwaySaveStateTarget +
+                                   replay_state_duration_frames()) ||
           (g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_SAVE &&
            replay_timestamp >= (u32)g_RunwaySaveStateSegmentEnd)) {
         g_RunwaySaveStatePausedFrames = 0;
