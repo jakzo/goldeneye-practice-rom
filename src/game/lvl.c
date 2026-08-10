@@ -43,6 +43,7 @@
 #include "practice/practice_replay.h"
 #include "practice/practice_lag.h"
 #include "practice/practice_render.h"
+#include "practice/practice_timescale.h"
 #include "bg.h"
 #include "objective.h"
 #include "mp_watch.h"
@@ -975,14 +976,10 @@ Gfx* lvlRender(Gfx* DL)
     else
     {
 #ifdef PRACTICE_ROM
-        /* A zero-tick frame reuses the previous framebuffer. The original
-         * renderers mutate model matrices and consume the rotating graphics
-         * arena, so rerunning them without gameplay advancing can corrupt
-         * both paused saves and freshly loaded state. The first live frame
-         * performs the normal complete rebuild and validates loaded render
-         * state below. */
-        if (speedgraphframes == 0)
-        {
+        /* Ordinary zero-tick frames retain the last complete framebuffer and
+         * its model matrices. Loading invalidates those buffers, so allow one
+         * dedicated render-only rebuild before freezing again. */
+        if (speedgraphframes == 0 && !practice_needs_refreshed_render()) {
             return DL;
         }
 #endif
@@ -994,10 +991,13 @@ Gfx* lvlRender(Gfx* DL)
         bool refresh_render_state =
             speedgraphframes == 0 && practice_needs_refreshed_render();
         if (speedgraphframes == 0) {
-            if (!refresh_render_state) {
+            if (!refresh_render_state &&
+                !practice_is_render_state_invalidated()) {
                 practice_restore_render_matrices();
             }
             practice_prepare_paused_render_state(&render_context);
+        } else {
+            practice_begin_live_render();
         }
 #endif
 
@@ -1062,7 +1062,7 @@ Gfx* lvlRender(Gfx* DL)
 #endif
             chraiUpdateOnscreenPropCount();
 #if PRACTICE_ROM
-            if (speedgraphframes != 0) {
+            if (!g_IsTimePaused) {
 #endif
             chrpropUpdateAutoaimTarget();
             chraiCheckUseHeldItems();

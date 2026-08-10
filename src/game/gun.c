@@ -22230,13 +22230,10 @@ void gunTickGameplay(s32 triggerOn)
     }
 
 #ifdef PRACTICE_ROM
-    // Don't fire weapon when time is paused or between frames when slowed
-    if (g_ClockTimer == 0)
-    {
-        g_CurrentPlayer->hands[0].weapon_firing_status = 0;
-        g_CurrentPlayer->hands[1].weapon_firing_status = 0;
-    }
-    else
+    /* A paused tick must not advance the firing state machine, but it must not
+     * clear its output either. Save states can be captured while a shot is
+     * active, and clearing the status makes a held trigger restart after load. */
+    if (!g_IsTimePaused)
 #endif
     {
         handle_weapon_id_values_possibly_1st_person_animation(0, sp48z.arr[0]);
@@ -22244,6 +22241,9 @@ void gunTickGameplay(s32 triggerOn)
     }
     used_to_load_1st_person_model_on_demand(0);
     used_to_load_1st_person_model_on_demand(1);
+#ifdef PRACTICE_ROM
+    if (!g_IsTimePaused)
+#endif
     sub_GAME_7F0671A4();
 
     if (g_CurrentPlayer->resetshadecol)

@@ -7,12 +7,11 @@
 #include "objecthandler.h"
 #include "practice_states_utils.h"
 #include "practice_ui.h"
-#include <bondconstants.h>
 #include <assert.h>
+#include <bondconstants.h>
 #include <snd.h>
 #include <string.h>
 
-extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern PathRecord *pathFindById(s32 ID);
 extern Vertex *sub_GAME_7F09BE4C(s32 vertexCount, s32 allocationType,
                                  void *allocationData, s32 arg3);
@@ -38,9 +37,9 @@ extern BloodVertexAllocation *dword_CODE_bss_8007A0E8;
   (CHRHIDDEN_FIRE_WEAPON_LEFT | CHRHIDDEN_FIRE_WEAPON_RIGHT |                  \
    CHRHIDDEN_FIRE_TRACER | CHRHIDDEN_MOVING | CHRHIDDEN_OFFSCREEN_PATROL)
 
-#define CHR_LIFECYCLE_HIDDEN_MASK                                             \
-  (CHRHIDDEN_DROP_HELD_ITEMS | CHRHIDDEN_ALERT_GUARD_RELATED |                \
-   CHRHIDDEN_REMOVE | CHRHIDDEN_BACKGROUND_AI | CHRHIDDEN_0400 |              \
+#define CHR_LIFECYCLE_HIDDEN_MASK                                              \
+  (CHRHIDDEN_DROP_HELD_ITEMS | CHRHIDDEN_ALERT_GUARD_RELATED |                 \
+   CHRHIDDEN_REMOVE | CHRHIDDEN_BACKGROUND_AI | CHRHIDDEN_0400 |               \
    CHRHIDDEN_FREEZE)
 
 #define CHR_FLINCH_HIDDEN_MASK CHRHIDDEN_RAND_FLINCH_MASK
@@ -50,6 +49,119 @@ extern BloodVertexAllocation *dword_CODE_bss_8007A0E8;
 #define MAX_MODEL_BLOOD_NODES 128
 #define MAX_MODEL_TRAVERSAL_DEPTH 64
 #define MAX_MODEL_TRAVERSAL_NODES 512
+#define CHR_COMMON_BUFFER_SIZE 512
+
+typedef struct ChrCommonStream {
+  StateStream base;
+  u8 bytes[CHR_COMMON_BUFFER_SIZE];
+  u32 size;
+} ChrCommonStream;
+
+static void chr_common_write(StateStream *stream, const void *src, u32 size) {
+  ChrCommonStream *common = (ChrCommonStream *)stream;
+  if (stream->total_processed + size > sizeof(common->bytes)) {
+    practiceLogError("CHR common state exceeds its temporary buffer");
+    assert(FALSE);
+    return;
+  }
+  memcpy(common->bytes + stream->total_processed, src, size);
+  stream->total_processed += size;
+  if (stream->total_processed > common->size) {
+    common->size = stream->total_processed;
+  }
+}
+
+static void chr_common_read(StateStream *stream, void *dst, u32 size) {
+  ChrCommonStream *common = (ChrCommonStream *)stream;
+  if (stream->total_processed + size > common->size) {
+    practiceLogError("CHR common state read exceeds its temporary buffer");
+    assert(FALSE);
+    return;
+  }
+  memcpy(dst, common->bytes + stream->total_processed, size);
+  stream->total_processed += size;
+}
+
+static void chr_common_seek(StateStream *stream, u32 absolute_offset) {
+  stream->total_processed = absolute_offset;
+}
+
+static void chr_common_flush(StateStream *stream) { (void)stream; }
+
+static void chr_common_stream_init(ChrCommonStream *stream, u32 size) {
+  stream->base.write_bytes = chr_common_write;
+  stream->base.read_bytes = chr_common_read;
+  stream->base.seek = chr_common_seek;
+  stream->base.flush = chr_common_flush;
+  stream->base.total_processed = 0;
+  stream->base.base_address = 0;
+  stream->size = size;
+}
+
+static void write_chr_common_rle(StateStream *stream, const u8 *src, u32 size) {
+  u32 offset = 0;
+
+  write_u16(stream, size);
+  while (offset < size) {
+    u32 zero_count = 0;
+    u32 literal_start;
+    u32 literal_count;
+
+    while (offset + zero_count < size && src[offset + zero_count] == 0 &&
+           zero_count < 128) {
+      zero_count++;
+    }
+    if (zero_count >= 2) {
+      write_u8(stream, 0x80 | (zero_count - 1));
+      offset += zero_count;
+      continue;
+    }
+    literal_start = offset;
+    literal_count = 0;
+    while (offset < size && literal_count < 128) {
+      zero_count = 0;
+      while (offset + zero_count < size && src[offset + zero_count] == 0 &&
+             zero_count < 2) {
+        zero_count++;
+      }
+      if (zero_count >= 2) {
+        break;
+      }
+      offset++;
+      literal_count++;
+    }
+    write_u8(stream, literal_count - 1);
+    write_bytes(stream, src + literal_start, literal_count);
+  }
+}
+
+static void read_chr_common_rle(StateStream *stream, ChrCommonStream *common) {
+  u32 size = read_u16(stream);
+  u32 offset = 0;
+
+  if (size > sizeof(common->bytes)) {
+    practiceLogError("Saved CHR common state is too large (%d)", size);
+    assert(FALSE);
+    size = sizeof(common->bytes);
+  }
+  chr_common_stream_init(common, size);
+  while (offset < size) {
+    u8 control = read_u8(stream);
+    u32 count = (control & 0x7f) + 1;
+
+    if (count > size - offset) {
+      practiceLogError("CHR common state RLE exceeds destination size");
+      assert(FALSE);
+      count = size - offset;
+    }
+    if (control & 0x80) {
+      bzero(common->bytes + offset, count);
+    } else {
+      read_bytes(stream, common->bytes + offset, count);
+    }
+    offset += count;
+  }
+}
 
 static f32 normalize_chr_heading(f32 heading) {
   union {
@@ -238,7 +350,8 @@ static s16 get_waypoint_index(const waypoint *point) {
 
   /* waypointFindRoute writes a NULL terminator but leaves later route-array
    * slots untouched. Some ACT_GOPOS records therefore contain stack junk in
-   * unused slots; only exact pointers into the live waypoint table are valid. */
+   * unused slots; only exact pointers into the live waypoint table are valid.
+   */
   for (index = 0; g_CurrentSetup.pathwaypoints[index].padID >= 0; index++) {
     if (point == &g_CurrentSetup.pathwaypoints[index]) {
       return index;
@@ -306,6 +419,8 @@ static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
     write_u32(stream, chr->act_stand.turning);
     write_u32(stream, chr->act_stand.checkfacingwall);
     write_u32(stream, chr->act_stand.wallcount);
+    write_f32(stream, chr->act_stand.mergetime);
+    write_u8(stream, chr->act_stand.face_target);
     break;
   case ACT_ANIM:
     write_u8(stream, chr->act_anim.unk02c != 0);
@@ -452,10 +567,17 @@ static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
     // state, and (where applicable) restored equipment attachments.
     break;
   }
+
+  /* The final four bytes of the action union survive action transitions. In
+   * particular, ACT_STAND retains the weapon ID here and ACT_ATTACK consumes
+   * it later without reinitializing it. Preserve the compact shared tail for
+   * every action rather than saving the whole inactive union. */
+  write_bytes(stream, &chr->act_attack.attack_item, 4);
 }
 
 static void load_supported_action(StateStream *stream, ChrRecord *chr) {
   ACT_TYPE actiontype = (ACT_TYPE)read_u8(stream);
+  u8 action_tail[4];
   s32 i;
 
   if (chr != NULL) {
@@ -464,14 +586,15 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
 
   switch (actiontype) {
   case ACT_STAND: {
-    s32 prestand = read_u32(stream);
-    s32 face_entitytype = read_u32(stream);
-    s32 face_entityid = read_u32(stream);
-    s32 reaim = read_u32(stream);
-    s32 turning = read_u32(stream);
+    u32 prestand = read_u32(stream);
+    u32 face_entitytype = read_u32(stream);
+    u32 face_entityid = read_u32(stream);
+    u32 reaim = read_u32(stream);
+    u32 turning = read_u32(stream);
     u32 checkfacingwall = read_u32(stream);
-    s32 wallcount = read_u32(stream);
-
+    u32 wallcount = read_u32(stream);
+    f32 mergetime = read_f32(stream);
+    s8 face_target = read_u8(stream);
     if (chr != NULL) {
       chr->act_stand.prestand = prestand;
       chr->act_stand.face_entitytype = face_entitytype;
@@ -480,6 +603,8 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
       chr->act_stand.turning = turning;
       chr->act_stand.checkfacingwall = checkfacingwall;
       chr->act_stand.wallcount = wallcount;
+      chr->act_stand.mergetime = mergetime;
+      chr->act_stand.face_target = face_target;
     }
     break;
   }
@@ -815,6 +940,14 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
   default:
     break;
   }
+
+  read_bytes(stream, action_tail, sizeof(action_tail));
+  if (chr != NULL) {
+    chr->act_attack.attack_item = (s8)action_tail[0];
+    chr->act_attack.unk81 = action_tail[1];
+    chr->act_attack.unk82 = action_tail[2];
+    chr->act_attack.unk83 = action_tail[3];
+  }
 }
 
 bool practice_states_save_chr_action(StateStream *stream,
@@ -939,8 +1072,7 @@ static void read_animation_zero_rle(StateStream *stream, u8 *dst, u32 size) {
   }
 }
 
-static bool model_rw_scalar_value(Model *model, ModelNode *node,
-                                  u32 **value) {
+static bool model_rw_scalar_value(Model *model, ModelNode *node, u32 **value) {
   union ModelRwData *rwdata = modelGetNodeRwData(model, node);
 
   switch (node->Opcode & 0xff) {
@@ -1010,8 +1142,8 @@ static void save_model_rw_scalars(StateStream *stream, Model *model,
 }
 
 static void load_model_rw_scalars(StateStream *stream, Model *model,
-                                  ModelNode *node, s32 depth,
-                                  s32 saved_count, s32 *loaded_count) {
+                                  ModelNode *node, s32 depth, s32 saved_count,
+                                  s32 *loaded_count) {
   if (node == NULL || depth >= 64 || *loaded_count >= saved_count) {
     return;
   }
@@ -1022,8 +1154,8 @@ static void load_model_rw_scalars(StateStream *stream, Model *model,
       (*loaded_count)++;
     }
     if ((node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
-      load_model_rw_scalars(stream, model, node->Child, depth + 1,
-                            saved_count, loaded_count);
+      load_model_rw_scalars(stream, model, node->Child, depth + 1, saved_count,
+                            loaded_count);
     }
     node = node->Next;
   }
@@ -1188,7 +1320,6 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
                                                        model->obj->RootNode);
     *dst = root_data;
   }
-
 }
 
 typedef struct ModelBloodNode {
@@ -1466,18 +1597,18 @@ static void load_model_blood_patches(StateStream *stream, Model *model) {
 }
 
 static void clear_chr_transient_sounds(ChrRecord *chr) {
-  ALSoundState *sound3 = (ALSoundState *)chr->ptr_SEbuffer3;
-  ALSoundState *sound4 = (ALSoundState *)chr->ptr_SEbuffer4;
+  ALSoundState **sounds = (ALSoundState **)&chr->weapons_held[2];
+  s32 i;
 
-  if (sound3 != NULL && sndGetPlayingState(sound3) != 0) {
-    sndDeactivate(sound3);
+  /* Assembly in sub_GAME_7F02BFE4 indexes four ALSoundState pointers from
+   * offset 0x168 as two slots per hand. The current ChrRecord declaration
+   * misnames the first two words as weapons_held[2] and fireslot_word. */
+  for (i = 0; i < 4; i++) {
+    if (sounds[i] != NULL && sndGetPlayingState(sounds[i]) != 0) {
+      sndDeactivate(sounds[i]);
+    }
+    sounds[i] = NULL;
   }
-  if (sound4 != NULL && sndGetPlayingState(sound4) != 0) {
-    sndDeactivate(sound4);
-  }
-
-  chr->ptr_SEbuffer3 = NULL;
-  chr->ptr_SEbuffer4 = NULL;
 }
 
 static void clear_chr_transient_joint_list(ChrRecord *chr) {
@@ -1488,7 +1619,9 @@ static void clear_chr_transient_joint_list(ChrRecord *chr) {
 }
 
 void save_chr_record(StateStream *stream, const ChrRecord *chr) {
-  s32 ailist_id = -1;
+  StateStream *storage_stream = stream;
+  ChrCommonStream common_stream;
+  s32 ailist_reference;
 
   bool supported_action = is_supported_chr_action(chr);
   bool has_model_transform =
@@ -1505,6 +1638,9 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_u8(stream, (u8)chr->headnum);
   write_u8(stream, (u8)chr->bodynum);
   write_f32(stream, model_heading);
+
+  chr_common_stream_init(&common_stream, 0);
+  stream = &common_stream.base;
 
   write_u8(stream, (u8)chr->accuracyrating);
   write_u8(stream, (u8)chr->speedrating);
@@ -1556,7 +1692,8 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_f32(stream, chr->aimendrshoulder);
   write_f32(stream, chr->aimendback);
   write_f32(stream, chr->aimendsideback);
-  write_u32(stream, chr->fireslot_word);
+  /* Offset 0x16c is a transient sound pointer, not persistent firing state. */
+  write_u32(stream, 0);
   write_u32(stream, chr->field_178[0]);
   write_u32(stream, chr->field_178[1]);
   write_bytes(stream, chr->unk180, sizeof(chr->unk180));
@@ -1564,11 +1701,8 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_bytes(stream, &chr->shadecol, sizeof(rgba_u8));
   write_bytes(stream, &chr->nextcol, sizeof(rgba_u8));
 
-  if (chr->ailist != NULL) {
-    bool is_global_ailist;
-    ailist_id = chraiGetAIListID(chr->ailist, &is_global_ailist);
-  }
-  write_u32(stream, ailist_id);
+  ailist_reference = get_ai_list_reference(chr->ailist);
+  write_u32(stream, ailist_reference);
   write_u16(stream, chr->aioffset);
   write_u16(stream, (u16)chr->aireturnlist);
   write_u8(stream, (u8)chr->sleep);
@@ -1581,7 +1715,6 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_bytes(stream, &chr->prevpos, sizeof(coord3d));
   write_u32(stream, chr->lastwalk60);
   write_u32(stream, chr->lastmoveok60);
-  write_bytes(stream, &chr->collision_bounds, sizeof(rect4f));
 
   write_u8(stream, has_model_transform);
   if (has_model_transform) {
@@ -1591,6 +1724,10 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
     write_bytes(stream, &model_offset, sizeof(coord3d));
     write_f32(stream, model_heading);
   }
+
+  stream = storage_stream;
+  write_chr_common_rle(stream, common_stream.bytes,
+                       common_stream.base.total_processed);
 
   write_u8(stream, supported_action);
   if (supported_action) {
@@ -1605,7 +1742,10 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
 
   write_u16(stream, get_prop_index(chr->weapons_held[0]));
   write_u16(stream, get_prop_index(chr->weapons_held[1]));
-  write_u16(stream, get_prop_index(chr->weapons_held[2]));
+  /* The third legacy slot has no readers in GoldenEye and can retain a stale
+   * pointer while equipment is being rebuilt. Keep the on-disk slot for
+   * format compatibility, but normalize this derived/unused state. */
+  write_u16(stream, (u16)-1);
   write_u16(stream, get_prop_index(chr->handle_positiondata_hat));
 
   {
@@ -1647,7 +1787,9 @@ void load_chr_allocation_state(StateStream *stream,
 
 void load_chr_record(StateStream *stream, ChrRecord *chr,
                      ChrAttachmentIndices *attachments) {
-  s32 ailist_id;
+  StateStream *storage_stream = stream;
+  ChrCommonStream common_stream;
+  s32 ailist_reference;
   bool has_model_transform;
   coord3d model_offset;
   f32 model_heading;
@@ -1656,6 +1798,9 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   s32 hand;
 
   clear_chr_transient_joint_list(chr);
+
+  read_chr_common_rle(stream, &common_stream);
+  stream = &common_stream.base;
 
   chr->accuracyrating = (s8)read_u8(stream);
   chr->speedrating = (s8)read_u8(stream);
@@ -1715,18 +1860,19 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   chr->aimendrshoulder = read_f32(stream);
   chr->aimendback = read_f32(stream);
   chr->aimendsideback = read_f32(stream);
-  chr->fireslot_word = read_u32(stream);
+  clear_chr_transient_sounds(chr);
+  read_u32(stream);
+  chr->fireslot_word = 0;
   chr->field_178[0] = read_u32(stream);
   chr->field_178[1] = read_u32(stream);
   read_bytes(stream, chr->unk180, sizeof(chr->unk180));
   chr->hidden = (chr->hidden & ~CHR_COMBAT_HIDDEN_MASK) |
                 ((u16)read_u16(stream) & CHR_COMBAT_HIDDEN_MASK);
-  clear_chr_transient_sounds(chr);
   read_bytes(stream, &chr->shadecol, sizeof(rgba_u8));
   read_bytes(stream, &chr->nextcol, sizeof(rgba_u8));
 
-  ailist_id = read_u32(stream);
-  chr->ailist = ailist_id != -1 ? ailistFindById(ailist_id) : NULL;
+  ailist_reference = read_u32(stream);
+  chr->ailist = get_ai_list_by_reference(ailist_reference);
   chr->aioffset = read_u16(stream);
   chr->aireturnlist = (s16)read_u16(stream);
   chr->sleep = (s8)read_u8(stream);
@@ -1744,7 +1890,18 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   read_bytes(stream, &chr->prevpos, sizeof(coord3d));
   chr->lastwalk60 = read_u32(stream);
   chr->lastmoveok60 = read_u32(stream);
-  read_bytes(stream, &chr->collision_bounds, sizeof(rect4f));
+  if (chr->prop != NULL) {
+    chr->collision_bounds.f[0] = chr->prop->pos.x + chr->chrwidth;
+    chr->collision_bounds.f[1] = chr->prop->pos.z;
+    chr->collision_bounds.f[2] = chr->prop->pos.x;
+    chr->collision_bounds.f[3] = chr->prop->pos.z + chr->chrwidth;
+    chr->collision_bounds.f[4] = chr->prop->pos.x - chr->chrwidth;
+    chr->collision_bounds.f[5] = chr->prop->pos.z;
+    chr->collision_bounds.f[6] = chr->prop->pos.x;
+    chr->collision_bounds.f[7] = chr->prop->pos.z - chr->chrwidth;
+  } else {
+    bzero(&chr->collision_bounds, sizeof(chr->collision_bounds));
+  }
 
   has_model_transform = read_u8(stream);
   if (has_model_transform) {
@@ -1757,6 +1914,13 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
       setsubroty(chr->model, model_heading);
     }
   }
+
+  if (stream->total_processed != common_stream.size) {
+    practiceLogError("Saved CHR common state has %d unread bytes",
+                     common_stream.size - stream->total_processed);
+    assert(FALSE);
+  }
+  stream = storage_stream;
 
   if (read_u8(stream)) {
     load_supported_action(stream, chr);

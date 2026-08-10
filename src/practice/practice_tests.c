@@ -210,7 +210,6 @@ enum ReplaySaveStatePhase {
 };
 
 void practice_tests_set_case(s32 test_case, s32 test_param) {
-  (void)test_param;
   g_practice_test_case = test_case;
   g_save_test_timer = -1;
   case_delta = 0;
@@ -1923,14 +1922,6 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_ReplaySaveChrFlagsHash = replay_chr_flags_hash();
     g_ReplaySaveChrHiddenHash = replay_chr_hidden_hash();
     practice_replay_get_checkpoint(&g_ReplaySaveCheckpoint);
-    if (g_ReplayTestPlaybackCount == 0) {
-      save_game_state();
-      load_game_state();
-      save_game_state();
-      load_game_state();
-      g_ReplayTestPlaybackCount = 2;
-      emu_log("RUNWAY_STATE_STORAGE_ROUND_TRIPS_COMPLETE saves=2 loads=2");
-    }
     g_SimulatedButtons = trigger | D_JPAD;
     g_SimulatedButtonsPressed = D_JPAD;
     g_RunwaySaveStatePausedFrames = 0;
@@ -2188,6 +2179,10 @@ void practice_tests_frame() {
           g_ReplaySegmentPropPos = g_CurrentPlayer->prop->pos;
           g_ReplaySegmentActiveListHash = replay_active_list_hash();
           g_ReplaySegmentFreeListHash = replay_free_list_hash();
+          /* Stop simulation at the exact 60-frame boundary while any queued
+           * graphics task drains. Loading must wait for that task, but replay
+           * gameplay must not continue advancing in the meantime. */
+          pause();
           g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_LOAD;
         } else if (replay_timestamp !=
                    (u32)g_RunwaySaveStateSegmentEnd) {

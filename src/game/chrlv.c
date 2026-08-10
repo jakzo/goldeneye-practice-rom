@@ -7029,18 +7029,7 @@ s32 sub_GAME_7F02D630(ChrRecord *self, GUNHAND hand, coord3d *arg2)
         {
             if (weapon_prop_model->obj->Switches[0])
             {
-#ifdef PRACTICE_ROM
-                if (practice_is_render_state_invalidated())
-                {
-                    temp_a0 = &obj->mtx;
-                }
-                else
-                {
-                    temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[0], 0);
-                }
-#else
                 temp_a0 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[0], 0);
-#endif
                 spB8 = weapon_prop_model->obj->Switches[0]->Data;
 
                 arg2->f[0] = spB8[0];
@@ -7054,18 +7043,7 @@ s32 sub_GAME_7F02D630(ChrRecord *self, GUNHAND hand, coord3d *arg2)
             }
             else if (weapon_prop_model->obj->Switches[1])
             {
-#ifdef PRACTICE_ROM
-                if (practice_is_render_state_invalidated())
-                {
-                    temp_a0_2 = &obj->mtx;
-                }
-                else
-                {
-                    temp_a0_2 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[1], 0);
-                }
-#else
                 temp_a0_2 = modelFindNodeMtx(weapon_prop_model, weapon_prop_model->obj->Switches[1], 0);
-#endif
                 matrix_4x4_multiply_homogeneous(currentPlayerGetMatrix10D4(), temp_a0_2, &sp68);
 
                 arg2->f[0] = sp68.m[3][0];

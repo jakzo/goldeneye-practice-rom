@@ -37,6 +37,12 @@ void set_time_scale(f32 scale) {
 void pause() {
   if (!g_IsTimePaused) {
     g_ForcedDeltaFrames = speedgraphframes;
+    /* The pause hotkey is handled after the frame counter update. A paused
+     * render can therefore run before restore_rng_if_frame_dropped gets a
+     * chance to establish this frame's baseline. Snapshot it here so render
+     * cleanup never restores the RNG state from an older paused frame. */
+    g_FrozenFrameRngSeed = g_randomSeed;
+    g_FrozenFrameChrObjRngSeed = g_chrObjRandomSeed;
     practice_sfx_pause();
   }
   g_IsTimePaused = TRUE;

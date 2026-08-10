@@ -40,8 +40,6 @@ extern Vertex *sub_GAME_7F09BE4C(s32 vertexCount, s32 allocationType,
                                  ModelFileHeader *header, s32 destroyedLevel);
 extern void sub_GAME_7F09C044(Vertex *vertices);
 extern PathRecord *pathFindById(s32 ID);
-extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
-extern AIRecord *ailistFindById(s32 ID);
 extern void projectileFree(Projectile *projectile);
 extern void embedmentFree(Embedment *embedment);
 extern void projectileReset(Projectile *projectile);
@@ -49,6 +47,7 @@ extern void chrpropDelist(PropRecord *prop);
 extern void chrpropDetach(PropRecord *prop);
 extern void redarken_lights_in_room(s32 room_index);
 extern void sub_GAME_7F0B6368(s32 room);
+extern void delete_room_data(s32 room);
 extern s32 chrGetNumFree(void);
 extern void clear_aircraft_model_obj(Model *model);
 extern PropRecord *hatCreateForChr(ChrRecord *chr, s32 modelnum, u32 flags);
@@ -56,7 +55,6 @@ extern PropRecord *objInit(ObjectRecord *obj, ModelFileHeader *model_header,
                            PropRecord *prop, Model *model);
 extern WeaponObjRecord *weaponCreate(bool musthaveprop, bool musthavemodel,
                                      ModelFileHeader *modeldef);
-extern s32 setupGetCommandIndexByProp(PropRecord *prop);
 extern WeaponObjRecord blank_08_object_preset_1;
 extern bondstruct_unk_8007A170 dword_CODE_bss_8007A170[20];
 extern struct sImageTableEntry *explosion_smokeimages;
@@ -81,8 +79,7 @@ extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 
 static ModelNode *get_model_node_by_index(ModelFileHeader *header,
                                           s16 targetIndex);
-static void write_effect_zero_rle(StateStream *stream, const u8 *src,
-                                  u32 size);
+static void write_effect_zero_rle(StateStream *stream, const u8 *src, u32 size);
 static void read_effect_zero_rle(StateStream *stream, u8 *dst, u32 size);
 
 static bool is_rdram_range(const void *ptr, u32 size) {
@@ -94,16 +91,15 @@ static bool is_rdram_range(const void *ptr, u32 size) {
 }
 
 static u8 get_deformation_colour_mode(Vertex *saved, Vertex *base) {
-  if (saved->r == base->r && saved->g == base->g &&
-      saved->b == base->b && saved->a == base->a) {
+  if (saved->r == base->r && saved->g == base->g && saved->b == base->b &&
+      saved->a == base->a) {
     return 0;
   }
-  if (saved->r == 0 && saved->g == 0 && saved->b == 0 &&
-      saved->a == 0xff) {
+  if (saved->r == 0 && saved->g == 0 && saved->b == 0 && saved->a == 0xff) {
     return 1;
   }
-  if (saved->r == base->r && saved->g == base->g &&
-      saved->b == base->b && saved->a == 0) {
+  if (saved->r == base->r && saved->g == base->g && saved->b == base->b &&
+      saved->a == 0) {
     return 2;
   }
   if (saved->r == 0 && saved->g == 0 && saved->b == 0 && saved->a == 0) {
@@ -234,9 +230,8 @@ static void save_object_model_animation(StateStream *stream,
 
   write_u8(stream, has_root_data);
   if (has_root_data) {
-    root_data =
-        (ModelRwData_HeaderRecord *)modelGetNodeRwData((Model *)model,
-                                                       model->obj->RootNode);
+    root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
+        (Model *)model, model->obj->RootNode);
     write_bytes(stream, root_data, sizeof(ModelRwData_HeaderRecord));
   }
 }
@@ -427,8 +422,11 @@ typedef struct ObjAllocationState {
   u16 modelnum;      /* ObjectRecord::obj model id, or 0xffff when absent. */
   u8 objtype;        /* PROPDEF_* object subtype. */
   s16 setupCmdIndex; /* Setup-command index owning this object, or -1 when the
-                      * object was created dynamically (dropped/thrown). */
+                      * object was created dynamically (dropped/thrown). -2
+                      * identifies a player-buffer weapon object. */
 } ObjAllocationState;
+
+#define OBJ_ALLOC_PLAYER_BUFFER -2
 
 typedef union {
   ObjectRecord base;
@@ -534,6 +532,19 @@ static void clear_plain_prop(PropRecord *prop, bool release_prop) {
   }
 }
 
+static void clear_stale_player_presence_prop(PropRecord *prop) {
+  s32 player_count = getPlayerCount();
+  s32 i;
+
+  for (i = 0; i < player_count; i++) {
+    if (g_playerPointers[i] != NULL && g_playerPointers[i]->prop == prop) {
+      g_playerPointers[i]->prop = NULL;
+    }
+  }
+
+  clear_plain_prop(prop, TRUE);
+}
+
 static void release_explosion_prop(PropRecord *prop) {
   if (prop->explosion != NULL) {
     // Natural expiry leaves every part inactive before releasing the buffer
@@ -624,8 +635,7 @@ static PropRecord *create_chr_prop(PropRecord *prop,
   PropRecord *result;
   ChrRecord *target_chr;
 
-  if (prop == NULL || allocation->bodynum < 0 ||
-      allocation->slot_index < 0 ||
+  if (prop == NULL || allocation->bodynum < 0 || allocation->slot_index < 0 ||
       allocation->slot_index >= g_NumChrSlots) {
     return NULL;
   }
@@ -1234,8 +1244,8 @@ static bool prop_is_saved_child_object(PropRecord *prop) {
  * with many crate contents still fit in the save-state SRAM partition.
  */
 static bool prop_uses_compact_contained_object_state(PropRecord *prop) {
-  return prop_is_saved_child_object(prop) && prop->parent->type != PROP_TYPE_CHR &&
-         prop->obj->projectile == NULL &&
+  return prop_is_saved_child_object(prop) &&
+         prop->parent->type != PROP_TYPE_CHR && prop->obj->projectile == NULL &&
          !(prop->obj->runtime_bitflags &
            (RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED)) &&
          objGetDestroyedLevel(prop->obj) == 0;
@@ -1319,10 +1329,11 @@ static void restore_chr_attachments(PropRecord *chr_prop,
   }
 
   chrIndex = get_prop_index(chr_prop);
-  for (i = 0; i < 3; i++) {
+  for (i = 0; i < 2; i++) {
     savedChild[i] = saved_links_name_chr_child(
         savedLinks, recordCount, indices->weapons_held[i], chrIndex);
   }
+  savedChild[2] = FALSE;
   savedChild[3] = saved_links_name_chr_child(savedLinks, recordCount,
                                              indices->hat, chrIndex);
 
@@ -1334,10 +1345,9 @@ static void restore_chr_attachments(PropRecord *chr_prop,
                  ? get_chr_attachment_prop(indices->weapons_held[GUNLEFT],
                                            PROPDEF_COLLECTABLE)
                  : NULL;
-  saved[2] = savedChild[2] ? get_prop_by_index(indices->weapons_held[2]) : NULL;
-  saved[3] = savedChild[3]
-                 ? get_chr_attachment_prop(indices->hat, PROPDEF_HAT)
-                 : NULL;
+  saved[2] = NULL;
+  saved[3] =
+      savedChild[3] ? get_chr_attachment_prop(indices->hat, PROPDEF_HAT) : NULL;
 
   // Restore held equipment that no longer has a live standalone prop to
   // reattach (e.g. the character was killed and dropped it). Prefer rebinding
@@ -1382,7 +1392,8 @@ static void restore_chr_attachments(PropRecord *chr_prop,
 
   old[0] = chr->weapons_held[0];
   old[1] = chr->weapons_held[1];
-  old[2] = chr->weapons_held[2];
+  /* ChrRecord offset 0x168 is a transient sound pointer, not an attachment. */
+  old[2] = NULL;
   old[3] = chr->handle_positiondata_hat;
 
   for (i = 0; i < 4; i++) {
@@ -1412,12 +1423,6 @@ static void restore_chr_attachments(PropRecord *chr_prop,
 
   chr->weapons_held[GUNRIGHT] = saved[GUNRIGHT];
   chr->weapons_held[GUNLEFT] = saved[GUNLEFT];
-  // The third legacy slot has no readers or attachment-node semantics in the
-  // current decompilation. Preserve it only when it already names this CHR's
-  // child; normal runtime state leaves it NULL.
-  if (saved[2] != NULL && saved[2]->parent == chr_prop) {
-    chr->weapons_held[2] = saved[2];
-  }
   chr->handle_positiondata_hat = saved[3];
 
   // Restore the muzzle flash (GUNFIRE node) visibility last: weapon creation
@@ -1468,7 +1473,10 @@ static void restore_concealed_chr_item(PropRecord *prop, PropRecord *chr_prop) {
 }
 
 static void restore_player_child_object(PropRecord *prop,
-                                        PropRecord *player_prop) {
+                                        PropRecord *player_prop,
+                                        s16 attachment_node_index) {
+  ModelNode *attachment_node = NULL;
+
   if (prop == NULL || player_prop == NULL ||
       (player_prop->type != PROP_TYPE_PLAYER &&
        player_prop->type != PROP_TYPE_VIEWER) ||
@@ -1490,6 +1498,26 @@ static void restore_player_child_object(PropRecord *prop,
   prop->obj->runtime_bitflags &=
       ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
   prop->obj->projectile = NULL;
+
+  if (prop->obj->model != NULL && player_prop->chr != NULL &&
+      player_prop->chr->model != NULL && attachment_node_index >= 0) {
+    attachment_node = get_model_node_by_index(player_prop->chr->model->obj,
+                                              attachment_node_index);
+  }
+  if (prop->obj->model != NULL && attachment_node_index >= 0) {
+    prop->obj->model->attachedto =
+        player_prop->chr != NULL ? player_prop->chr->model : NULL;
+    prop->obj->model->attachedto_objinst = attachment_node;
+  } else if (prop->obj->model != NULL && player_prop->chr != NULL &&
+             player_prop->chr->model != NULL &&
+             (prop->obj->model->attachedto != player_prop->chr->model ||
+              prop->obj->model->attachedto_objinst == NULL) &&
+             prop->obj->type == PROPDEF_COLLECTABLE) {
+    s32 switchIndex = (prop->obj->flags & PROPFLAG_WEAPON_LEFTHANDED) ? 5 : 3;
+    prop->obj->model->attachedto = player_prop->chr->model;
+    prop->obj->model->attachedto_objinst =
+        player_prop->chr->model->obj->Switches[switchIndex];
+  }
 }
 
 static bool restore_contained_object(PropRecord *prop, PropRecord *parent) {
@@ -1498,15 +1526,14 @@ static bool restore_contained_object(PropRecord *prop, PropRecord *parent) {
       (parent->type != PROP_TYPE_OBJ && parent->type != PROP_TYPE_DOOR &&
        parent->type != PROP_TYPE_WEAPON) ||
       prop->obj == NULL || parent->obj == NULL) {
-    practiceLogError(
-        "Contained prop has invalid restored parent relationship "
-        "(prop=%d type=%d obj=%x parent=%d type=%d obj=%x)",
-        prop != NULL ? get_prop_index(prop) : -1,
-        prop != NULL ? prop->type : -1,
-        prop != NULL ? prop->obj : NULL,
-        parent != NULL ? get_prop_index(parent) : -1,
-        parent != NULL ? parent->type : -1,
-        parent != NULL ? parent->obj : NULL);
+    practiceLogError("Contained prop has invalid restored parent relationship "
+                     "(prop=%d type=%d obj=%x parent=%d type=%d obj=%x)",
+                     prop != NULL ? get_prop_index(prop) : -1,
+                     prop != NULL ? prop->type : -1,
+                     prop != NULL ? prop->obj : NULL,
+                     parent != NULL ? get_prop_index(parent) : -1,
+                     parent != NULL ? parent->type : -1,
+                     parent != NULL ? parent->obj : NULL);
     assert(FALSE);
     return FALSE;
   }
@@ -1582,11 +1609,12 @@ static void removePropAtIndex(s16 index) {
     return;
   }
 
-  // Player/viewer presence props are owned by the bond/viewer-player loaders,
-  // not the generic prop add/remove path. They are always saved records (so a
-  // genuine gap never contains one); never free one here even if a divergent
-  // state leaves one in an unexpected slot.
+  // A cutscene transition after saving can replace the player's viewer prop.
+  // If that future prop slot is absent from the saved active list, discard it
+  // before the saved player payload selects its original viewer prop. Keeping
+  // it active prepends an extra viewer to the restored prop list.
   if (toClear->type == PROP_TYPE_VIEWER || toClear->type == PROP_TYPE_PLAYER) {
+    clear_stale_player_presence_prop(toClear);
     return;
   }
 
@@ -1790,9 +1818,67 @@ static void load_embedment(StateStream *stream, Embedment *emb) {
   }
 }
 
+/* The polygon, edge count and Y bounds are rebuilt from the restored object
+ * transform. The remaining words are cached collision coefficients used by
+ * the hit tests; rebuilding them is not bit-identical after a state load. */
+static void save_object_collision_coefficients(StateStream *stream,
+                                               ObjectRecord *obj) {
+  struct collision_data *collision =
+      obj != NULL ? obj->ptr_allocated_collisiondata_block : NULL;
+
+  write_u8(stream, collision != NULL);
+  if (collision != NULL) {
+    write_bytes(stream, &collision->unk24, 0x20);
+  }
+}
+
+static void load_object_collision_coefficients(StateStream *stream,
+                                               ObjectRecord *obj) {
+  u8 has_collision = read_u8(stream);
+  u8 coefficients[0x20];
+
+  if (!has_collision) {
+    return;
+  }
+  read_bytes(stream, coefficients, sizeof(coefficients));
+  if (obj != NULL && obj->ptr_allocated_collisiondata_block != NULL) {
+    bcopy(coefficients, &obj->ptr_allocated_collisiondata_block->unk24,
+          sizeof(coefficients));
+  }
+}
+
 static void save_obj_allocation_state(StateStream *stream, PropRecord *prop) {
   ObjectRecord *obj = prop->obj;
-  s16 setup_index = obj != NULL ? setupGetCommandIndexByProp(prop) : -1;
+  s16 setup_index = -1;
+  s32 hand;
+
+  if (obj != NULL && prop->parent != NULL &&
+      (prop->parent->type == PROP_TYPE_PLAYER ||
+       prop->parent->type == PROP_TYPE_VIEWER) &&
+      g_CurrentPlayer != NULL) {
+    for (hand = 0; hand < 2; hand++) {
+      u32 bufferStart = (u32)g_CurrentPlayer->ptr_hand_weapon_buffer[hand];
+      u32 bufferEnd = bufferStart + getSizeBufferWeaponInHand(hand);
+      u32 objectStart = (u32)obj;
+
+      if (bufferStart != 0 && objectStart >= bufferStart &&
+          objectStart + sizeof(WeaponObjRecord) <= bufferEnd) {
+        setup_index = OBJ_ALLOC_PLAYER_BUFFER;
+        break;
+      }
+    }
+  }
+  if (obj != NULL && setup_index != OBJ_ALLOC_PLAYER_BUFFER) {
+    setup_index = tagGetCommandIndex(obj);
+  }
+
+  /* Identify setup ownership by the ObjectRecord itself. Looking it up by
+   * prop is ambiguous because collected setup objects can retain a stale prop
+   * pointer after that slot has been reused by another object. */
+  if (setup_index >= 0 &&
+      setupCommandGetObject(lvlGetCurrentStageToLoad(), setup_index) != obj) {
+    setup_index = -1;
+  }
 
   write_u16(stream, obj != NULL ? (u16)obj->obj : (u16)0xffff);
   write_u8(stream, obj != NULL ? (u8)obj->type : (u8)0);
@@ -1972,11 +2058,10 @@ static void save_affine_matrix(StateStream *stream, const Mtxf *matrix,
   s32 row;
 
   if (is_affine && matrix->m[3][0] == position->f[0] &&
-      matrix->m[3][1] == position->f[1] &&
-      matrix->m[3][2] == position->f[2]) {
+      matrix->m[3][1] == position->f[1] && matrix->m[3][2] == position->f[2]) {
     mode = 2;
-  } else if (is_affine && matrix->m[3][0] == 0.0f &&
-             matrix->m[3][1] == 0.0f && matrix->m[3][2] == 0.0f) {
+  } else if (is_affine && matrix->m[3][0] == 0.0f && matrix->m[3][1] == 0.0f &&
+             matrix->m[3][2] == 0.0f) {
     mode = 3;
   }
   write_u8(stream, mode);
@@ -2052,20 +2137,21 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
   }
   write_u16(stream, embIdx);
 
-  if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED) {
+  if (obj->prop != NULL && obj->prop->parent != NULL && obj->model != NULL &&
+      obj->model->attachedto != NULL &&
+      obj->model->attachedto_objinst != NULL) {
+    attachmentNodeIdx = get_model_node_index(obj->model->attachedto->obj,
+                                             obj->model->attachedto_objinst);
+    if (attachmentNodeIdx < 0) {
+      practiceLogError("Prop attachment node is not in parent model");
+      assert(FALSE);
+    }
+  } else if (obj->runtime_bitflags & RUNTIMEBITFLAG_EMBEDDED) {
     if (obj->prop == NULL || obj->prop->parent == NULL || obj->model == NULL ||
         obj->model->attachedto == NULL ||
         obj->model->attachedto_objinst == NULL) {
       practiceLogError("Embedded prop has incomplete attachment pointers");
       assert(FALSE);
-    } else {
-      attachmentNodeIdx = get_model_node_index(obj->model->attachedto->obj,
-                                               obj->model->attachedto_objinst);
-      if (attachmentNodeIdx < 0) {
-        practiceLogError(
-            "Embedded prop attachment node is not in parent model");
-        assert(FALSE);
-      }
     }
   }
   write_u16(stream, attachmentNodeIdx);
@@ -2197,8 +2283,7 @@ static void save_compact_contained_object_base(StateStream *stream,
     }
     for (i = 0; i < numSwitches; i++) {
       ModelNode *node = obj->model->obj->Switches[i];
-      if (node != NULL &&
-          (node->Opcode & 0xff) == MODELNODE_OPCODE_SWITCH) {
+      if (node != NULL && (node->Opcode & 0xff) == MODELNODE_OPCODE_SWITCH) {
         union ModelRwData *rwdata = modelGetNodeRwData(obj->model, node);
         if (rwdata != NULL && rwdata->Switch.visible) {
           switchStates |= 1 << i;
@@ -2223,8 +2308,8 @@ static void load_compact_contained_object_base(StateStream *stream,
   obj->pad = read_u16(stream);
   obj->flags = read_u32(stream);
   obj->flags2 = read_u32(stream);
-  obj->runtime_bitflags = read_u32(stream) &
-                          ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
+  obj->runtime_bitflags =
+      read_u32(stream) & ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
   obj->maxdamage = read_f32(stream);
   obj->damage = read_f32(stream);
   *(u32 *)&obj->shadecol = read_u32(stream);
@@ -2239,8 +2324,7 @@ static void load_compact_contained_object_base(StateStream *stream,
     }
     for (i = 0; i < numSwitches; i++) {
       ModelNode *node = obj->model->obj->Switches[i];
-      if (node != NULL &&
-          (node->Opcode & 0xff) == MODELNODE_OPCODE_SWITCH) {
+      if (node != NULL && (node->Opcode & 0xff) == MODELNODE_OPCODE_SWITCH) {
         union ModelRwData *rwdata = modelGetNodeRwData(obj->model, node);
         if (rwdata != NULL) {
           rwdata->Switch.visible = (switchStates & (1 << i)) != 0;
@@ -2666,88 +2750,123 @@ static void load_decals_state(StateStream *stream) {
 
 // Airborne explosion debris is visual, but its age and vertical position
 // determine which live entries consume RNG while expiring. Preserve those
-// gameplay-relevant values, the ring slots, and linear motion; rebuild a small
-// generic quad instead of spending scarce SRAM on per-particle rotation and
-// vertex appearance which do not feed back into gameplay.
+// gameplay-relevant values, the ring slots, and motion. Rotation and angular
+// velocity are needed to rebuild the same particle matrices after loading, but
+// the local quad appearance is immutable after spawn and can be replaced with
+// a small generic quad instead of spending scarce SRAM on it.
+#define FLYING_PARTICLE_MOTION_SIZE (sizeof(coord3d) * 4)
+#define FLYING_PARTICLE_OCCUPANCY_SIZE ((MAX_FLYING_PARTICLES + 7) / 8)
+
+static void
+initialize_saved_flying_particle_vertices(struct FlyingParticles *particle) {
+  s32 vertex;
+
+  for (vertex = 0; vertex < 4; vertex++) {
+    particle->vertex_list[vertex].v.ob[0] = vertex >= 2 ? -5 : 5;
+    particle->vertex_list[vertex].v.ob[1] = 0;
+    particle->vertex_list[vertex].v.ob[2] = vertex == 1 || vertex == 2 ? -5 : 5;
+    particle->vertex_list[vertex].v.flag = 0;
+    particle->vertex_list[vertex].v.cn[0] = 0x30;
+    particle->vertex_list[vertex].v.cn[1] = 0x30;
+    particle->vertex_list[vertex].v.cn[2] = 0x30;
+    particle->vertex_list[vertex].v.cn[3] = 0xdc;
+  }
+  particle->vertex_list[0].v.tc[0] = 0xe0;
+  particle->vertex_list[0].v.tc[1] = 0xe0;
+  particle->vertex_list[1].v.tc[0] = 0xe0;
+  particle->vertex_list[3].v.tc[1] = 0xe0;
+}
+
 static void save_flying_particles_state(StateStream *stream) {
-  s32 block;
+  u8 occupied[FLYING_PARTICLE_OCCUPANCY_SIZE];
+  u8 plane[MAX_FLYING_PARTICLES];
+  s32 occupancy_size = (max_particles + 7) / 8;
+  s32 live_count = 0;
+  s32 i;
+  s32 byte;
+
+  bzero(occupied, sizeof(occupied));
 
   write_u32(stream, g_NumParticleEntries);
-  for (block = 0; block < max_particles; block += 8) {
-    u8 occupied = 0;
-    s32 bit;
-
-    if (g_FlyingParticlesBuffer != NULL) {
-      for (bit = 0; bit < 8 && block + bit < max_particles; bit++) {
-        if (g_FlyingParticlesBuffer[block + bit].unk00 > 0) {
-          occupied |= 1 << bit;
-        }
+  if (g_FlyingParticlesBuffer != NULL) {
+    for (i = 0; i < max_particles; i++) {
+      if (g_FlyingParticlesBuffer[i].unk00 > 0) {
+        occupied[i / 8] |= 1 << (i % 8);
+        live_count++;
       }
     }
-    write_u8(stream, occupied);
+  }
+  write_bytes(stream, occupied, occupancy_size);
 
-    if (g_FlyingParticlesBuffer != NULL) {
-      for (bit = 0; bit < 8 && block + bit < max_particles; bit++) {
-        s32 i = block + bit;
+  for (i = 0; i < max_particles; i++) {
+    if (occupied[i / 8] & (1 << (i % 8))) {
+      if (g_FlyingParticlesBuffer[i].unk00 > 0xffff) {
+        practiceLogError("Flying particle %d age is invalid", i);
+        assert(FALSE);
+      }
+      write_u16(stream, g_FlyingParticlesBuffer[i].unk00);
+    }
+  }
 
-        if (g_FlyingParticlesBuffer[i].unk00 > 0) {
-          struct FlyingParticles *particle = &g_FlyingParticlesBuffer[i];
-          if (particle->unk00 > 0xffff) {
-            practiceLogError("Flying particle %d age is invalid", i);
-            assert(FALSE);
-          }
-          write_u16(stream, particle->unk00);
-          write_bytes(stream, &particle->position, sizeof(coord3d));
-          write_bytes(stream, &particle->position_drift, sizeof(coord3d));
-        }
+  /* Transposing the exact motion bytes groups the common float sign/exponent
+   * bytes together. XORing adjacent slots then leaves long zero runs for the
+   * existing RLE without quantizing any simulation or render state. */
+  for (byte = 0; byte < FLYING_PARTICLE_MOTION_SIZE; byte++) {
+    u8 previous = 0;
+    s32 entry = 0;
+
+    for (i = 0; i < max_particles; i++) {
+      if (occupied[i / 8] & (1 << (i % 8))) {
+        u8 value = ((u8 *)&g_FlyingParticlesBuffer[i].position)[byte];
+        plane[entry++] = value ^ previous;
+        previous = value;
       }
     }
+    write_effect_zero_rle(stream, plane, live_count);
   }
 }
 
 static void load_flying_particles_state(StateStream *stream) {
-  s32 block;
+  u8 occupied[FLYING_PARTICLE_OCCUPANCY_SIZE];
+  u8 plane[MAX_FLYING_PARTICLES];
+  s32 occupancy_size = (max_particles + 7) / 8;
+  s32 live_count = 0;
+  s32 i;
+  s32 byte;
+
+  bzero(occupied, sizeof(occupied));
 
   g_NumParticleEntries = read_u32(stream);
+  read_bytes(stream, occupied, occupancy_size);
   if (g_FlyingParticlesBuffer != NULL) {
-    for (block = 0; block < max_particles; block++) {
-      g_FlyingParticlesBuffer[block].unk00 = 0;
+    for (i = 0; i < max_particles; i++) {
+      bzero(&g_FlyingParticlesBuffer[i], sizeof(struct FlyingParticles));
     }
   }
-  for (block = 0; block < max_particles; block += 8) {
-    u8 occupied = read_u8(stream);
-    s32 bit;
 
-    for (bit = 0; bit < 8 && block + bit < max_particles; bit++) {
-      struct FlyingParticles tmp;
-      s32 index = block + bit;
-      s32 vertex;
-
-      if (!(occupied & (1 << bit))) {
-        continue;
+  for (i = 0; i < max_particles; i++) {
+    if (occupied[i / 8] & (1 << (i % 8))) {
+      u16 age = read_u16(stream);
+      live_count++;
+      if (g_FlyingParticlesBuffer != NULL) {
+        g_FlyingParticlesBuffer[i].unk00 = age;
+        initialize_saved_flying_particle_vertices(&g_FlyingParticlesBuffer[i]);
       }
+    }
+  }
 
-      bzero(&tmp, sizeof(tmp));
-      tmp.unk00 = read_u16(stream);
-      read_bytes(stream, &tmp.position, sizeof(coord3d));
-      read_bytes(stream, &tmp.position_drift, sizeof(coord3d));
-      for (vertex = 0; vertex < 4; vertex++) {
-        tmp.vertex_list[vertex].v.ob[0] = vertex >= 2 ? -5 : 5;
-        tmp.vertex_list[vertex].v.ob[1] = 0;
-        tmp.vertex_list[vertex].v.ob[2] =
-            vertex == 1 || vertex == 2 ? -5 : 5;
-        tmp.vertex_list[vertex].v.flag = 0;
-        tmp.vertex_list[vertex].v.cn[0] = 0x30;
-        tmp.vertex_list[vertex].v.cn[1] = 0x30;
-        tmp.vertex_list[vertex].v.cn[2] = 0x30;
-        tmp.vertex_list[vertex].v.cn[3] = 0xdc;
-      }
-      tmp.vertex_list[0].v.tc[0] = 0xe0;
-      tmp.vertex_list[0].v.tc[1] = 0xe0;
-      tmp.vertex_list[1].v.tc[0] = 0xe0;
-      tmp.vertex_list[3].v.tc[1] = 0xe0;
-      if (g_FlyingParticlesBuffer != NULL && index < (u32)max_particles) {
-        g_FlyingParticlesBuffer[index] = tmp;
+  for (byte = 0; byte < FLYING_PARTICLE_MOTION_SIZE; byte++) {
+    u8 previous = 0;
+    s32 entry = 0;
+
+    read_effect_zero_rle(stream, plane, live_count);
+    for (i = 0; i < max_particles; i++) {
+      if (occupied[i / 8] & (1 << (i % 8))) {
+        u8 value = plane[entry++] ^ previous;
+        previous = value;
+        if (g_FlyingParticlesBuffer != NULL) {
+          ((u8 *)&g_FlyingParticlesBuffer[i].position)[byte] = value;
+        }
       }
     }
   }
@@ -2875,7 +2994,8 @@ static bool light_vertex_loaded(s32 room, u16 vtx_index) {
     return FALSE;
   }
 
-  /* Bounds check the saved vertex index before redarken_lights_in_room scans. */
+  /* Bounds check the saved vertex index before redarken_lights_in_room scans.
+   */
   return ((u32)vtx_index * sizeof(Vtx)) <
          (u32)g_BgRoomInfo[room].usize_point_index_binary;
 }
@@ -3041,13 +3161,41 @@ static void load_bg_room_cache_state(StateStream *stream) {
     return;
   }
 
+  /* Loads from the hotkey are deferred until all graphics tasks have drained,
+   * so later-timeline room allocations can be released before restoring rooms
+   * which were resident at the save point. Keeping every later allocation as
+   * a cache can exhaust the BG allocator and make a required room reload fail.
+   * Preserve complete allocations for rooms which are resident in the saved
+   * state; their expanded texture metadata is gameplay-visible. */
+  for (room = 1; room < count; room++) {
+    s_room_info *info = &g_BgRoomInfo[room];
+    bool has_allocation = info->ptr_point_index != NULL ||
+                          info->ptr_expanded_mapping_info != NULL ||
+                          info->ptr_secondary_expanded_mapping_info != NULL ||
+                          info->ptr_unique_collision_points != NULL;
+    bool allocation_complete = info->ptr_point_index != NULL &&
+                               info->ptr_expanded_mapping_info != NULL;
+
+    if (model_loaded[room] == 0) {
+      if (has_allocation) {
+        delete_room_data(room);
+      }
+    } else if (!allocation_complete && has_allocation) {
+      delete_room_data(room);
+    }
+  }
+
   for (room = 0; room < count; room++) {
     s_room_info *info = &g_BgRoomInfo[room];
 
-    if (model_loaded[room] != 0 && info->model_bin_loaded == 0 &&
-        info->ptr_point_index == NULL &&
-        info->ptr_expanded_mapping_info == NULL) {
+    if (model_loaded[room] != 0 && (info->ptr_point_index == NULL ||
+                                    info->ptr_expanded_mapping_info == NULL)) {
       sub_GAME_7F0B6368(room);
+      if (info->model_bin_loaded == 0 || info->ptr_point_index == NULL ||
+          info->ptr_expanded_mapping_info == NULL) {
+        practiceLogError("Failed to reload saved BG room %d", room);
+        assert(FALSE);
+      }
     }
     info->room_rendered = room_rendered[room];
     info->room_neighbor_to_rendered = room_neighbor[room];
@@ -3360,8 +3508,8 @@ static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
   }
   case PROPDEF_VEHICHLE: {
     VehichleRecord *veh = (VehichleRecord *)obj;
-    u32 ailistID = read_u32(stream);
-    veh->ailist = (ailistID != 0) ? ailistFindById(ailistID) : NULL;
+    s32 ailistReference = read_u32(stream);
+    veh->ailist = get_ai_list_by_reference(ailistReference);
     veh->aioffset = read_u16(stream);
     veh->aireturnlist = read_u16(stream);
     veh->speed = read_f32(stream);
@@ -3379,8 +3527,8 @@ static void load_object_subtype(StateStream *stream, ObjectRecord *obj) {
   }
   case PROPDEF_AIRCRAFT: {
     AircraftRecord *air = (AircraftRecord *)obj;
-    u32 ailistID = read_u32(stream);
-    air->ailist = (ailistID != 0) ? ailistFindById(ailistID) : NULL;
+    s32 ailistReference = read_u32(stream);
+    air->ailist = get_ai_list_by_reference(ailistReference);
     air->aioffset = read_u16(stream);
     air->aireturnlist = read_u16(stream);
     air->rotoryrot = read_f32(stream);
@@ -3455,6 +3603,7 @@ static void skip_prop_data(StateStream *stream, u8 type,
     } else if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
       load_object_subtype(stream, &temp_obj.base);
     }
+    load_object_collision_coefficients(stream, NULL);
   } else if (type == PROP_TYPE_EXPLOSION) {
     struct Explosion temp_explosion;
     bzero(&temp_explosion, sizeof(temp_explosion));
@@ -3536,8 +3685,7 @@ bool save_props_state(StateStream *stream) {
       continue;
     }
 
-    compactContainedObject =
-        prop_uses_compact_contained_object_state(prop);
+    compactContainedObject = prop_uses_compact_contained_object_state(prop);
     // Write base prop record fields
     {
       u32 delta = i - previousPropIndex;
@@ -3549,8 +3697,7 @@ bool save_props_state(StateStream *stream) {
       }
       previousPropIndex = i;
     }
-    write_u8(stream,
-             prop->type | (compactContainedObject ? 0x80 : 0));
+    write_u8(stream, prop->type | (compactContainedObject ? 0x80 : 0));
     write_u8(stream, prop->flags);
     write_u16(stream, prop->timetoregen);
     if (!compactContainedObject) {
@@ -3578,7 +3725,6 @@ bool save_props_state(StateStream *stream) {
       }
       write_u8(stream, prop->smoke - g_SmokeBuffer);
     }
-
     switch ((PROP_TYPE)prop->type) {
     case PROP_TYPE_DOOR: {
       DoorRecord *door = prop->door;
@@ -3756,9 +3902,7 @@ bool save_props_state(StateStream *stream) {
         }
         case PROPDEF_VEHICHLE: {
           VehichleRecord *veh = (VehichleRecord *)obj;
-          bool isGlobal;
-          write_u32(stream,
-                    veh->ailist ? chraiGetAIListID(veh->ailist, &isGlobal) : 0);
+          write_u32(stream, get_ai_list_reference(veh->ailist));
           write_u16(stream, veh->aioffset);
           write_u16(stream, veh->aireturnlist);
           write_f32(stream, veh->speed);
@@ -3774,9 +3918,7 @@ bool save_props_state(StateStream *stream) {
         }
         case PROPDEF_AIRCRAFT: {
           AircraftRecord *air = (AircraftRecord *)obj;
-          bool isGlobal;
-          write_u32(stream,
-                    air->ailist ? chraiGetAIListID(air->ailist, &isGlobal) : 0);
+          write_u32(stream, get_ai_list_reference(air->ailist));
           write_u16(stream, air->aioffset);
           write_u16(stream, air->aireturnlist);
           write_f32(stream, air->rotoryrot);
@@ -3830,6 +3972,7 @@ bool save_props_state(StateStream *stream) {
           break;
         }
       }
+      save_object_collision_coefficients(stream, obj);
       break;
     }
 
@@ -3873,7 +4016,6 @@ bool save_props_state(StateStream *stream) {
   if (!save_viewer_players_state(stream)) {
     return FALSE;
   }
-
   // Scorch marks and bullet holes reference props by index, so they are saved
   // after every prop record (and the players) has been written.
   save_decals_state(stream);
@@ -3987,6 +4129,219 @@ static bool prop_can_own_saved_children(PropRecord *prop) {
     return prop->obj != NULL && prop->obj->prop == prop;
   }
   return FALSE;
+}
+
+static bool prop_is_player_or_viewer(PropRecord *prop) {
+  return prop != NULL &&
+         (prop->type == PROP_TYPE_PLAYER || prop->type == PROP_TYPE_VIEWER);
+}
+
+static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
+                                      s32 recordCount);
+
+// Viewer model reconciliation may tear down and recreate Bond's model and its
+// held-weapon child. Keep the saved child objects out of that teardown, then
+// discard any replacement children generated by solo_char_load before putting
+// the saved attachment graph back.
+static void detach_saved_player_children(const SavedPropLinks *savedLinks,
+                                         s32 recordCount) {
+  s32 i;
+
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *prop;
+    PropRecord *parent;
+
+    if ((s16)savedLinks[i].parent < 0) {
+      continue;
+    }
+
+    prop = get_prop_by_index(savedLinks[i].index);
+    parent = get_prop_by_index(savedLinks[i].parent);
+    if (prop != NULL && prop_is_player_or_viewer(parent) &&
+        prop->parent == parent) {
+      chrpropDetach(prop);
+    }
+  }
+}
+
+static bool
+saved_state_requires_player_model_rebuild(const SavedPropLinks *savedLinks,
+                                          s32 recordCount) {
+  s32 i;
+
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *parent;
+
+    if ((s16)savedLinks[i].parent < 0 ||
+        savedLinks[i].attachmentNode != OBJ_ALLOC_PLAYER_BUFFER) {
+      continue;
+    }
+    parent = get_prop_by_index(savedLinks[i].parent);
+    if (prop_is_player_or_viewer(parent)) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
+}
+
+static PropRecord *find_saved_player_child(PropRecord *player_prop,
+                                           PropRecord *generated_child,
+                                           const SavedPropLinks *savedLinks,
+                                           s32 recordCount) {
+  s32 i;
+  u16 playerIndex = get_prop_index(player_prop);
+
+  if (generated_child == NULL || generated_child->obj == NULL) {
+    return NULL;
+  }
+
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *saved_child;
+
+    if (savedLinks[i].parent != playerIndex ||
+        savedLinks[i].index == get_prop_index(generated_child)) {
+      continue;
+    }
+    saved_child = get_prop_by_index(savedLinks[i].index);
+    if (saved_child != NULL && saved_child->obj != NULL &&
+        saved_child->obj->type == generated_child->obj->type &&
+        saved_child->obj->obj == generated_child->obj->obj) {
+      return saved_child;
+    }
+  }
+
+  return NULL;
+}
+
+static bool replace_saved_player_weapon(PropRecord *saved_prop,
+                                        PropRecord *generated_prop) {
+  WeaponObjRecord saved_weapon;
+  WeaponObjRecord *generated_weapon;
+  Model *generated_model;
+  ChrRecord *player_chr;
+  s32 hand;
+
+  if (saved_prop == NULL || generated_prop == NULL || saved_prop->obj == NULL ||
+      generated_prop->obj == NULL ||
+      saved_prop->obj->type != PROPDEF_COLLECTABLE ||
+      generated_prop->obj->type != PROPDEF_COLLECTABLE) {
+    practiceLogError("Player child replacement is not a collectable weapon");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  saved_weapon = *saved_prop->weapon;
+  generated_weapon = generated_prop->weapon;
+  generated_model = generated_weapon->model;
+  player_chr =
+      generated_prop->parent != NULL ? generated_prop->parent->chr : NULL;
+
+  objFreePermanently(saved_prop->obj, FALSE);
+  chrpropDetach(generated_prop);
+
+  *generated_weapon = saved_weapon;
+  generated_weapon->prop = saved_prop;
+  generated_weapon->model = generated_model;
+  saved_prop->weapon = generated_weapon;
+
+  if (player_chr != NULL) {
+    for (hand = 0; hand < 2; hand++) {
+      if (player_chr->weapons_held[hand] == generated_prop) {
+        player_chr->weapons_held[hand] = saved_prop;
+      }
+    }
+    if (player_chr->handle_positiondata_hat == generated_prop) {
+      player_chr->handle_positiondata_hat = saved_prop;
+    }
+  }
+
+  generated_prop->obj = NULL;
+  chrpropDisable(generated_prop);
+  chrpropFree(generated_prop);
+  return TRUE;
+}
+
+static bool cleanup_live_player_children(PropRecord *player_prop,
+                                         const SavedPropLinks *savedLinks,
+                                         s32 recordCount) {
+  PropRecord *child;
+  u16 playerIndex;
+
+  if (!prop_is_player_or_viewer(player_prop)) {
+    return TRUE;
+  }
+
+  playerIndex = get_prop_index(player_prop);
+  child = player_prop->child;
+  while (child != NULL) {
+    PropRecord *next = child->prev;
+    u16 childIndex = get_prop_index(child);
+
+    if (saved_link_names_child(savedLinks, recordCount, childIndex,
+                               playerIndex)) {
+      chrpropDetach(child);
+    } else if ((child->type == PROP_TYPE_OBJ ||
+                child->type == PROP_TYPE_WEAPON) &&
+               child->obj != NULL) {
+      PropRecord *saved_child =
+          find_saved_player_child(player_prop, child, savedLinks, recordCount);
+      if (saved_child != NULL) {
+        if (!replace_saved_player_weapon(saved_child, child)) {
+          return FALSE;
+        }
+      } else {
+        objFreePermanently(child->obj, TRUE);
+      }
+    } else {
+      chrpropDetach(child);
+    }
+
+    child = next;
+  }
+
+  player_prop->child = NULL;
+  return TRUE;
+}
+
+static bool restore_saved_player_children(const SavedPropLinks *savedLinks,
+                                          s32 recordCount) {
+  s32 i;
+
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *parent;
+
+    if ((s16)savedLinks[i].parent >= 0) {
+      continue;
+    }
+
+    parent = get_prop_by_index(savedLinks[i].index);
+    if (prop_is_player_or_viewer(parent)) {
+      if (!cleanup_live_player_children(parent, savedLinks, recordCount)) {
+        return FALSE;
+      }
+    }
+  }
+
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *prop;
+    PropRecord *parent;
+
+    if ((s16)savedLinks[i].parent < 0) {
+      continue;
+    }
+
+    prop = get_prop_by_index(savedLinks[i].index);
+    parent = get_prop_by_index(savedLinks[i].parent);
+    if (prop == NULL || !prop_is_player_or_viewer(parent)) {
+      continue;
+    }
+
+    restore_player_child_object(prop, parent, savedLinks[i].attachmentNode);
+  }
+
+  rebuild_saved_child_links(savedLinks, recordCount);
+  return TRUE;
 }
 
 static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
@@ -4147,6 +4502,7 @@ bool load_props_state(StateStream *stream) {
     u8 savedPropTypeAndFlags = read_u8(stream);
     bool compactContainedObject = (savedPropTypeAndFlags & 0x80) != 0;
     u8 savedPropType = savedPropTypeAndFlags & 0x7f;
+
     u8 savedPropFlags = read_u8(stream);
     s16 savedPropTimetoregen = read_u16(stream);
     coord3d savedPropPos = {0};
@@ -4221,6 +4577,15 @@ bool load_props_state(StateStream *stream) {
     }
 
     PropRecord *prop = get_prop_by_index(savedPropIndex);
+
+    if (hasObjAllocation &&
+        savedObjAllocation.setupCmdIndex == OBJ_ALLOC_PLAYER_BUFFER &&
+        !slot_matches_object(prop, savedPropType, &savedObjAllocation)) {
+      // Compact player weapons have no serialized model attachment node. This
+      // sentinel requests reconstruction of the player-buffer allocation graph
+      // after the rest of the prop payload has loaded.
+      savedLinks[i].attachmentNode = OBJ_ALLOC_PLAYER_BUFFER;
+    }
 
     // Remove any enabled props occupying slots the save skipped over so the
     // prop array is rebuilt to exactly match the saved set.
@@ -4465,6 +4830,7 @@ bool load_props_state(StateStream *stream) {
         } else if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
           load_object_subtype(stream, &temp_obj.base);
         }
+        load_object_collision_coefficients(stream, NULL);
         break;
       }
 
@@ -4494,14 +4860,16 @@ bool load_props_state(StateStream *stream) {
 
       load_object_subtype(stream, obj);
 
-      (void)createdObjProp;
-      (void)shouldRegisterObjectRooms;
-
-      // Dynamic collision geometry is still rebuilt from the restored
-      // transform; this is independent of room-list registration.
+      // Dynamic collision geometry is rebuilt from the restored transform;
+      // this is independent of room-list registration.
       if (obj->ptr_allocated_collisiondata_block != NULL) {
         chrobjCollisionRelated(obj);
       }
+      load_object_collision_coefficients(stream, obj);
+
+      (void)createdObjProp;
+      (void)shouldRegisterObjectRooms;
+
       break;
     }
 
@@ -4564,8 +4932,7 @@ bool load_props_state(StateStream *stream) {
       break;
     }
 
-    if ((savedPropType == PROP_TYPE_OBJ ||
-         savedPropType == PROP_TYPE_DOOR ||
+    if ((savedPropType == PROP_TYPE_OBJ || savedPropType == PROP_TYPE_DOOR ||
          savedPropType == PROP_TYPE_WEAPON) &&
         prop->obj != NULL) {
       savedLinks[i].objectRuntimeBitflags = prop->obj->runtime_bitflags;
@@ -4611,10 +4978,9 @@ bool load_props_state(StateStream *stream) {
       }
     } else if (parent != NULL && parent->type == PROP_TYPE_CHR) {
       restore_concealed_chr_item(prop, parent);
-    } else if (parent != NULL &&
-               (parent->type == PROP_TYPE_PLAYER ||
-                parent->type == PROP_TYPE_VIEWER)) {
-      restore_player_child_object(prop, parent);
+    } else if (parent != NULL && (parent->type == PROP_TYPE_PLAYER ||
+                                  parent->type == PROP_TYPE_VIEWER)) {
+      restore_player_child_object(prop, parent, savedLinks[i].attachmentNode);
     } else if (parent != NULL &&
                (parent->type == PROP_TYPE_OBJ ||
                 parent->type == PROP_TYPE_DOOR ||
@@ -4631,7 +4997,8 @@ bool load_props_state(StateStream *stream) {
   rebuild_saved_child_links(savedLinks, recordCount);
 
   /* Reparenting helpers normalize ownership flags. Preserve transitional
-   * states too, such as a held item already queued to drop with a projectile. */
+   * states too, such as a held item already queued to drop with a projectile.
+   */
   for (i = 0; i < recordCount; i++) {
     PropRecord *prop = get_prop_by_index(savedLinks[i].index);
 
@@ -4734,7 +5101,13 @@ bool load_props_state(StateStream *stream) {
     }
   }
 
-  if (!load_viewer_players_state(stream)) {
+  detach_saved_player_children(savedLinks, recordCount);
+  if (!load_viewer_players_state(
+          stream,
+          saved_state_requires_player_model_rebuild(savedLinks, recordCount))) {
+    return FALSE;
+  }
+  if (!restore_saved_player_children(savedLinks, recordCount)) {
     return FALSE;
   }
 

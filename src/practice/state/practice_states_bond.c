@@ -1,3 +1,4 @@
+#include "../practice_render.h"
 #include "bondinv.h"
 #include "bondview.h"
 #include "chrai.h"
@@ -97,6 +98,40 @@ static bool current_player_model_is_valid(void) {
   return is_rdram_range(model->obj->RootNode, sizeof(ModelNode));
 }
 
+static bool player_presence_prop_is_active(PropRecord *target) {
+  PropRecord *prop = ptr_obj_pos_list_first_entry;
+  s32 guard = 0;
+
+  while (prop != NULL && guard++ < POS_DATA_ENTRY_LEN) {
+    if (prop == target) {
+      return TRUE;
+    }
+    prop = prop->next;
+  }
+
+  return FALSE;
+}
+
+static void release_player_presence_prop(PropRecord *prop) {
+  if (prop == NULL) {
+    return;
+  }
+
+  if ((prop->type != PROP_TYPE_VIEWER && prop->type != PROP_TYPE_PLAYER) ||
+      prop->parent != NULL || !player_presence_prop_is_active(prop)) {
+    practiceLogError("Invalid stale player prop index=%d type=%d parent=%d",
+                     get_prop_index(prop), prop->type,
+                     get_prop_index(prop->parent));
+    assert(FALSE);
+    return;
+  }
+
+  chrpropDeregisterRooms(prop);
+  chrpropDelist(prop);
+  chrpropDisable(prop);
+  chrpropFree(prop);
+}
+
 static ModelNode *next_model_node(ModelNode *root, ModelNode *node) {
   if (node->Child != NULL) {
     return node->Child;
@@ -141,8 +176,7 @@ static void load_hand_gunfire_nodes(StateStream *stream, Model *model) {
 
   for (i = 0; i < count; i++) {
     u32 value = read_u32(stream);
-    while (node != NULL &&
-           (node->Opcode & 0xff) != MODELNODE_OPCODE_GUNFIRE) {
+    while (node != NULL && (node->Opcode & 0xff) != MODELNODE_OPCODE_GUNFIRE) {
       node = next_model_node(root, node);
     }
     if (node != NULL) {
@@ -196,9 +230,9 @@ static void validate_current_player_model_invariant(bool saved_had_model) {
   chr = prop->chr;
 
   if (chr->model != model || model->chr != chr) {
-    practiceLogError(
-        "Bond model/chr mismatch model=%08x chr=%08x chrmodel=%08x modelchr=%08x",
-        model, chr, chr->model, model->chr);
+    practiceLogError("Bond model/chr mismatch model=%08x chr=%08x "
+                     "chrmodel=%08x modelchr=%08x",
+                     model, chr, chr->model, model->chr);
   }
 
   if (!is_rdram_range(model->obj, sizeof(ModelFileHeader))) {
@@ -214,7 +248,8 @@ static void validate_current_player_model_invariant(bool saved_had_model) {
 }
 #endif
 
-static void reconcile_current_player_model_presence(bool saved_had_model) {
+static void reconcile_current_player_model_presence(bool saved_had_model,
+                                                    bool force_rebuild) {
   bool live_has_model;
 
   if (g_CurrentPlayer == NULL) {
@@ -222,6 +257,14 @@ static void reconcile_current_player_model_presence(bool saved_had_model) {
   }
 
   live_has_model = current_player_model_is_valid();
+  if (force_rebuild && live_has_model && g_CurrentPlayer->prop != NULL &&
+      g_CurrentPlayer->prop->chr != NULL) {
+    disable_sounds_attached_to_player_then_something(g_CurrentPlayer->prop);
+    g_CurrentPlayer->prop->chr = NULL;
+    sub_GAME_7F07DE9C(g_CurrentPlayer);
+    g_CurrentPlayer->ptr_char_objectinstance = NULL;
+    live_has_model = FALSE;
+  }
   if (g_CurrentPlayer->ptr_char_objectinstance != NULL && !live_has_model) {
     Model *stale_model = g_CurrentPlayer->ptr_char_objectinstance;
 
@@ -233,20 +276,23 @@ static void reconcile_current_player_model_presence(bool saved_had_model) {
     }
     g_CurrentPlayer->ptr_char_objectinstance = NULL;
   }
-  if (saved_had_model == live_has_model) {
-    return;
-  }
-
   if (saved_had_model) {
+    if (live_has_model) {
+      return;
+    }
     if (g_CurrentPlayer->prop != NULL) {
-      // A teardown can leave the viewer prop holding a ChrRecord whose model was
-      // cleared. solo_char_load() only rebuilds when prop->chr is NULL.
+      // A teardown can leave the viewer prop holding a ChrRecord whose model
+      // was cleared. solo_char_load() only rebuilds when prop->chr is NULL.
       if (g_CurrentPlayer->prop->chr != NULL &&
           g_CurrentPlayer->prop->chr->model == NULL) {
         g_CurrentPlayer->prop->chr = NULL;
       }
       solo_char_load();
     }
+    return;
+  }
+
+  if (!live_has_model) {
     return;
   }
 
@@ -382,7 +428,7 @@ static void read_delta_matrix(StateStream *stream, Mtxf *matrix,
 
   for (word = 0; word < 16; word++) {
     u32 code = (codes >> (word * 2)) & 3;
-    u32 delta = code == 0 ? 0
+    u32 delta = code == 0   ? 0
                 : code == 1 ? read_u8(stream)
                 : code == 2 ? read_u16(stream)
                             : read_u32(stream);
@@ -533,14 +579,17 @@ static void save_current_player_state(StateStream *stream) {
     }
   }
 
-  /* 4. First-person hand matrices (fixed-point after the previous render). */
+  /* 4. First-person hand matrices. Paused rendering restores these buffers to
+   * float while a live render leaves them packed for the RSP, so normalize
+   * either representation to exact floats in storage. */
   {
     s32 hand;
 
     for (hand = 0; hand < 2; hand++) {
       ModelFileHeader *header =
           (ModelFileHeader *)g_CurrentPlayer->hands[hand].field_B70;
-      Mtx *matrices = (Mtx *)g_CurrentPlayer->hands[hand].field_B74;
+      RenderPosView *matrices =
+          (RenderPosView *)g_CurrentPlayer->hands[hand].field_B74;
       s32 count = header != NULL && matrices != NULL ? header->numMatrices : 0;
 
       if (count < 0 || count > MAX_SAVED_HAND_RENDER_MATRICES) {
@@ -549,7 +598,16 @@ static void save_current_player_state(StateStream *stream) {
 
       write_u16(stream, count);
       if (count > 0) {
-        write_bytes(stream, matrices, count * sizeof(Mtx));
+        s32 matrix;
+        for (matrix = 0; matrix < count; matrix++) {
+          Mtxf value;
+          if (practice_hand_render_matrices_are_fixed(hand)) {
+            guMtxL2F(value.m, (Mtx *)&matrices[matrix].pos);
+          } else {
+            matrix_4x4_copy(&matrices[matrix].pos, &value);
+          }
+          write_bytes(stream, &value, sizeof(value));
+        }
       }
     }
   }
@@ -580,8 +638,7 @@ static void save_current_player_state(StateStream *stream) {
 
     for (hand = 0; hand < 2; hand++) {
       Model *model = (Model *)&g_CurrentPlayer->hands[hand].field_B68;
-      ModelFileHeader *header =
-          &g_CurrentPlayer->copy_of_body_obj_header[hand];
+      ModelFileHeader *header = &g_CurrentPlayer->copy_of_body_obj_header[hand];
       bool has_model = g_CurrentPlayer->hand_item[hand] != ITEM_UNARMED &&
                        g_CurrentPlayer->hand_item[hand] != ITEM_TANKSHELLS &&
                        g_CurrentPlayer->hand_item[hand] != ITEM_SUIT_LF_HAND &&
@@ -598,8 +655,8 @@ static void save_current_player_state(StateStream *stream) {
   /* 7. Head-bob and third-person Bond model animation/root transforms. */
   write_u8(stream, g_CurrentPlayer->model != NULL);
   if (g_CurrentPlayer->model != NULL) {
-    practice_states_save_model_animation(
-        stream, (Model *)&g_CurrentPlayer->model);
+    practice_states_save_model_animation(stream,
+                                         (Model *)&g_CurrentPlayer->model);
   }
   write_u8(stream, g_CurrentPlayer->ptr_char_objectinstance != NULL);
   if (g_CurrentPlayer->ptr_char_objectinstance != NULL) {
@@ -611,10 +668,9 @@ static void save_current_player_state(StateStream *stream) {
    * bullet tracing/culling plus the previous matrices for aim correction. The
    * pointers target the rotating graphics arena, so save their values. */
   {
-    Mtxf *matrices[4] = {g_CurrentPlayer->field_10CC,
-                         g_CurrentPlayer->field_10D4,
-                         g_CurrentPlayer->field_10E8,
-                         g_CurrentPlayer->field_10EC};
+    Mtxf *matrices[4] = {
+        g_CurrentPlayer->field_10CC, g_CurrentPlayer->field_10D4,
+        g_CurrentPlayer->field_10E8, g_CurrentPlayer->field_10EC};
     s32 matrix;
 
     for (matrix = 0; matrix < 4; matrix++) {
@@ -638,7 +694,8 @@ static void save_current_player_state(StateStream *stream) {
   }
 }
 
-static void load_current_player_state(StateStream *stream) {
+static void load_current_player_state(StateStream *stream,
+                                      bool force_model_rebuild) {
   textoverride *live_textoverrides;
   RenderPosView *live_hand_render_pos[2];
   s32 live_hand_matrix_count[2];
@@ -746,16 +803,10 @@ static void load_current_player_state(StateStream *stream) {
       }
     } else {
       if (g_CurrentPlayer->prop != NULL) {
-        if (!(g_CurrentPlayer->prop->flags & 0x10)) {
-          g_CurrentPlayer->prop->rooms[0] = 0xff;
-        }
-        chrpropDelist(g_CurrentPlayer->prop);
-        chrpropDisable(g_CurrentPlayer->prop);
-        chrpropFree(g_CurrentPlayer->prop);
+        release_player_presence_prop(g_CurrentPlayer->prop);
         g_CurrentPlayer->prop = NULL;
       }
     }
-
   }
 
   /* 4. Re-initialize inventory, then read and apply inventory section. */
@@ -838,13 +889,12 @@ static void load_current_player_state(StateStream *stream) {
           g_CurrentPlayer->hands[hand].weapon_current_animation;
       s32 saved_watch_animation_step =
           g_CurrentPlayer->step_in_view_watch_animation;
-      Model *live_model =
-          (Model *)&g_CurrentPlayer->hands[hand].field_B68;
+      Model *live_model = (Model *)&g_CurrentPlayer->hands[hand].field_B68;
       ModelFileHeader *live_header =
           &g_CurrentPlayer->copy_of_body_obj_header[hand];
-      bool can_reuse_model =
-          saved_model_item == live_hand_item[hand] &&
-          live_model->obj == live_header && live_header->RootNode != NULL;
+      bool can_reuse_model = saved_model_item == live_hand_item[hand] &&
+                             live_model->obj == live_header &&
+                             live_header->RootNode != NULL;
 
       /* Tank shells select the tank firing path but have no standalone
        * first-person hand model that can be rebuilt with the generic item
@@ -873,9 +923,9 @@ static void load_current_player_state(StateStream *stream) {
           modelInit(model, header, rw_data);
           if (live_hand_render_pos[hand] != NULL &&
               live_hand_matrix_count[hand] == header->numMatrices &&
-              is_active_gfx_range(
-                  live_hand_render_pos[hand],
-                  header->numMatrices * sizeof(RenderPosView))) {
+              is_active_gfx_range(live_hand_render_pos[hand],
+                                  header->numMatrices *
+                                      sizeof(RenderPosView))) {
             render_pos = live_hand_render_pos[hand];
           } else {
             render_pos =
@@ -886,8 +936,7 @@ static void load_current_player_state(StateStream *stream) {
           }
           model->render_pos = render_pos;
           sub_GAME_7F05E978(model, 1);
-          sub_GAME_7F05EA94(model,
-                            g_CurrentPlayer->hands[hand].field_87E);
+          sub_GAME_7F05EA94(model, g_CurrentPlayer->hands[hand].field_87E);
         }
       }
 
@@ -923,21 +972,24 @@ static void load_current_player_state(StateStream *stream) {
     g_CurrentPlayer->hands[hand].sideflag = saved_sideflag[hand];
   }
 
-  /* 6. Restore fixed-point hand matrices into the current live buffers. */
+  /* 6. Restore canonical float hand matrices into the current live buffers. */
   {
     s32 hand;
 
+    practice_clear_loaded_hand_matrices_float();
     for (hand = 0; hand < 2; hand++) {
       ModelFileHeader *header =
           (ModelFileHeader *)g_CurrentPlayer->hands[hand].field_B70;
-      Mtx *matrices = (Mtx *)g_CurrentPlayer->hands[hand].field_B74;
+      RenderPosView *matrices =
+          (RenderPosView *)g_CurrentPlayer->hands[hand].field_B74;
       s32 saved_count = read_u16(stream);
       u32 size = saved_count * sizeof(Mtx);
 
-      if (saved_count > 0 &&
-          saved_count <= MAX_SAVED_HAND_RENDER_MATRICES && header != NULL &&
-          matrices != NULL && header->numMatrices == saved_count) {
+      if (saved_count > 0 && saved_count <= MAX_SAVED_HAND_RENDER_MATRICES &&
+          header != NULL && matrices != NULL &&
+          header->numMatrices == saved_count) {
         read_bytes(stream, matrices, size);
+        practice_mark_loaded_hand_matrices_float(hand);
       } else if (size > 0) {
         stream_seek(stream,
                     stream->base_address + stream->total_processed + size);
@@ -954,10 +1006,9 @@ static void load_current_player_state(StateStream *stream) {
 
     if (has_watch_model) {
       practice_states_load_model_animation(
-          stream,
-          g_CurrentPlayer->hand_item[GUNLEFT] == ITEM_SUIT_LF_HAND
-              ? watch_model
-              : NULL);
+          stream, g_CurrentPlayer->hand_item[GUNLEFT] == ITEM_SUIT_LF_HAND
+                      ? watch_model
+                      : NULL);
     }
   }
 
@@ -969,8 +1020,7 @@ static void load_current_player_state(StateStream *stream) {
     for (hand = 0; hand < 2; hand++) {
       bool has_model = read_u8(stream);
       Model *model = (Model *)&g_CurrentPlayer->hands[hand].field_B68;
-      ModelFileHeader *header =
-          &g_CurrentPlayer->copy_of_body_obj_header[hand];
+      ModelFileHeader *header = &g_CurrentPlayer->copy_of_body_obj_header[hand];
 
       if (has_model) {
         Model *valid_model =
@@ -984,7 +1034,7 @@ static void load_current_player_state(StateStream *stream) {
   /* 9. Restore head-bob and third-person model animation/root transforms.
    * This must follow hand-model loading because both use the player's weapon
    * buffers; rebuilding a hand model can invalidate the intro's Bond model. */
-  reconcile_current_player_model_presence(saved_had_model);
+  reconcile_current_player_model_presence(saved_had_model, force_model_rebuild);
 #ifdef DEV
   validate_current_player_model_invariant(saved_had_model);
 #endif
@@ -996,8 +1046,8 @@ static void load_current_player_state(StateStream *stream) {
     animInit((Model *)&g_CurrentPlayer->model, &player_gait_object_header,
              &g_CurrentPlayer->field_654);
     modelSetScale((Model *)&g_CurrentPlayer->model, IDO_POINT_ONE);
-    practice_states_load_model_animation(
-        stream, (Model *)&g_CurrentPlayer->model);
+    practice_states_load_model_animation(stream,
+                                         (Model *)&g_CurrentPlayer->model);
   }
   if (read_u8(stream)) {
     practice_states_load_model_animation(
@@ -1048,8 +1098,8 @@ static void load_current_player_state(StateStream *stream) {
   /* 9. Re-generate watch menu GDLs. */
   {
     extern Gfx *sub_GAME_7F0A3330(Gfx * arg0, void *arg1, s32 arg2);
-    extern void sub_GAME_7F0A2F30(struct damage_display_parent *arg0, s32 arg1,
-                                 s32 arg2, f32 arg3);
+    extern void sub_GAME_7F0A2F30(struct damage_display_parent * arg0, s32 arg1,
+                                  s32 arg2, f32 arg3);
     extern struct WatchVertex *setup_watch_rectangles(
         struct WatchVertex * vtx, s32 startx, s32 startz, s32 width, s32 height,
         s32 horizontal_offset, s32 vertical_offset);
@@ -1135,13 +1185,7 @@ bool save_viewer_players_state(StateStream *stream) {
     write_u8(stream, current_player_model_is_valid());
     if (current_player_model_is_valid()) {
       ChrRecord *viewer_chr = g_CurrentPlayer->prop->chr;
-      write_u16(stream, viewer_chr->hidden);
-      write_u32(stream, viewer_chr->chrflags);
-      write_u8(stream, (u8)viewer_chr->sleep);
-      if (!practice_states_save_chr_action(stream, viewer_chr)) {
-        set_cur_player(original_player);
-        return FALSE;
-      }
+      save_chr_record(stream, viewer_chr);
     }
   }
 
@@ -1149,7 +1193,7 @@ bool save_viewer_players_state(StateStream *stream) {
   return TRUE;
 }
 
-bool load_viewer_players_state(StateStream *stream) {
+bool load_viewer_players_state(StateStream *stream, bool force_model_rebuild) {
   s32 live_player_count = getPlayerCount();
   s32 saved_count = read_u8(stream);
   s32 i;
@@ -1180,30 +1224,50 @@ bool load_viewer_players_state(StateStream *stream) {
        * position data.
        */
       if (viewer_prop != NULL) {
+        PropRecord *live_prop = g_playerPointers[player_index]->prop;
+        s32 other_player;
+
+        if (live_prop != NULL && live_prop != viewer_prop) {
+          for (other_player = 0; other_player < live_player_count;
+               other_player++) {
+            if (other_player != player_index &&
+                g_playerPointers[other_player] != NULL &&
+                g_playerPointers[other_player]->prop == live_prop) {
+              practiceLogError(
+                  "Player %d stale prop %d is shared with player %d",
+                  player_index, get_prop_index(live_prop), other_player);
+              assert(FALSE);
+              return FALSE;
+            }
+          }
+          release_player_presence_prop(live_prop);
+        }
         g_playerPointers[player_index]->prop = viewer_prop;
       }
     }
 
     set_cur_player(player_index);
-    load_current_player_state(stream);
+    load_current_player_state(stream, force_model_rebuild);
 
     if (read_u8(stream)) {
-      ChrRecord *viewer_chr = g_CurrentPlayer->prop != NULL
-                                  ? g_CurrentPlayer->prop->chr
-                                  : NULL;
-      u16 hidden = read_u16(stream);
-      u32 chrflags = read_u32(stream);
-      s8 sleep = (s8)read_u8(stream);
+      ChrRecord *viewer_chr =
+          g_CurrentPlayer->prop != NULL ? g_CurrentPlayer->prop->chr : NULL;
+      ChrAllocationState allocation;
+      ChrAttachmentIndices attachments;
 
       if (viewer_chr == NULL || viewer_chr->model == NULL) {
         practiceLogError("Viewer CHR missing player=%d chr=%08x", player_index,
                          viewer_chr);
         return FALSE;
       }
-      viewer_chr->hidden = hidden;
-      viewer_chr->chrflags = chrflags;
-      viewer_chr->sleep = sleep;
-      practice_states_load_chr_action(stream, viewer_chr);
+      load_chr_allocation_state(stream, &allocation);
+      if (allocation.slot_index != viewer_chr - g_ChrSlots) {
+        practiceLogError("Viewer CHR slot mismatch player=%d saved=%d live=%d",
+                         player_index, allocation.slot_index,
+                         viewer_chr - g_ChrSlots);
+        return FALSE;
+      }
+      load_chr_record(stream, viewer_chr, &attachments);
     }
   }
 

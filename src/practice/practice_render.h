@@ -31,6 +31,9 @@ typedef struct PracticeRenderContext {
   s32 model_render_position_count;
   s32 rendered_all_characters;
   PracticeRenderWatchState *watch_state;
+  coord3d current_model_pos;
+  coord3d previous_model_pos;
+  coord3d current_room_pos;
 } PracticeRenderContext;
 
 extern bool g_IsRenderOnly;
@@ -41,6 +44,11 @@ void practice_prepare_character_render(PracticeRenderContext *context);
 void practice_prepare_refreshed_render(PracticeRenderContext *context);
 void practice_finish_character_render(PracticeRenderContext *context);
 void practice_restore_render_matrices(void);
+void practice_begin_live_render(void);
+void practice_mark_converted_render_matrices(RenderPosView *render_pos);
+bool practice_hand_render_matrices_are_fixed(s32 hand);
+void practice_clear_loaded_hand_matrices_float(void);
+void practice_mark_loaded_hand_matrices_float(s32 hand);
 void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
                                          Mtxf *matrix10e8, Mtxf *matrix10ec);
 void practice_set_loaded_projection_matrix(Mtxf *projection);

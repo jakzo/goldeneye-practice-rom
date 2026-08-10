@@ -6,7 +6,9 @@
 #include "game/chr.h"
 #include "game/chrobjhandler.h"
 #include "game/dyn.h"
+#include "game/fog.h"
 #include "game/matrixmath.h"
+#include "game/objecthandler.h"
 #include "game/player.h"
 #include "practice_render.h"
 
@@ -24,6 +26,8 @@ typedef struct PracticeRenderJoint {
 typedef struct PracticeRenderObject {
   Model *model;
   RenderPosView *render_pos;
+  bool has_root_data;
+  ModelRwData_HeaderRecord root_data;
 } PracticeRenderObject;
 
 extern PracticeRenderJoint *D_80036060;
@@ -61,7 +65,12 @@ static Mtx g_LoadedRoomProjectionMatrix;
 static bool g_HasLoadedProjectionMatrix;
 static bool g_HasLoadedRoomProjectionMatrix;
 static PracticeRenderWatchState g_PausedWatchState;
+static u8 g_PausedPropOnscreen[(POS_DATA_ENTRY_LEN + 7) / 8];
+static u8 g_ConvertedPropMatrices[(POS_DATA_ENTRY_LEN + 7) / 8];
+static u8 g_ConvertedHandMatrices;
+static u8 g_LoadedFloatHandMatrices;
 
+static void restore_matrices(RenderPosView *render_pos, s32 count);
 static void restore_model_matrices(Model *model);
 
 void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
@@ -78,23 +87,22 @@ void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
   } else {
     g_CurrentPlayer->field_10D4 = NULL;
   }
-  /* Loading occurs before the saved frame's render. The uninterrupted path
-   * pushes each current camera matrix into its previous slot during that
-   * render, before gameplay resumes. Reproduce that derived transition here. */
-  if (matrix10cc != NULL) {
-    matrix_4x4_copy(matrix10cc, &g_LoadedCameraMatrix10E8);
-    g_CurrentPlayer->field_10E8 = &g_LoadedCameraMatrix10E8;
-  } else if (matrix10e8 != NULL) {
+  /* Gameplay can consume the previous-frame matrices before another render
+   * replaces them, so restore their saved values exactly. */
+  if (matrix10e8 != NULL) {
     matrix_4x4_copy(matrix10e8, &g_LoadedCameraMatrix10E8);
+    g_CurrentPlayer->field_10E8 = &g_LoadedCameraMatrix10E8;
+  } else if (matrix10cc != NULL) {
+    matrix_4x4_copy(matrix10cc, &g_LoadedCameraMatrix10E8);
     g_CurrentPlayer->field_10E8 = &g_LoadedCameraMatrix10E8;
   } else {
     g_CurrentPlayer->field_10E8 = NULL;
   }
-  if (matrix10d4 != NULL) {
-    matrix_4x4_copy(matrix10d4, &g_LoadedPreviousCameraMatrix);
-    g_CurrentPlayer->field_10EC = &g_LoadedPreviousCameraMatrix;
-  } else if (matrix10ec != NULL) {
+  if (matrix10ec != NULL) {
     matrix_4x4_copy(matrix10ec, &g_LoadedPreviousCameraMatrix);
+    g_CurrentPlayer->field_10EC = &g_LoadedPreviousCameraMatrix;
+  } else if (matrix10d4 != NULL) {
+    matrix_4x4_copy(matrix10d4, &g_LoadedPreviousCameraMatrix);
     g_CurrentPlayer->field_10EC = &g_LoadedPreviousCameraMatrix;
   } else {
     g_CurrentPlayer->field_10EC = NULL;
@@ -140,11 +148,9 @@ void practice_cache_equipped_weapon_matrix(PropRecord *weapon_prop) {
   Model *model = obj != NULL ? obj->model : NULL;
   s32 index;
 
-  /* A post-load refresh is render-only, but its rebuilt attachment matrix is
-   * needed by the first live gameplay tick.  Ordinary held-pause renders must
-   * not replace the gameplay cache. */
-  if ((g_IsRenderOnly && !practice_is_render_state_invalidated()) ||
-      weapon_prop == NULL ||
+  /* Render-only work must not replace the gameplay cache restored by a save
+   * state. The first live gameplay tick consumes that exact cached matrix. */
+  if (g_IsRenderOnly || weapon_prop == NULL ||
       weapon_prop->type != PROP_TYPE_WEAPON ||
       weapon_prop->parent == NULL ||
       weapon_prop->parent->type != PROP_TYPE_CHR || model == NULL ||
@@ -155,11 +161,13 @@ void practice_cache_equipped_weapon_matrix(PropRecord *weapon_prop) {
   if (index >= 0) {
     Mtx fixed_matrix;
 
-    /* Gameplay normally reads this matrix after the renderer has quantized it
-     * to N64 fixed point. Keep the stable cache in float form, but round-trip
-     * it through Mtx so the invalidated first tick sees the identical value. */
-    guMtxF2L(model->render_pos[index].pos.m, &fixed_matrix);
-    guMtxL2F(obj->mtx.m, &fixed_matrix);
+    /* Gameplay reads this matrix after the renderer has quantized it with the
+     * game's 65535-based conversion, not libultra's standard 16.16 helpers.
+     * Use the same pack/unpack pair so the invalidated first tick receives the
+     * bit-identical transform used by the ordinary gameplay path. */
+    matrix_4x4_f32_to_s32(&model->render_pos[index].pos,
+                          (Mtxf *)&fixed_matrix);
+    sub_GAME_7F058E78((Mtxf *)&fixed_matrix, &obj->mtx);
   }
 }
 
@@ -216,6 +224,28 @@ static void restore_watch_state(PracticeRenderContext *context) {
   D_800409D8 = saved->unknown_409D8;
 }
 
+static void save_prop_onscreen_state(void) {
+  s32 i;
+
+  bzero(g_PausedPropOnscreen, sizeof(g_PausedPropOnscreen));
+  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+    if (pos_data_entry[i].flags & PROPFLAG_ONSCREEN)
+      g_PausedPropOnscreen[i >> 3] |= 1 << (i & 7);
+  }
+}
+
+static void restore_prop_onscreen_state(void) {
+  s32 i;
+
+  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+    pos_data_entry[i].flags &= ~PROPFLAG_ONSCREEN;
+    if (g_PausedPropOnscreen[i >> 3] & (1 << (i & 7)))
+      pos_data_entry[i].flags |= PROPFLAG_ONSCREEN;
+  }
+
+  chraiUpdateOnscreenPropCount();
+}
+
 void practice_prepare_paused_render_state(PracticeRenderContext *context) {
   if (g_IsRenderStateInvalidated && g_HasLoadedProjectionMatrix &&
       g_HasLoadedRoomProjectionMatrix) {
@@ -228,71 +258,13 @@ void practice_prepare_paused_render_state(PracticeRenderContext *context) {
     g_CurrentPlayer->projmatrix = projection;
     g_CurrentPlayer->field_10E0 = (s32)room_projection;
   }
+  bzero(g_ConvertedPropMatrices, sizeof(g_ConvertedPropMatrices));
+  g_ConvertedHandMatrices = 0;
+  context->current_model_pos = g_CurrentPlayer->current_model_pos;
+  context->previous_model_pos = g_CurrentPlayer->previous_model_pos;
+  context->current_room_pos = g_CurrentPlayer->current_room_pos;
+  save_prop_onscreen_state();
   save_watch_state(context);
-}
-
-static s32 count_model_render_joints(Model *model) {
-  ModelNode *node;
-  ModelNode *parent;
-  s32 count = 0;
-
-  if (model == NULL || model->obj == NULL)
-    return 0;
-
-  node = model->obj->RootNode;
-  parent = node != NULL ? node->Parent : NULL;
-
-  while (node != NULL) {
-    s32 type = node->Opcode & 0xff;
-
-    if (type <= 3 || (type >= 11 && type <= 16) || type == 21)
-      count++;
-
-    if (node->Child != NULL) {
-      node = node->Child;
-    } else {
-      while (node != NULL) {
-        if (node == parent) {
-          node = NULL;
-          break;
-        }
-
-        if (node->Next != NULL) {
-          node = node->Next;
-          break;
-        }
-
-        node = node->Parent;
-      }
-    }
-  }
-
-  return count;
-}
-
-static s32 count_character_render_joints(ChrRecord *chr) {
-  s32 count;
-  s32 i;
-
-  if (chr == NULL)
-    return 0;
-
-  count = count_model_render_joints(chr->model);
-
-  for (i = 0; i < 3; i++) {
-    PropRecord *held = chr->weapons_held[i];
-
-    if (held != NULL && held->obj != NULL)
-      count += count_model_render_joints(held->obj->model);
-  }
-
-  if (chr->handle_positiondata_hat != NULL &&
-      chr->handle_positiondata_hat->obj != NULL) {
-    count += count_model_render_joints(
-        chr->handle_positiondata_hat->obj->model);
-  }
-
-  return count;
 }
 
 void practice_invalidate_render_state(void) {
@@ -311,7 +283,7 @@ void practice_validate_render_state(void) {
   g_IsRenderStateInvalidated = FALSE;
 }
 
-static void save_joint_pool(PracticeRenderContext *context, s32 max_count) {
+static void save_joint_pool(PracticeRenderContext *context) {
   PracticeRenderJoint *joint;
   PracticeRenderJoint **order;
   s32 count = 0;
@@ -322,7 +294,7 @@ static void save_joint_pool(PracticeRenderContext *context, s32 max_count) {
   context->joint_pool_count = 0;
 
   for (joint = D_80036060;
-       joint != NULL && count < max_count;
+       joint != NULL && count < 600;
        joint = joint->next) {
     count++;
   }
@@ -388,7 +360,7 @@ static void save_model_render_positions(PracticeRenderContext *context,
       if (chr->model != NULL)
         count++;
 
-      for (i = 0; i < 3; i++) {
+      for (i = 0; i < 2; i++) {
         PropRecord *held = chr->weapons_held[i];
 
         if (held != NULL && held->obj != NULL && held->obj->model != NULL)
@@ -437,7 +409,7 @@ static void save_model_render_positions(PracticeRenderContext *context,
         saved++;
       }
 
-      for (i = 0; i < 3; i++) {
+      for (i = 0; i < 2; i++) {
         PropRecord *held = chr->weapons_held[i];
 
         if (held != NULL && held->obj != NULL && held->obj->model != NULL) {
@@ -457,6 +429,24 @@ static void save_model_render_positions(PracticeRenderContext *context,
       }
     }
   }
+
+  saved = context->model_render_positions;
+  {
+    s32 i;
+    for (i = 0; i < context->model_render_position_count; i++) {
+      Model *model = saved[i].model;
+      ModelNode *root = model != NULL && model->obj != NULL
+                            ? model->obj->RootNode
+                            : NULL;
+      saved[i].has_root_data =
+          root != NULL && (root->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
+      if (saved[i].has_root_data) {
+        ModelRwData_HeaderRecord *root_data =
+            (ModelRwData_HeaderRecord *)modelGetNodeRwData(model, root);
+        saved[i].root_data = *root_data;
+      }
+    }
+  }
 }
 
 static void restore_model_render_positions(PracticeRenderContext *context) {
@@ -467,49 +457,145 @@ static void restore_model_render_positions(PracticeRenderContext *context) {
     saved[i].model->render_pos = saved[i].render_pos;
 }
 
-static void restore_refreshed_render_matrices(void) {
-  PropRecord *prop;
+static void restore_model_root_data(PracticeRenderContext *context) {
+  PracticeRenderObject *saved = context->model_render_positions;
+  s32 i;
 
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    if (!(prop->flags & PROPFLAG_ONSCREEN)) {
+  for (i = 0; i < context->model_render_position_count; i++) {
+    if (saved[i].has_root_data) {
+      ModelNode *root = saved[i].model->obj->RootNode;
+      ModelRwData_HeaderRecord *root_data =
+          (ModelRwData_HeaderRecord *)modelGetNodeRwData(saved[i].model, root);
+      *root_data = saved[i].root_data;
+    }
+  }
+}
+
+static void restore_refreshed_render_matrices(void) {
+  s32 prop_index;
+
+  for (prop_index = 0; prop_index < POS_DATA_ENTRY_LEN; prop_index++) {
+    PropRecord *prop = &pos_data_entry[prop_index];
+
+    if (!(g_ConvertedPropMatrices[prop_index >> 3] &
+          (1 << (prop_index & 7)))) {
       continue;
     }
+
     if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
-        prop->chr != NULL) {
-      ChrRecord *chr = prop->chr;
-      s32 hand;
-
-      restore_model_matrices(chr->model);
-      for (hand = 0; hand < 3; hand++) {
-        PropRecord *held = chr->weapons_held[hand];
-        s32 previous;
-        bool duplicate = FALSE;
-
-        for (previous = 0; previous < hand; previous++) {
-          if (chr->weapons_held[previous] == held) {
-            duplicate = TRUE;
-            break;
-          }
-        }
-        if (!duplicate && held != NULL && held->obj != NULL) {
-          restore_model_matrices(held->obj->model);
-        }
-      }
-      if (chr->handle_positiondata_hat != NULL &&
-          chr->handle_positiondata_hat->obj != NULL) {
-        restore_model_matrices(chr->handle_positiondata_hat->obj->model);
-      }
+        prop->chr != NULL && prop->chr->model != NULL) {
+      restore_model_matrices(prop->chr->model);
     } else if ((prop->type == PROP_TYPE_OBJ ||
                 prop->type == PROP_TYPE_WEAPON ||
                 prop->type == PROP_TYPE_DOOR) &&
-               (prop->parent == NULL ||
-                (prop->parent->type != PROP_TYPE_CHR &&
-                 prop->parent->type != PROP_TYPE_VIEWER)) &&
-               prop->obj != NULL) {
+               prop->obj != NULL && prop->obj->model != NULL) {
       restore_model_matrices(prop->obj->model);
     }
   }
+}
+
+static Model *get_live_prop_model(PropRecord *prop) {
+  if (prop == NULL)
+    return NULL;
+
+  if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+      prop->chr != NULL) {
+    return prop->chr->model;
+  }
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL) {
+    return prop->obj->model;
+  }
+  return NULL;
+}
+
+static bool mark_converted_prop_tree(PropRecord *prop,
+                                     RenderPosView *render_pos, s32 depth) {
+  PropRecord *child;
+  Model *model;
+  s32 child_guard = 0;
+
+  if (prop == NULL || depth >= POS_DATA_ENTRY_LEN)
+    return FALSE;
+
+  model = get_live_prop_model(prop);
+  if (model != NULL && model->render_pos == render_pos) {
+    s32 prop_index = prop - pos_data_entry;
+    if (prop_index >= 0 && prop_index < POS_DATA_ENTRY_LEN) {
+      g_ConvertedPropMatrices[prop_index >> 3] |= 1 << (prop_index & 7);
+      return TRUE;
+    }
+  }
+
+  for (child = prop->child;
+       child != NULL && child_guard++ < POS_DATA_ENTRY_LEN;
+       child = child->prev) {
+    if (mark_converted_prop_tree(child, render_pos, depth + 1))
+      return TRUE;
+  }
+  return FALSE;
+}
+
+void practice_mark_converted_render_matrices(RenderPosView *render_pos) {
+  s32 hand;
+  PropRecord *prop;
+
+  if (render_pos == NULL)
+    return;
+
+  for (hand = 0; hand < 2; hand++) {
+    if ((RenderPosView *)g_CurrentPlayer->hands[hand].field_B74 == render_pos) {
+      g_ConvertedHandMatrices |= 1 << hand;
+      return;
+    }
+  }
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    if (mark_converted_prop_tree(prop, render_pos, 0))
+      return;
+  }
+}
+
+bool practice_hand_render_matrices_are_fixed(s32 hand) {
+  return hand >= 0 && hand < 2 &&
+         (g_ConvertedHandMatrices & (1 << hand)) != 0;
+}
+
+void practice_clear_loaded_hand_matrices_float(void) {
+  g_LoadedFloatHandMatrices = 0;
+}
+
+void practice_mark_loaded_hand_matrices_float(s32 hand) {
+  if (hand >= 0 && hand < 2)
+    g_LoadedFloatHandMatrices |= 1 << hand;
+}
+
+static void restore_converted_hand_matrices(void) {
+  s32 hand;
+
+  for (hand = 0; hand < 2; hand++) {
+    struct hand *hand_state = &g_CurrentPlayer->hands[hand];
+    ModelFileHeader *header = (ModelFileHeader *)hand_state->field_B70;
+
+    if ((g_ConvertedHandMatrices & (1 << hand)) && header != NULL) {
+      restore_matrices((RenderPosView *)hand_state->field_B74,
+                       header->numMatrices);
+    }
+  }
+}
+
+static void clear_converted_render_matrices(void) {
+  bzero(g_ConvertedPropMatrices, sizeof(g_ConvertedPropMatrices));
+  g_ConvertedHandMatrices = 0;
+}
+
+void practice_begin_live_render(void) {
+  /* Gameplay/model ticks rebuild float matrices before each live render, so
+   * only conversions from this render can describe the buffers a following
+   * paused frame inherits. */
+  clear_converted_render_matrices();
 }
 
 static void initialize_model_matrices(Model *model) {
@@ -535,7 +621,7 @@ static void initialize_character_matrices(ChrRecord *chr) {
 
   initialize_model_matrices(chr->model);
 
-  for (i = 0; i < 3; i++) {
+  for (i = 0; i < 2; i++) {
     PropRecord *held = chr->weapons_held[i];
 
     if (held != NULL && held->obj != NULL)
@@ -548,23 +634,59 @@ static void initialize_character_matrices(ChrRecord *chr) {
   }
 }
 
+static bool prop_or_ancestor_is_onscreen(PropRecord *prop) {
+  s32 guard = 0;
+
+  while (prop != NULL && guard++ < POS_DATA_ENTRY_LEN) {
+    if (prop->flags & PROPFLAG_ONSCREEN)
+      return TRUE;
+    prop = prop->parent;
+  }
+
+  return FALSE;
+}
+
+static void initialize_visible_object_tree(PropRecord *prop, s32 depth) {
+  PropRecord *child;
+  s32 child_guard = 0;
+
+  if (prop == NULL || depth >= POS_DATA_ENTRY_LEN)
+    return;
+
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL && prop->obj->model != NULL &&
+      prop_or_ancestor_is_onscreen(prop)) {
+    initialize_model_matrices(prop->obj->model);
+  }
+
+  for (child = prop->child;
+       child != NULL && child_guard++ < POS_DATA_ENTRY_LEN;
+       child = child->prev) {
+    initialize_visible_object_tree(child, depth + 1);
+  }
+}
+
 void practice_prepare_character_render(PracticeRenderContext *context) {
   PropRecord *prop;
-  s32 max_joint_count = 0;
 
   context->rendered_all_characters = FALSE;
   g_IsRenderOnly = TRUE;
 
+  /* A render-only pass can change its visible set while culling. Preserve the
+   * complete free list: limiting the snapshot to the initially visible model
+   * estimate lets newly visible characters consume unsaved nodes and corrupt
+   * the pool when it is restored. */
+  save_joint_pool(context);
+  save_model_render_positions(context, FALSE);
+
+  /* Attached child props are delisted, but a visible ancestor can still
+   * render their models recursively. Give those models current-arena storage
+   * without allocating matrices for every dormant object in the level. */
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
-    if ((prop->flags & PROPFLAG_ONSCREEN) &&
-        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER)) {
-      max_joint_count += count_character_render_joints(prop->chr);
-    }
+    initialize_visible_object_tree(prop, 0);
   }
-
-  save_joint_pool(context, max_joint_count);
-  save_model_render_positions(context, FALSE);
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
@@ -573,10 +695,6 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
          prop->type == PROP_TYPE_WEAPON ||
          prop->type == PROP_TYPE_DOOR) &&
         prop->obj != NULL && prop->obj->model != NULL) {
-      /* Visibility flags can survive a load even when the referenced matrix
-       * buffer belonged to an older graphics-arena generation. Give the
-       * object renderer unambiguous current-frame float storage. */
-      initialize_model_matrices(prop->obj->model);
       continue;
     }
 
@@ -605,7 +723,6 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
 
 void practice_prepare_refreshed_render(PracticeRenderContext *context) {
   PropRecord *prop;
-  s32 max_joint_count = 0;
   s32 hand;
 
   /* Only visible models need matrix storage, but every restored character can
@@ -647,13 +764,18 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
          * overlap, so finish reading the fixed matrix into stack storage
          * before writing the restored float matrix back to the arena.
          */
-        guMtxL2F(restored_matrix.m,
-                 (Mtx *)&old_render_pos[matrix].pos);
+        if (g_LoadedFloatHandMatrices & (1 << hand)) {
+          matrix_4x4_copy(&old_render_pos[matrix].pos, &restored_matrix);
+        } else {
+          guMtxL2F(restored_matrix.m,
+                   (Mtx *)&old_render_pos[matrix].pos);
+        }
         matrix_4x4_copy(&restored_matrix,
                         &new_render_pos[matrix].pos);
       }
 
       hand_state->field_B74 = (s32)new_render_pos;
+      g_LoadedFloatHandMatrices &= ~(1 << hand);
     }
   }
 
@@ -663,20 +785,26 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
    * there is no previous fixed-point render matrix to convert back to float.
    * Build fresh matrices from the restored state instead.
    */
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    if ((prop->flags & PROPFLAG_ONSCREEN) &&
-        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
-        prop->chr != NULL) {
-      max_joint_count += count_character_render_joints(prop->chr);
-    }
-  }
-
-  save_joint_pool(context, max_joint_count);
+  save_joint_pool(context);
   save_model_render_positions(context, FALSE);
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
+    initialize_visible_object_tree(prop, 0);
+  }
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    if ((prop->type == PROP_TYPE_OBJ ||
+         prop->type == PROP_TYPE_WEAPON ||
+         prop->type == PROP_TYPE_DOOR) &&
+        prop->obj != NULL && prop->obj->model != NULL) {
+      if (prop->flags & PROPFLAG_ONSCREEN) {
+        object_interaction(prop);
+      }
+      continue;
+    }
+
     if (!(prop->flags & PROPFLAG_ONSCREEN))
       continue;
 
@@ -684,12 +812,6 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
         prop->chr != NULL && prop->chr->model != NULL) {
       initialize_character_matrices(prop->chr);
       chrTickBeams(prop);
-    } else if ((prop->type == PROP_TYPE_OBJ ||
-                prop->type == PROP_TYPE_WEAPON ||
-                prop->type == PROP_TYPE_DOOR) &&
-               prop->obj != NULL && prop->obj->model != NULL) {
-      initialize_model_matrices(prop->obj->model);
-      object_interaction(prop);
     }
   }
 
@@ -715,12 +837,13 @@ void practice_finish_character_render(PracticeRenderContext *context) {
     }
   }
 
-  if (context->rendered_all_characters) {
-    /* Retain the rebuilt allocations instead of restoring stale pre-load
-     * arena pointers. Walk the live ownership graph because the saved pointer
-     * list itself lives in that arena and may be overwritten by rendering. */
-    restore_refreshed_render_matrices();
-  } else {
+  /* Nested/offscreen child objects can be rendered through a visible parent
+   * without receiving a temporary render_pos allocation of their own. Restore
+   * every buffer the paused alpha pass actually converted before discarding
+   * any temporary visible-model pointers. */
+  restore_refreshed_render_matrices();
+  restore_model_root_data(context);
+  if (!context->rendered_all_characters) {
     restore_model_render_positions(context);
   }
   restore_joint_pool(context);
@@ -729,7 +852,18 @@ void practice_finish_character_render(PracticeRenderContext *context) {
      * the first live frame validates the reconstructed render state. */
     g_IsRenderStateInvalidated = 2;
   }
+  /* Visibility is gameplay state. A render-only paused frame may calculate a
+   * different visible set while rebuilding matrices, but it must not expose
+   * that transient set to the next live tick. */
+  restore_prop_onscreen_state();
+  g_CurrentPlayer->current_model_pos = context->current_model_pos;
+  g_CurrentPlayer->previous_model_pos = context->previous_model_pos;
+  g_CurrentPlayer->current_room_pos = context->current_room_pos;
   restore_watch_state(context);
+  /* Only buffers actually consumed by the paused alpha pass are fixed point.
+   * Leave skipped hand models in their existing float representation. */
+  restore_converted_hand_matrices();
+  clear_converted_render_matrices();
   g_IsRenderOnly = FALSE;
 }
 
@@ -754,18 +888,10 @@ static void restore_model_matrices(Model *model) {
 }
 
 void practice_restore_render_matrices(void) {
-  s32 i;
-
-  for (i = 0; i < 2; i++) {
-    struct hand *hand = &g_CurrentPlayer->hands[i];
-    ModelFileHeader *header = (ModelFileHeader *)hand->field_B70;
-
-    if (header != NULL) {
-      restore_matrices((RenderPosView *)hand->field_B74,
-                       header->numMatrices);
-    }
-
-    if (hand->rocket != NULL)
-      restore_model_matrices(hand->rocket->model);
-  }
+  /* A live alpha pass leaves every matrix it submits in packed fixed-point
+   * form. Restore exactly those buffers before a zero-tick paused render tries
+   * to reuse them as floats, including nested prop models. */
+  restore_refreshed_render_matrices();
+  restore_converted_hand_matrices();
+  clear_converted_render_matrices();
 }

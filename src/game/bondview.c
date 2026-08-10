@@ -49,6 +49,7 @@
 #include "practice/practice_splits.h"
 #include "practice/practice_ui.h"
 #include "practice/practice_lag.h"
+#include "practice/practice_render.h"
 #include "practice/state/practice_states_utils.h"
 
 #ifdef VERSION_EU
@@ -20420,6 +20421,9 @@ void bondviewTransformManyPosToViewMatrix(RenderPosView * arg0, s32 arg1)
     rpv_entry = arg0;
     do
     {
+#ifdef PRACTICE_ROM
+        practice_mark_converted_render_matrices(arg0);
+#endif
         matrix_4x4_copy(&rpv_entry->pos, &mtx);
         matrix_4x4_f32_to_s32(&mtx, &arg0[i].pos);
         i++;

@@ -50,6 +50,7 @@
 #include "objective_status.h"
 #include "practice/practice_external_camera.h"
 #include "practice/practice_render.h"
+#include "practice/practice_timescale.h"
 
 extern Model *g_CurrentProjectileModel;
 extern ModelNode *dword_CODE_bss_80075B74;
@@ -4796,6 +4797,15 @@ void chrobjWeaponTick(struct PropRecord* prop)
     {
         return;
     }
+
+#ifdef PRACTICE_ROM
+    /* A paused practice frame still walks the prop list for rendering. Some
+     * explosive weapon states trigger on an exact timer value rather than a
+     * timer decrement, so ticking them with a zero delta can create an
+     * explosion immediately after a state load. Leave all weapon-object
+     * simulation for the first frame on which game time actually resumes. */
+    if (g_IsTimePaused) return;
+#endif
 
     if (obj->type == PROP_TYPE_EXPLOSION) // 7
     {
@@ -15595,6 +15605,13 @@ bool objIsMortal(ObjectRecord* obj)
 */
 void chrobjMaybeDetonateObjectIfFlags(ObjectRecord *obj, f32 damage, coord3d *pos, ITEM_IDS item, s32 owner)
 {
+#ifdef PRACTICE_ROM
+    /* NPC hitscan can still run while a practice pause renders. Do not apply
+     * its object hit until the pause ends. Ordinary zero-delta frames remain
+     * part of the base game's deterministic simulation. */
+    if (g_IsTimePaused) return;
+#endif
+
     if ((obj->flags2 & 0x4000) == 0)
     {
         maybe_detonate_object(obj, damage, pos, item, owner);

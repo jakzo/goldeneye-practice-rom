@@ -1,4 +1,5 @@
 #include "practice_states_globals.h"
+#include "bg.h"
 #include "bondview.h"
 #include "chr.h"
 #include "chrai.h"
@@ -141,7 +142,6 @@ struct PracticeFogDetails {
   f32 near_scaled;
 };
 extern struct PracticeFogDetails g_CurFogDetails;
-extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern void sub_GAME_7F0BD8FC(s32 arg0);
 
 static s32 saved_player_tank_prop_index;
@@ -196,12 +196,7 @@ static void save_background_ai_state(StateStream *stream) {
 
   for (i = 0; i < g_ActiveChrsCount; i++) {
     ChrRecord *chr = &g_ActiveChrs[i];
-    s32 ailist_id = -1;
-
-    if (chr->ailist != NULL) {
-      bool is_global;
-      ailist_id = chraiGetAIListID(chr->ailist, &is_global);
-    }
+    s32 ailist_reference = get_ai_list_reference(chr->ailist);
 
     write_u16(stream, (u16)chr->chrnum);
     write_u8(stream, (u8)chr->actiontype);
@@ -217,7 +212,7 @@ static void save_background_ai_state(StateStream *stream) {
     write_u16(stream, (u16)chr->chrpreset1);
     write_u16(stream, (u16)chr->chrseeshot);
     write_u16(stream, (u16)chr->chrseedie);
-    write_u32(stream, ailist_id);
+    write_u32(stream, ailist_reference);
     write_u16(stream, chr->aioffset);
     write_u16(stream, (u16)chr->aireturnlist);
   }
@@ -242,13 +237,13 @@ static void load_background_ai_state(StateStream *stream) {
     s16 chrpreset1 = (s16)read_u16(stream);
     s16 chrseeshot = (s16)read_u16(stream);
     s16 chrseedie = (s16)read_u16(stream);
-    s32 ailist_id = read_u32(stream);
+    s32 ailist_reference = read_u32(stream);
     u16 aioffset = read_u16(stream);
     s16 aireturnlist = (s16)read_u16(stream);
 
     if (i < g_ActiveChrsCount) {
       ChrRecord *chr = &g_ActiveChrs[i];
-      AIRecord *ailist = ailist_id != -1 ? ailistFindById(ailist_id) : NULL;
+      AIRecord *ailist = get_ai_list_by_reference(ailist_reference);
 
       chr->chrnum = chrnum;
       chr->actiontype = actiontype;
@@ -628,6 +623,12 @@ void save_global_state(StateStream *stream) {
 
   // Values
   write_u32(stream, g_GlobalTimer);
+  write_u32(stream, g_ClockTimer);
+  write_f32(stream, g_GlobalTimerDelta);
+#if defined(BUGFIX_R1)
+  write_f32(stream, g_JP_GlobalTimerDelta);
+#endif
+  write_u32(stream, D_80048380);
   write_u32(stream, mission_timer);
 #if defined(VERSION_JP) || defined(VERSION_EU)
   write_f32(stream, watch_time_0);
@@ -836,6 +837,12 @@ void load_global_state_pre_props(StateStream *stream) {
 
   // Values
   g_GlobalTimer = read_u32(stream);
+  g_ClockTimer = read_u32(stream);
+  g_GlobalTimerDelta = read_f32(stream);
+#if defined(BUGFIX_R1)
+  g_JP_GlobalTimerDelta = read_f32(stream);
+#endif
+  D_80048380 = read_u32(stream);
   mission_timer = read_u32(stream);
 #if defined(VERSION_JP) || defined(VERSION_EU)
   watch_time_0 = read_f32(stream);
@@ -905,6 +912,33 @@ void load_global_state_pre_props(StateStream *stream) {
   read_bytes(stream, roomStatusFlags, sizeof(roomStatusFlags));
   read_bytes(stream, roomIndices, sizeof(roomIndices));
   read_bytes(stream, roomOwners, sizeof(roomOwners));
+  {
+    s32 matrix;
+    s32 room;
+
+    /* roomIndices and s_room_info::field_36 are the two directions of the
+     * room-transform lookup. Only the compact index array needs to be stored;
+     * rebuild the reverse mapping before the renderer can reuse a slot. */
+    for (room = 0; room < g_MaxNumRooms; room++) {
+      g_BgRoomInfo[room].field_36 = -1;
+    }
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
+      room = roomIndices[matrix];
+      if (room < 0) {
+        continue;
+      }
+      if (room >= g_MaxNumRooms || g_BgRoomInfo[room].field_36 != -1) {
+        practiceLogError("Saved room transform mapping is invalid (%d -> %d)",
+                         matrix, room);
+        assert(FALSE);
+        roomIndices[matrix] = -1;
+        roomOwners[matrix] = -1;
+        roomStatusFlags[matrix] = 2;
+        continue;
+      }
+      g_BgRoomInfo[room].field_36 = matrix;
+    }
+  }
   {
     u16 matrix_count = read_u16(stream);
     s32 matrix;

@@ -341,7 +341,7 @@ static void save_pip_prop_render_pos_states(
 
     save_pip_render_pos_state(states, count, chr->model);
 
-    for (i = 0; i < 3; i++) {
+    for (i = 0; i < 2; i++) {
       if (chr->weapons_held[i] != NULL &&
           chr->weapons_held[i]->obj != NULL) {
         save_pip_render_pos_state(states, count,

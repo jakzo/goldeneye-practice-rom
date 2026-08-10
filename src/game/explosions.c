@@ -22,6 +22,7 @@
 #include "music.h"
 #include "player.h"
 #include "practice/practice_external_camera.h"
+#include "practice/practice_timescale.h"
 #include "random.h"
 #include "snd.h"
 #include "stan.h"
@@ -783,6 +784,13 @@ s32 explosionTick(PropRecord* arg0)
         sub_GAME_7F03E27C(arg0, &sp90, &sp84, hrange);
 
         vrange = explosiontype->explosion_range + (((explosiontype->dmg_range - explosiontype->explosion_range) * (f32) exp->age) / (f32) explosiontype->duration);
+
+#ifdef PRACTICE_ROM
+        /* A practice pause still renders frames. Do not repeatedly apply its
+         * scheduled damage while paused; ordinary zero-delta frames retain
+         * the base game's behavior. */
+        if (!g_IsTimePaused)
+#endif
         explosionInflictDamage(arg0, vrange, vrange);
     }
     
@@ -1697,6 +1705,13 @@ void explosionUpdateFlyingParticles(void)
     f32 scalar;
     s32 i;
     s32 j;
+
+#ifdef PRACTICE_ROM
+    /* Practice pauses still render frames. Do not probabilistically expire
+     * particles (and consume RNG) while paused. Ordinary zero-delta frames
+     * must retain the base game's RNG calls for deterministic replays. */
+    if (g_IsTimePaused) return;
+#endif
 
     if (g_ClockTimer < 0xF)
     {

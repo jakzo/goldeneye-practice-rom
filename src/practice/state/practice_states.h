@@ -36,7 +36,8 @@ void load_global_state_pre_props(StateStream *stream);
 bool load_global_state_post_props(void);
 void restore_global_rng_after_load(void);
 bool save_viewer_players_state(StateStream *stream);
-bool load_viewer_players_state(StateStream *stream);
+bool load_viewer_players_state(StateStream *stream,
+                               bool force_model_rebuild);
 bool save_props_state(StateStream *stream);
 bool load_props_state(StateStream *stream);
 
