@@ -976,10 +976,9 @@ Gfx* lvlRender(Gfx* DL)
     else
     {
 #ifdef PRACTICE_ROM
-        /* Ordinary zero-tick frames retain the last complete framebuffer and
-         * its model matrices. Loading invalidates those buffers, so allow one
-         * dedicated render-only rebuild before freezing again. */
         if (speedgraphframes == 0 && !practice_needs_refreshed_render()) {
+            practice_copy_paused_framebuffer();
+            DL = practice_ui_render(DL);
             return DL;
         }
 #endif

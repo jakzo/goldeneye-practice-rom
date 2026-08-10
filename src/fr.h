@@ -188,6 +188,7 @@ s16 viGetViewTop(void);
 s16 viGetViewWidth(void);
 s16 viGetViewHeight(void);
 u8 *viGetFrameBuf2(void);
+u8 *viGetFrameBuf1(void);
 void viSetFrameBuf2(u8 *buf);
 void viSetFovY(f32 fovy);
 f32 viGetFovY(void);

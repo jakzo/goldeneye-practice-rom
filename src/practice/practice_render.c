@@ -10,6 +10,7 @@
 #include "game/matrixmath.h"
 #include "game/objecthandler.h"
 #include "game/player.h"
+#include "fr.h"
 #include "practice_render.h"
 
 extern s32 object_interaction(PropRecord *prop);
@@ -72,6 +73,20 @@ static u8 g_LoadedFloatHandMatrices;
 
 static void restore_matrices(RenderPosView *render_pos, s32 count);
 static void restore_model_matrices(Model *model);
+
+void practice_copy_paused_framebuffer(void) {
+  u8 *source = viGetFrameBuf1();
+  u8 *destination = viGetFrameBuf2();
+  u32 size = SCREEN_WIDTH * SCREEN_HEIGHT * 2;
+
+  /* Keep VI's double buffers in sync without re-entering gameplay renderers. */
+  if (source == destination)
+    return;
+
+  osInvalDCache(source, size);
+  bcopy(source, destination, size);
+  osWritebackDCache(destination, size);
+}
 
 void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
                                          Mtxf *matrix10e8, Mtxf *matrix10ec) {
