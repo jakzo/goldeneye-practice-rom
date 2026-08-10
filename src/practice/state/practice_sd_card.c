@@ -1,16 +1,15 @@
 #include "practice_sd_card.h"
 #include "practice_fatfs_config.h"
+#include "practice_libdragon_compat.h"
 #include "../../../libdragon/src/fatfs/ff.h"
 #include "../../../libdragon/src/fatfs/diskio.h"
 #include "../../../libdragon/src/libcart/cart.h"
 #include "../practice_ui.h"
 
-extern void __osPiGetAccess(void);
-extern void __osPiRelAccess(void);
 extern int sprintf(char *dst, const char *fmt, ...);
 
-#define SAVE_STATE_DIRECTORY "0:/goldeneye_practice_rom/save_states"
-#define SAVE_STATE_PARENT_DIRECTORY "0:/goldeneye_practice_rom"
+#define SAVE_STATE_DIRECTORY "0:/GEPRAC/STATES"
+#define SAVE_STATE_PARENT_DIRECTORY "0:/GEPRAC"
 #define SAVE_STATE_PATH_SIZE 128
 #define GENERATED_SAVE_STATE_PATH_SIZE 64
 #define SAVE_NUMBER_COUNT 1000
@@ -32,7 +31,7 @@ static bool g_SdCardFileWriting;
 static u16 g_SdCardCurrentWriteNumber;
 
 static DSTATUS sd_card_disk_initialize(void) {
-  return cart_card_init() == 0 ? 0 : STA_NOINIT;
+  return practice_cart_card_init() == 0 ? 0 : STA_NOINIT;
 }
 
 DSTATUS disk_initialize(BYTE pdrv) {
@@ -42,14 +41,16 @@ DSTATUS disk_initialize(BYTE pdrv) {
 DSTATUS disk_status(BYTE pdrv) { return pdrv == 0 ? 0 : STA_NOINIT; }
 
 DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count) {
-  if (pdrv != 0 || cart_card_rd_dram(buff, sector, count) != 0) {
+  if (pdrv != 0 ||
+      practice_cart_card_rd_dram(buff, sector, count) != 0) {
     return RES_ERROR;
   }
   return RES_OK;
 }
 
 DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
-  if (pdrv != 0 || cart_card_wr_dram(buff, sector, count) != 0) {
+  if (pdrv != 0 ||
+      practice_cart_card_wr_dram(buff, sector, count) != 0) {
     return RES_ERROR;
   }
   return RES_OK;
@@ -69,7 +70,9 @@ DWORD get_fattime(void) {
 }
 
 static bool sd_card_mount(void) {
-  static const s32 supported_cart_types[] = {CART_EDX, CART_ED, CART_SC};
+  /* Probe SC64 first. EverDrive detection writes to its device register
+   * ranges, which can overlap storage emulated by another flashcart. */
+  static const s32 supported_cart_types[] = {CART_SC, CART_EDX, CART_ED};
   FRESULT result;
   s32 i;
 
@@ -77,24 +80,19 @@ static bool sd_card_mount(void) {
     return TRUE;
   }
 
-  __osPiGetAccess();
-
   for (i = 0;
        i < sizeof(supported_cart_types) / sizeof(supported_cart_types[0]);
        i++) {
-    cart_type = supported_cart_types[i];
-    if (cart_init() >= 0) {
+    if (practice_cart_init(supported_cart_types[i]) >= 0) {
       break;
     }
   }
   if (i == sizeof(supported_cart_types) / sizeof(supported_cart_types[0])) {
     cart_type = CART_NULL;
-    __osPiRelAccess();
     return FALSE;
   }
 
   result = f_mount(&g_SdCardFat, "", 1);
-  __osPiRelAccess();
   if (result != FR_OK) {
     practiceLogWarn("Could not mount flashcart SD card (%d)", result);
     return FALSE;
@@ -109,7 +107,7 @@ static s32 parse_save_number(const char *name) {
   s32 b = name[1] - '0';
   s32 c = name[2] - '0';
   if (a >= 0 && a <= 9 && b >= 0 && b <= 9 && c >= 0 && c <= 9 &&
-      name[3] == '-') {
+      name[3] == '.') {
     return a * 100 + b * 10 + c;
   }
   return -1;
@@ -302,22 +300,20 @@ bool practice_sd_card_begin_write(const char *level_name, s32 max_save_states) {
     return FALSE;
   }
 
-  __osPiGetAccess();
+  (void)level_name;
+
   result = f_mkdir(SAVE_STATE_PARENT_DIRECTORY);
   if (result != FR_OK && result != FR_EXIST) {
     practiceLogWarn("Could not create SD-card save directory (%d)", result);
-    __osPiRelAccess();
     return FALSE;
   }
   result = f_mkdir(SAVE_STATE_DIRECTORY);
   if (result != FR_OK && result != FR_EXIST) {
     practiceLogWarn("Could not create SD-card save directory (%d)", result);
-    __osPiRelAccess();
     return FALSE;
   }
 
   if (!scan_save_directory(&saves)) {
-    __osPiRelAccess();
     return FALSE;
   }
   if (max_save_states < 1) {
@@ -327,16 +323,18 @@ bool practice_sd_card_begin_write(const char *level_name, s32 max_save_states) {
   }
   if (saves.count >= max_save_states &&
       !delete_oldest_saves(&saves, saves.count - max_save_states + 1)) {
-    __osPiRelAccess();
     return FALSE;
   }
 
-  sprintf(path, "%s/%03d-%s.sav", SAVE_STATE_DIRECTORY, saves.next,
-          level_name);
-  result = f_open(&g_SdCardFile, path, FA_WRITE | FA_CREATE_NEW);
-  __osPiRelAccess();
+  sprintf(path, "%s/%03d.SAV", SAVE_STATE_DIRECTORY, saves.next);
+  /* The state serializer seeks backward to patch counts and offsets. Its
+   * paged stream must read the already-written page before changing only part
+   * of it, so a newly created save needs read as well as write access. */
+  result =
+      f_open(&g_SdCardFile, path, FA_READ | FA_WRITE | FA_CREATE_NEW);
   if (result != FR_OK) {
-    practiceLogWarn("Could not create SD-card save state (%d)", result);
+    practiceLogWarn("Could not create SD-card save state (%d): %s", result,
+                    path);
     return FALSE;
   }
 
@@ -354,7 +352,6 @@ bool practice_sd_card_finish_write(bool success) {
     return FALSE;
   }
 
-  __osPiGetAccess();
   close_result = f_close(&g_SdCardFile);
   g_SdCardFileOpen = FALSE;
   g_SdCardFileWriting = FALSE;
@@ -363,8 +360,6 @@ bool practice_sd_card_finish_write(bool success) {
       f_unlink(path);
     }
   }
-  __osPiRelAccess();
-
   if (close_result != FR_OK) {
     practiceLogWarn("Could not close SD-card save state (%d)", close_result);
     return FALSE;
@@ -381,17 +376,13 @@ bool practice_sd_card_begin_read(void) {
     return FALSE;
   }
 
-  __osPiGetAccess();
   if (!scan_save_directory(&saves)) {
-    __osPiRelAccess();
     return FALSE;
   }
   if (saves.count == 0 || !find_save_path(saves.newest, path)) {
-    __osPiRelAccess();
     return FALSE;
   }
   result = f_open(&g_SdCardFile, path, FA_READ);
-  __osPiRelAccess();
   if (result != FR_OK) {
     practiceLogWarn("Could not open SD-card save state (%d)", result);
     return FALSE;
@@ -406,9 +397,7 @@ void practice_sd_card_finish_read(void) {
   if (!g_SdCardFileOpen || g_SdCardFileWriting) {
     return;
   }
-  __osPiGetAccess();
   f_close(&g_SdCardFile);
-  __osPiRelAccess();
   g_SdCardFileOpen = FALSE;
 }
 
@@ -417,9 +406,11 @@ bool practice_sd_card_seek(u32 offset) {
   if (!g_SdCardFileOpen) {
     return FALSE;
   }
-  __osPiGetAccess();
   result = f_lseek(&g_SdCardFile, offset);
-  __osPiRelAccess();
+  if (result != FR_OK) {
+    practiceLogWarn("Could not seek SD-card save state (%d, offset %d)", result,
+                    offset);
+  }
   return result == FR_OK;
 }
 
@@ -429,20 +420,37 @@ bool practice_sd_card_write(const void *data, u32 size) {
   if (!g_SdCardFileOpen || !g_SdCardFileWriting) {
     return FALSE;
   }
-  __osPiGetAccess();
   result = f_write(&g_SdCardFile, data, size, &written);
-  __osPiRelAccess();
+  if (result != FR_OK || written != size) {
+    practiceLogWarn("Could not write SD-card save state (%d, %d/%d)", result,
+                    written, size);
+  }
   return result == FR_OK && written == size;
 }
 
 bool practice_sd_card_read(void *data, u32 size) {
   FRESULT result;
   UINT read;
-  if (!g_SdCardFileOpen || g_SdCardFileWriting) {
+  u32 i;
+  if (!g_SdCardFileOpen) {
     return FALSE;
   }
-  __osPiGetAccess();
   result = f_read(&g_SdCardFile, data, size, &read);
-  __osPiRelAccess();
+
+  /* A serializer backpatch can revisit the current final, partially written
+   * page. FatFs correctly returns only the bytes up to EOF; the unwritten
+   * remainder of a new save file is logically zero. Normal save-state loads
+   * must still reject truncated files. */
+  if (result == FR_OK && g_SdCardFileWriting && read < size) {
+    for (i = read; i < size; i++) {
+      ((u8 *)data)[i] = 0;
+    }
+    read = size;
+  }
+
+  if (result != FR_OK || read != size) {
+    practiceLogWarn("Could not read SD-card save state (%d, %d/%d)", result,
+                    read, size);
+  }
   return result == FR_OK && read == size;
 }

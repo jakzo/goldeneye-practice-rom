@@ -10,7 +10,7 @@
 #define inline
 #endif
 
-#define STORAGE_PAGE_SIZE 512
+#define STORAGE_PAGE_SIZE 4096
 
 typedef struct StateStream StateStream;
 
@@ -28,6 +28,7 @@ typedef struct {
   u8 page[STORAGE_PAGE_SIZE]
       __attribute__((aligned(16))); // 16 byte alignment for D-cache
   PracticeStorageLocation location;
+  u32 capacity;
   u32 page_offset;
   u32 current_page_addr;
   bool is_write;
@@ -40,7 +41,7 @@ void storage_stream_init_write(StorageStream *stream,
                                u32 base_address);
 void storage_stream_init_read(StorageStream *stream,
                               PracticeStorageLocation location,
-                              u32 base_address);
+                              u32 base_address, u32 size);
 
 // Generic stream helpers
 static inline void write_u32(StateStream *stream, u32 val) {

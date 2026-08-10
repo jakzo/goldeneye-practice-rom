@@ -170,25 +170,18 @@ static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
 static s32 frigate_apply(s32 stage_id) { return stage_id == LEVELID_FRIGATE; }
 
 static s32 s_boot_level_option = LEVELID_TITLE;
-static s32 s_storage_availability_checked;
-static s32 s_flashcart_storage_available;
-
 static s32 save_state_storage_options(s32 stage_id, s32 option_index,
                                       const char **option_name,
                                       s32 *option_value) {
   s32 available_index = 0;
   s32 i;
 
-  if (!s_storage_availability_checked) {
-    s_flashcart_storage_available =
-        storage_location_is_available(PRACTICE_STORAGE_FLASHCART_SD);
-    s_storage_availability_checked = TRUE;
-  }
-
   for (i = 0; i < ARRAY_COUNT(s_save_state_storage); i++) {
     s32 location = s_save_state_storage[i].value;
+    /* Rendering this menu must not probe the flashcart. Flashcart access can
+     * block on PI/TLB activity and should only happen when storage is used. */
     s32 available = location == PRACTICE_STORAGE_FLASHCART_SD
-                        ? s_flashcart_storage_available
+                        ? TRUE
                         : storage_location_is_available(location);
 
     if (!available) {
@@ -273,7 +266,7 @@ static const struct PracticeSetting s_level_settings[] = {
 static const struct PracticeSetting s_global_settings[] = {
     DYNAMIC_OPTIONS_SETTING("Save state storage", save_state_storage,
                             save_state_storage_options),
-    INT_SLIDER_SETTING("Max save states", max_save_states, 1, 99),
+    INT_SLIDER_SETTING("Max SD save states", max_save_states, 1, 99),
     DYNAMIC_OPTIONS_SETTING("Replay mode", replay_mode, replay_mode_options),
 #if DEV
     OPTIONS_SETTING("Record replay seeds", record_replay_seeds, s_off_on, NULL),
@@ -603,7 +596,6 @@ void practice_config_menu_reset(void) {
   s_slider_hold_frames = 0;
   s_slider_hold_button = 0;
   s_last_stage = LEVELID_NONE;
-  s_storage_availability_checked = FALSE;
 }
 
 void practice_config_menu_tick(s32 stage_id, s32 is_objectives_page) {

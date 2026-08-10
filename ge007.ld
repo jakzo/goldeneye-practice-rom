@@ -58,8 +58,15 @@ SECTIONS
    BEGIN_SEG(code, _startSegmentRomEnd, (_startSegmentEnd - 0x10000000)) SUBALIGN(16)
    {
 #include "ld/lib.text.ld.inc"
+      /* Flashcart access holds the global PI lock. Keep every function that
+       * executes while that lock is held out of the pageable game segment,
+       * whose TLB miss handler also needs PI access. */
+      build/OUTCODE/src/flashcart_sd_resident.o (.text .text.*);
    }
    END_SEG(code)
+
+   ASSERT(cart_init >= _codeSegmentStart && cart_init < _codeSegmentEnd,
+          "flashcart code must remain resident while holding the PI lock")
 
 
    BEGIN_SEG(cdata, _codeSegmentRomEnd, _codeSegmentRomEnd)
@@ -209,6 +216,7 @@ SECTIONS
 #include "ld/game.data.ld.inc"
 #include "ld/game.rodata.ld.inc"
       build/OUTCODE/src/practice.o (.rodata.* .data.*);
+      build/OUTCODE/src/flashcart_sd_resident.o (.rodata .rodata.* .data .data.*);
       *libgcc.a (.rodata .rodata.* .data .data.*);
       build/OUTCODE/src/gspboot.o (.data);
       build/OUTCODE/src/aspboot.o (.data);
@@ -225,6 +233,7 @@ SECTIONS
 #include "ld/lib.bss.ld.inc"
 #include "ld/game.bss.ld.inc"
       build/OUTCODE/src/practice.o (.bss.*);
+      build/OUTCODE/src/flashcart_sd_resident.o (.bss .bss.*);
       *libgcc.a (.bss .bss.*);
       *(COMMON);
       /* _start clears BSS in 8-byte chunks and requires an exact multiple. */

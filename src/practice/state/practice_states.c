@@ -68,7 +68,8 @@ void practice_states_log_test_fixture(void) {
     return;
 
   storage_stream_init_read(&stream, g_SaveStateStorage,
-                           get_save_state_storage_offset());
+                           get_save_state_storage_offset(),
+                           get_saved_state_size());
   emu_log("RUNWAY_STATE_BEGIN size=%d", get_saved_state_size());
   while (offset < get_saved_state_size()) {
     u32 chunk = get_saved_state_size() - offset;
@@ -180,7 +181,11 @@ void save_game_state(void) {
   if (stream.error) {
     storage_finish_save(g_SaveStateStorage, FALSE);
     g_HasSavedState = FALSE;
-    practiceLogWarn("Save state is too large for selected storage");
+    if (g_SaveStateStorage == PRACTICE_STORAGE_FLASHCART_SD) {
+      practiceLogWarn("Failed while writing save state data");
+    } else {
+      practiceLogWarn("Save state is too large for selected storage");
+    }
     return;
   }
 
@@ -210,7 +215,7 @@ void save_game_state(void) {
   g_HasSavedState = TRUE;
 
   practice_sfx_play_save_state_sound();
-  practiceLogInfo("State saved (%d bytes, %dKB)", get_saved_state_size(),
+  practiceLogInfo("State saved (%dKB)",
                   (get_saved_state_size() + 1023) / 1024);
 }
 
@@ -262,7 +267,8 @@ void load_game_state(void) {
   /* Stop all active sound effects before loading state. */
   sndDeactivateAllSfxByFlag_1();
 
-  storage_stream_init_read(&stream, g_SaveStateStorage, storage_offset);
+  storage_stream_init_read(&stream, g_SaveStateStorage, storage_offset,
+                           get_saved_state_size());
 
   /* 1. Skip header (already validated from g_SavedHeader). */
   stream_seek(&stream.base, storage_offset + sizeof(SaveStateHeader));
@@ -271,7 +277,7 @@ void load_game_state(void) {
   load_global_state_pre_props(&stream.base);
 
   /* 3. Load props, followed by their associated player state. */
-  if (!load_props_state(&stream.base)) {
+  if (!load_props_state(&stream.base) || stream.error) {
     storage_finish_load(g_SaveStateStorage);
     practiceLogWarn("Failed to load state");
     return;

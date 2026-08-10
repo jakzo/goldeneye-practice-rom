@@ -42,7 +42,7 @@ static void storage_stream_flush_impl(StateStream *stream) {
   StorageStream *storage = (StorageStream *)stream;
   if (storage->is_write && storage->is_dirty) {
     StorageCursor cursor;
-    u32 capacity = storage_location_size(storage->location);
+    u32 capacity = storage->capacity;
     u32 size = storage->location == PRACTICE_STORAGE_FLASHCART_SD
                    ? storage->page_offset
                    : STORAGE_PAGE_SIZE;
@@ -65,7 +65,7 @@ static void storage_stream_flush_impl(StateStream *stream) {
 static void storage_stream_write_bytes_impl(StateStream *stream,
                                             const void *src, u32 size) {
   StorageStream *storage = (StorageStream *)stream;
-  u32 capacity = storage_location_size(storage->location);
+  u32 capacity = storage->capacity;
   if (storage->current_page_addr > capacity ||
       storage->page_offset > capacity - storage->current_page_addr ||
       size > capacity - storage->current_page_addr - storage->page_offset) {
@@ -95,8 +95,12 @@ static void storage_stream_write_bytes_impl(StateStream *stream,
       storage->current_page_addr += STORAGE_PAGE_SIZE;
       storage->page_offset = 0;
 
-      // Load next page into memory in case we are doing a partial update
-      if (bytes_written < size &&
+      /* Fixed-size backends need the untouched bytes around a partial update.
+       * An SD save is a new sequential write-only file, and its flush writes
+       * only page_offset bytes, so preloading would both be unnecessary and
+       * attempt an invalid read from the write-only FatFs handle. */
+      if (storage->location != PRACTICE_STORAGE_FLASHCART_SD &&
+          bytes_written < size &&
           size - bytes_written < STORAGE_PAGE_SIZE) {
         StorageCursor cursor;
         storage_cursor_init(&cursor, storage->location,
@@ -111,7 +115,7 @@ static void storage_stream_write_bytes_impl(StateStream *stream,
 static void storage_stream_read_bytes_impl(StateStream *stream, void *dst,
                                            u32 size) {
   StorageStream *storage = (StorageStream *)stream;
-  u32 capacity = storage_location_size(storage->location);
+  u32 capacity = storage->capacity;
   if (storage->current_page_addr > capacity ||
       storage->page_offset > capacity - storage->current_page_addr ||
       size > capacity - storage->current_page_addr - storage->page_offset) {
@@ -163,13 +167,23 @@ static void storage_stream_seek_impl(StateStream *stream,
     storage->page_offset = intra_page;
   } else {
     StorageCursor cursor;
+    u32 size = STORAGE_PAGE_SIZE;
+
+    if (page_start > storage->capacity) {
+      storage->error = TRUE;
+      return;
+    }
+
     // Evict current page if dirty
     storage_stream_flush_impl(stream);
 
     // Load the new page so partial edits don't corrupt the rest of it.
     storage->current_page_addr = page_start;
+    if (size > storage->capacity - page_start) {
+      size = storage->capacity - page_start;
+    }
     storage_cursor_init(&cursor, storage->location, page_start);
-    storage_read(&cursor, storage->page, STORAGE_PAGE_SIZE);
+    storage_read(&cursor, storage->page, size);
     storage->error |= cursor.error;
     storage->page_offset = intra_page;
   }
@@ -178,8 +192,9 @@ static void storage_stream_seek_impl(StateStream *stream,
 
 static void storage_stream_init(StorageStream *stream,
                                 PracticeStorageLocation location,
-                                u32 base_address, bool is_write) {
+                                u32 base_address, u32 size, bool is_write) {
   StorageCursor cursor;
+  u32 location_capacity = storage_location_size(location);
 
   stream->base.write_bytes = storage_stream_write_bytes_impl;
   stream->base.read_bytes = storage_stream_read_bytes_impl;
@@ -189,11 +204,21 @@ static void storage_stream_init(StorageStream *stream,
   stream->base.base_address = base_address;
 
   stream->location = location;
+  stream->capacity = location_capacity;
   stream->current_page_addr = base_address;
   stream->page_offset = 0;
   stream->is_write = is_write;
   stream->is_dirty = FALSE;
   stream->error = !storage_location_is_available(location);
+
+  if (!is_write) {
+    if (base_address > location_capacity ||
+        size > location_capacity - base_address) {
+      stream->error = TRUE;
+    } else {
+      stream->capacity = base_address + size;
+    }
+  }
 
   if (location == PRACTICE_STORAGE_EXPANSION_RAM) {
     stream->base.write_bytes = memory_stream_write_bytes_impl;
@@ -204,7 +229,7 @@ static void storage_stream_init(StorageStream *stream,
   }
 
   if (!stream->error && (!is_write || base_address % STORAGE_PAGE_SIZE != 0)) {
-    u32 capacity = storage_location_size(location);
+    u32 capacity = stream->capacity;
     u32 size = STORAGE_PAGE_SIZE;
     if (size > capacity - base_address) {
       size = capacity - base_address;
@@ -218,11 +243,11 @@ static void storage_stream_init(StorageStream *stream,
 void storage_stream_init_write(StorageStream *stream,
                                PracticeStorageLocation location,
                                u32 base_address) {
-  storage_stream_init(stream, location, base_address, TRUE);
+  storage_stream_init(stream, location, base_address, 0, TRUE);
 }
 
 void storage_stream_init_read(StorageStream *stream,
                               PracticeStorageLocation location,
-                              u32 base_address) {
-  storage_stream_init(stream, location, base_address, FALSE);
+                              u32 base_address, u32 size) {
+  storage_stream_init(stream, location, base_address, size, FALSE);
 }

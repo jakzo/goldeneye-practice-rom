@@ -143,14 +143,22 @@ RSPOBJECTS := $(foreach file,$(RSPCODE),$(BUILD_DIR)/$(file:.s=.bin))
 CODEFILES := $(foreach dir,src,$(wildcard $(dir)/*.c))
 CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 
-PRACTICEFILES_C := $(sort $(shell find src/practice -type f -name '*.c'))
+PRACTICEFILES_C := $(sort $(shell find src/practice -type f -name '*.c' \
+	! -path 'src/practice/state/practice_sd_card.c' \
+	! -path 'src/practice/state/practice_libdragon_compat.c'))
 PRACTICEOBJECTS := $(foreach file,$(PRACTICEFILES_C),$(BUILD_DIR)/$(file:.c=.o))
-FLASHCARTSDFILES_C := libdragon/src/fatfs/ff.c \
-	libdragon/src/fatfs/ffunicode.c \
+FLASHCARTSDPAGEDFILES_C := src/practice/state/practice_sd_card.c \
+	libdragon/src/fatfs/ff.c
+FLASHCARTSDRESIDENTFILES_C := src/practice/state/practice_libdragon_compat.c \
 	libdragon/src/libcart/cart.c
-FLASHCARTSDOBJECTS := $(foreach file,$(FLASHCARTSDFILES_C),$(BUILD_DIR)/$(file:.c=.o))
-PRACTICE_LINK_OBJECTS := $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS)
+FLASHCARTSDFILES_C := $(FLASHCARTSDPAGEDFILES_C) \
+	$(FLASHCARTSDRESIDENTFILES_C)
+FLASHCARTSDPAGEDOBJECTS := $(foreach file,$(FLASHCARTSDPAGEDFILES_C),$(BUILD_DIR)/$(file:.c=.o))
+FLASHCARTSDRESIDENTOBJECTS := $(foreach file,$(FLASHCARTSDRESIDENTFILES_C),$(BUILD_DIR)/$(file:.c=.o))
+FLASHCARTSDOBJECTS := $(FLASHCARTSDPAGEDOBJECTS) $(FLASHCARTSDRESIDENTOBJECTS)
+PRACTICE_LINK_OBJECTS := $(PRACTICEOBJECTS) $(FLASHCARTSDPAGEDOBJECTS)
 PRACTICE_LINK_OBJECT := $(BUILD_DIR)/src/practice.o
+FLASHCART_SD_RESIDENT_LINK_OBJECT := $(BUILD_DIR)/src/flashcart_sd_resident.o
 OBSEG_C_SOURCE_FILES := $(sort $(shell find assets/obseg -type f -name '*.c' \
 	! -name '*.inc.c' ! -path 'assets/obseg/prop/*/Model.c'))
 
@@ -251,7 +259,7 @@ COMPILER_MANIFEST := $(BUILD_DIR)/metadata/compiler-manifest.json
 .SECONDARY:
 	$(APPELF) $(APPROM) $(APPBIN) $(ULTRAOBJECTS) $(BUILD_DIR)/ge007.$(OUTCODE).map \
 	$(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) \
-	$(OBSEG_OBJECTS) $(OBSEG_RZ) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS) $(MUSIC_RZ_FILES) $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS) $(PRACTICE_LINK_OBJECT)
+	$(OBSEG_OBJECTS) $(OBSEG_RZ) $(ROMOBJECTS) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(IMAGE_OBJS) $(MUSIC_RZ_FILES) $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS) $(PRACTICE_LINK_OBJECT) $(FLASHCART_SD_RESIDENT_LINK_OBJECT)
 
 # Dont delete these intermediate targets on make cancelation.
 .PRECIOUS: %.bin  %.o
@@ -399,12 +407,15 @@ $(BUILD_DIR)/src/practice/%.o: src/practice/%.c
 $(BUILD_DIR)/libdragon/src/%.o: libdragon/src/%.c
 	@mkdir -p $(@D)
 	$(CC_GCC) -c $(LIBDRAGON_STORAGE_INCLUDE) $(GCC_COMMON_FLAGS) \
-		-std=gnu99 -Dmemset=practice_fatfs_memset \
+		-std=gnu99 \
 		-include src/practice/state/practice_fatfs_config.h \
 		-include src/practice/state/practice_libdragon_compat.h -o $@ $<
 
 # Combine practice objects so the linker script does not need to know their directory depth.
 $(PRACTICE_LINK_OBJECT): $(PRACTICE_LINK_OBJECTS)
+	$(LD) -r -o $@ $^
+
+$(FLASHCART_SD_RESIDENT_LINK_OBJECT): $(FLASHCARTSDRESIDENTOBJECTS)
 	$(LD) -r -o $@ $^
 
 BUILD_CHECK_DIR := $(BUILD_DIR)/checks
@@ -481,10 +492,10 @@ endif
 #	$(CC_GCC) -c $(CFLAGS_GCC_ORIGINAL) -o $@ $<
 
 #Link Files
-$(APPELF): $(RSPOBJECTS) $(ULTRAOBJECTS) $(HEADEROBJECTS) $(OBSEG_RZ) $(BUILD_DIR)/$(OBSEGMENT) $(MUSIC_RZ_FILES) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) $(PRACTICE_LINK_OBJECT) ge007.ld
+$(APPELF): $(RSPOBJECTS) $(ULTRAOBJECTS) $(HEADEROBJECTS) $(OBSEG_RZ) $(BUILD_DIR)/$(OBSEGMENT) $(MUSIC_RZ_FILES) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(ROMOBJECTS) $(ASSET_DATAOBJECTS) $(ROMOBJECTS2) $(RAMROM_OBJECTS) $(FONTOBJECTS) $(MUSIC_OBJECTS) $(OBSEG_OBJECTS) $(PRACTICE_LINK_OBJECT) $(FLASHCART_SD_RESIDENT_LINK_OBJECT) ge007.ld
 	cpp $(LDFILEOPTS) -P ge007.ld -o $(BUILD_DIR)/ge007.$(OUTCODE).ld
 	@echo "Linking Files into ELF"
-	$(LD) $(LDFLAGS) -o $@ $(PRACTICE_LINK_OBJECT) $(LIBGCC)
+	$(LD) $(LDFLAGS) -o $@ $(PRACTICE_LINK_OBJECT) $(FLASHCART_SD_RESIDENT_LINK_OBJECT) $(LIBGCC)
 
 $(APPBIN): $(APPELF)
 	@echo "Building ROM"
@@ -540,7 +551,7 @@ libultraclean: commonclean
 	rm -f $(ULTRAOBJECTS)
 
 codeclean: commonclean libultraclean
-	rm -f $(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(RSPOBJECTS) $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS) $(PRACTICE_LINK_OBJECT)
+	rm -f $(HEADEROBJECTS) $(BOOTOBJECTS) $(CODEOBJECTS) $(GAMEOBJECTS) $(RZOBJECTS) $(RSPOBJECTS) $(PRACTICEOBJECTS) $(FLASHCARTSDOBJECTS) $(PRACTICE_LINK_OBJECT) $(FLASHCART_SD_RESIDENT_LINK_OBJECT)
 
 clean: codeclean dataclean
 	@echo "\nAll Code and Asset Binaries Cleared! Make will Re-Build these next time.\n"

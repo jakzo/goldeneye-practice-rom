@@ -16,7 +16,7 @@
 #define FF_PRINT_FLOAT 0
 #define FF_STRF_ENCODE 0
 #define FF_CODE_PAGE 437
-#define FF_USE_LFN 1
+#define FF_USE_LFN 0
 #define FF_MAX_LFN 64
 #define FF_LFN_UNICODE 0
 #define FF_LFN_BUF 64
