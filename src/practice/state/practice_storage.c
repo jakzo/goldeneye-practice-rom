@@ -49,9 +49,11 @@ u32 storage_location_size(PracticeStorageLocation location) {
 }
 
 bool storage_begin_save(PracticeStorageLocation location,
-                        const char *level_name, s32 max_save_states) {
+                        const char *level_name, const char *difficulty_name,
+                        s32 max_save_states) {
   if (location == PRACTICE_STORAGE_FLASHCART_SD) {
-    return practice_sd_card_begin_write(level_name, max_save_states);
+    return practice_sd_card_begin_write(level_name, difficulty_name,
+                                        max_save_states);
   }
   return storage_location_is_available(location);
 }
@@ -63,9 +65,10 @@ bool storage_finish_save(PracticeStorageLocation location, bool success) {
   return success;
 }
 
-bool storage_begin_load(PracticeStorageLocation location) {
+bool storage_begin_load(PracticeStorageLocation location,
+                        const char *level_name, const char *difficulty_name) {
   if (location == PRACTICE_STORAGE_FLASHCART_SD) {
-    return practice_sd_card_begin_read();
+    return practice_sd_card_begin_read(level_name, difficulty_name);
   }
   return storage_location_is_available(location);
 }

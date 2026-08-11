@@ -66,3 +66,20 @@ const char *practice_level_short_name(s32 level_id) {
     return "unknown";
   }
 }
+
+const char *practice_difficulty_short_name(s32 difficulty) {
+  switch (difficulty) {
+  case DIFFICULTY_AGENT:
+    return "A";
+  case DIFFICULTY_SECRET:
+    return "SA";
+  case DIFFICULTY_00:
+    return "00";
+  case DIFFICULTY_007:
+    return "007";
+  case DIFFICULTY_MULTI:
+    return "MP";
+  default:
+    return "UNK";
+  }
+}

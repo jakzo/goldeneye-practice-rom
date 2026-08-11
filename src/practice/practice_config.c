@@ -18,30 +18,30 @@
 // Config storage is append-only. Add new fields to the end of PracticeConfig.
 // Never delete or reorder fields; rename unused fields to deprecated_*.
 struct PracticeConfig practice = {
-    TRUE,                     // skip_logos_on_startup
-    TRUE,                     // left_trigger_hotkeys
-    LEVELID_TITLE,            // boot_level
-    FALSE,                    // disable_intro_cutscenes
-    5.0f,                     // log_message_duration
-    TRUE,                     // show_hundredths_on_timer
-    TRUE,                     // show_mission_timer
-    TRUE,                     // grenade_cam
-    TRUE,                     // splits_enabled
-    FALSE,                    // gate_guard_status
-    FALSE,                    // dam_gate_intro_enabled
-    FALSE,                    // log_splits
-    FALSE,                    // speedometer_enabled
-    TRUE,                     // lag_estimate_enabled
-    PRACTICE_REPLAY_DISABLED, // replay_mode
-    FALSE,                    // record_replay_seeds
-    FALSE,                    // dam_guard_cam
-    FALSE,                    // frigate_hostage_cam
-    TRUE,                     // frigate_hostage_progress
-    FALSE,                    // frigate_ideal_hostage_pads
-    FALSE,                    // frigate_fast_guard_death
-    1,                        // max_external_cameras
-    PRACTICE_STORAGE_SRAM,    // save_state_storage
-    99,                       // max_save_states
+    TRUE,                          // skip_logos_on_startup
+    TRUE,                          // left_trigger_hotkeys
+    LEVELID_TITLE,                 // boot_level
+    FALSE,                         // disable_intro_cutscenes
+    5.0f,                          // log_message_duration
+    TRUE,                          // show_hundredths_on_timer
+    TRUE,                          // show_mission_timer
+    TRUE,                          // grenade_cam
+    TRUE,                          // splits_enabled
+    FALSE,                         // gate_guard_status
+    FALSE,                         // dam_gate_intro_enabled
+    FALSE,                         // log_splits
+    FALSE,                         // speedometer_enabled
+    TRUE,                          // lag_estimate_enabled
+    PRACTICE_REPLAY_DISABLED,      // replay_mode
+    FALSE,                         // record_replay_seeds
+    FALSE,                         // dam_guard_cam
+    FALSE,                         // frigate_hostage_cam
+    TRUE,                          // frigate_hostage_progress
+    FALSE,                         // frigate_ideal_hostage_pads
+    FALSE,                         // frigate_fast_guard_death
+    1,                             // max_external_cameras
+    PRACTICE_STORAGE_FLASHCART_SD, // save_state_storage
+    5,                             // max_save_states
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -163,9 +163,28 @@ static const struct PracticeOption s_max_external_cameras[] = {
 };
 static const struct PracticeOption s_save_state_storage[] = {
     {"SD", PRACTICE_STORAGE_FLASHCART_SD},
-    {"Ex-Pak", PRACTICE_STORAGE_EXPANSION_RAM},
+    {"Ex. Pak", PRACTICE_STORAGE_EXPANSION_RAM},
     {"SRAM", PRACTICE_STORAGE_SRAM},
 };
+
+static PracticeStorageLocation
+resolve_save_state_storage(PracticeStorageLocation preferred) {
+  s32 i;
+
+  if (storage_location_is_available(preferred)) {
+    return preferred;
+  }
+
+  for (i = 0; i < ARRAY_COUNT(s_save_state_storage); i++) {
+    PracticeStorageLocation location = s_save_state_storage[i].value;
+
+    if (location != preferred && storage_location_is_available(location)) {
+      return location;
+    }
+  }
+
+  return PRACTICE_STORAGE_SRAM;
+}
 
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
 static s32 frigate_apply(s32 stage_id) { return stage_id == LEVELID_FRIGATE; }
@@ -265,7 +284,7 @@ static const struct PracticeSetting s_level_settings[] = {
 static const struct PracticeSetting s_global_settings[] = {
     DYNAMIC_OPTIONS_SETTING("Save state storage", save_state_storage,
                             save_state_storage_options),
-    INT_SLIDER_SETTING("Max SD save states", max_save_states, 1, 99,
+    INT_SLIDER_SETTING("Max SD saves per level", max_save_states, 1, 20,
                        sd_card_apply),
     DYNAMIC_OPTIONS_SETTING("Replay mode", replay_mode, replay_mode_options),
 #if DEV
@@ -399,9 +418,11 @@ void practice_config_load(void) {
     }
   }
 
-  if (practice.max_save_states < 1 || practice.max_save_states > 99) {
-    practice.max_save_states = 99;
+  if (practice.max_save_states < 1 || practice.max_save_states > 20) {
+    practice.max_save_states = 5;
   }
+  practice.save_state_storage =
+      resolve_save_state_storage(practice.save_state_storage);
   practice_states_set_storage_location(practice.save_state_storage);
   apply_rom_config();
 }

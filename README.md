@@ -28,8 +28,13 @@
     - During gameplay press `L + D-Down` to save current state
     - During gameplay press `L + D-Up` to load current state
     - On a level's briefing screen, `Save state storage` selects SRAM, volatile Expansion Pak RAM, or flashcart SD
-        - Flashcart SD works with EverDrive 64 and SummerCart64 and creates numbered files such as `012-runway.sav` in `/goldeneye_practice_rom/save_states`
-            - `Max save states` limits the directory to 1–99 files; creating another save deletes the oldest numbered save
+        - Flashcart SD works with EverDrive 64 and SummerCart64 and creates numbered files grouped by level and difficulty
+            - Example save location: `/GEPRAC/STATES/RUNWAY/A/012.SAV`
+            - Difficulty directories are `A`, `SA`, `00`, and `007`
+            - When loading state, only saves for the current level and difficulty will be loaded
+            - `Max SD saves per level` will cause the lowest numbered saves to be deleted on save until there are no more than this setting for the level and difficulty
+            - Loading chooses the highest numbered save in the current level and difficulty directory
+            - If there are no numbered saves, it loads any `.SAV` file in that directory
         - Expansion Pak saves in memory to the extra RAM
             - Note that saves to here will NOT persist after rebooting the console
         - SRAM saves to the cartridge

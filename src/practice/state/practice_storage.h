@@ -30,9 +30,11 @@ typedef struct {
 bool storage_location_is_available(PracticeStorageLocation location);
 u32 storage_location_size(PracticeStorageLocation location);
 bool storage_begin_save(PracticeStorageLocation location,
-                        const char *level_name, s32 max_save_states);
+                        const char *level_name, const char *difficulty_name,
+                        s32 max_save_states);
 bool storage_finish_save(PracticeStorageLocation location, bool success);
-bool storage_begin_load(PracticeStorageLocation location);
+bool storage_begin_load(PracticeStorageLocation location,
+                        const char *level_name, const char *difficulty_name);
 void storage_finish_load(PracticeStorageLocation location);
 
 /**

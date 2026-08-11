@@ -1,15 +1,16 @@
 #include "practice_states.h"
-#include "../practice_replay.h"
-#include "../practice_grenade_cam.h"
 #include "../practice_config.h"
+#include "../practice_grenade_cam.h"
 #include "../practice_level.h"
 #include "../practice_render.h"
+#include "../practice_replay.h"
 #include "../practice_sfx.h"
 #include "../practice_sram.h"
 #include "../practice_timescale.h"
+#include "emu_log.h"
+#include "game/lvl.h"
 #include "player.h"
 #include "practice_ui.h"
-#include "emu_log.h"
 #include <snd.h>
 #include <ultra64.h>
 
@@ -23,9 +24,8 @@ static PracticeStorageLocation g_SaveStateStorage = PRACTICE_STORAGE_SRAM;
 static u32 g_SaveStateTestMinimumSize = 0;
 
 static u32 get_save_state_storage_offset(void) {
-  return g_SaveStateStorage == PRACTICE_STORAGE_SRAM
-             ? SAVE_STATE_SRAM_OFFSET
-             : 0;
+  return g_SaveStateStorage == PRACTICE_STORAGE_SRAM ? SAVE_STATE_SRAM_OFFSET
+                                                     : 0;
 }
 
 static u32 get_saved_state_size(void) {
@@ -64,7 +64,9 @@ void practice_states_log_test_fixture(void) {
   if (!g_HasSavedState)
     return;
 
-  if (!storage_begin_load(g_SaveStateStorage))
+  if (!storage_begin_load(
+          g_SaveStateStorage, practice_level_short_name(g_CurrentStageToLoad),
+          practice_difficulty_short_name(lvlGetSelectedDifficulty())))
     return;
 
   storage_cursor_init(&cursor, g_SaveStateStorage,
@@ -98,7 +100,7 @@ typedef struct SaveSerializationResult {
 } SaveSerializationResult;
 
 static SaveSerializationResult serialize_game_state(StateStream *stream,
-                                                     bool *stream_error) {
+                                                    bool *stream_error) {
   SaveSerializationResult result;
 
   result.size = 0;
@@ -165,7 +167,9 @@ void init_save_state_system(void) {
     return;
   }
 
-  if (!storage_begin_load(g_SaveStateStorage)) {
+  if (!storage_begin_load(
+          g_SaveStateStorage, practice_level_short_name(g_CurrentStageToLoad),
+          practice_difficulty_short_name(lvlGetSelectedDifficulty()))) {
     g_SavedHeader.magic = 0;
     g_HasSavedState = FALSE;
     return;
@@ -176,8 +180,7 @@ void init_save_state_system(void) {
   storage_read(&cursor, &g_SavedHeader, sizeof(g_SavedHeader));
   storage_finish_load(g_SaveStateStorage);
 
-  g_HasSavedState = !cursor.error &&
-                    g_SavedHeader.magic == SAVE_STATE_MAGIC &&
+  g_HasSavedState = !cursor.error && g_SavedHeader.magic == SAVE_STATE_MAGIC &&
                     g_SavedHeader.version == SAVE_STATE_VERSION;
 }
 
@@ -199,9 +202,10 @@ void save_game_state(void) {
     practice_replay_invalidate_saved();
   }
 
-  if (!storage_begin_save(g_SaveStateStorage,
-                          practice_level_short_name(g_CurrentStageToLoad),
-                          practice.max_save_states)) {
+  if (!storage_begin_save(
+          g_SaveStateStorage, practice_level_short_name(g_CurrentStageToLoad),
+          practice_difficulty_short_name(lvlGetSelectedDifficulty()),
+          practice.max_save_states)) {
     practiceLogWarn("Could not start save state write");
     return;
   }
@@ -254,8 +258,7 @@ void save_game_state(void) {
   g_HasSavedState = TRUE;
 
   practice_sfx_play_save_state_sound();
-  practiceLogInfo("State saved (%dKB)",
-                  (get_saved_state_size() + 1023) / 1024);
+  practiceLogInfo("State saved (%dKB)", (get_saved_state_size() + 1023) / 1024);
 }
 
 enum LoadSerializationResult {
@@ -285,15 +288,13 @@ static s32 deserialize_game_state(StateStream *stream, bool *stream_error) {
   return LOAD_SERIALIZATION_OK;
 }
 
-static s32 deserialize_game_state_from_memory(u32 storage_offset,
-                                              u32 size) {
+static s32 deserialize_game_state_from_memory(u32 storage_offset, u32 size) {
   MemoryStream stream;
   memory_stream_init_read(&stream, g_SaveStateStorage, storage_offset, size);
   return deserialize_game_state(&stream.base, &stream.error);
 }
 
-static s32 deserialize_game_state_from_storage(u32 storage_offset,
-                                               u32 size) {
+static s32 deserialize_game_state_from_storage(u32 storage_offset, u32 size) {
   StorageStream stream;
   storage_stream_init_read(&stream, g_SaveStateStorage, storage_offset, size);
   return deserialize_game_state(&stream.base, &stream.error);
@@ -304,10 +305,18 @@ void load_game_state(void) {
   s32 paused_resume_delta = g_IsTimePaused ? g_ForcedDeltaFrames : -1;
   u32 storage_offset = get_save_state_storage_offset();
 
-  if (g_CurrentPlayer == NULL || !g_HasSavedState) {
-    if (!g_HasSavedState) {
-      practiceLogWarn("No saved state");
-    }
+  if (g_CurrentPlayer == NULL) {
+    return;
+  }
+
+  if (g_SaveStateStorage == PRACTICE_STORAGE_FLASHCART_SD) {
+    /* The latest save is selected independently for the current level, so
+     * refresh the cached header whenever the load hotkey is used. */
+    init_save_state_system();
+  }
+
+  if (!g_HasSavedState) {
+    practiceLogWarn("No saved state");
     return;
   }
 
@@ -339,7 +348,9 @@ void load_game_state(void) {
     return;
   }
 
-  if (!storage_begin_load(g_SaveStateStorage)) {
+  if (!storage_begin_load(
+          g_SaveStateStorage, practice_level_short_name(g_CurrentStageToLoad),
+          practice_difficulty_short_name(lvlGetSelectedDifficulty()))) {
     practiceLogWarn("Could not open save state");
     return;
   }
@@ -347,12 +358,11 @@ void load_game_state(void) {
   /* Stop all active sound effects before loading state. */
   sndDeactivateAllSfxByFlag_1();
 
-  load_result =
-      g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM
-          ? deserialize_game_state_from_memory(storage_offset,
-                                               get_saved_state_size())
-          : deserialize_game_state_from_storage(storage_offset,
-                                                get_saved_state_size());
+  load_result = g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM
+                    ? deserialize_game_state_from_memory(storage_offset,
+                                                         get_saved_state_size())
+                    : deserialize_game_state_from_storage(
+                          storage_offset, get_saved_state_size());
 
   if (load_result == LOAD_SERIALIZATION_DATA_FAILED) {
     storage_finish_load(g_SaveStateStorage);
