@@ -20417,13 +20417,14 @@ void bondviewTransformManyPosToViewMatrix(RenderPosView * arg0, s32 arg1)
     i = 0;
     if (arg1 <= 0) { return; }
 
+#ifdef PRACTICE_ROM
+    practice_mark_converted_render_matrices(arg0);
+#endif
+
     // Couldn't find a better matching loop
     rpv_entry = arg0;
     do
     {
-#ifdef PRACTICE_ROM
-        practice_mark_converted_render_matrices(arg0);
-#endif
         matrix_4x4_copy(&rpv_entry->pos, &mtx);
         matrix_4x4_f32_to_s32(&mtx, &arg0[i].pos);
         i++;
