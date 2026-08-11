@@ -143,3 +143,16 @@ The codebase heavily utilizes standard decompilation patterns to bridge C with y
 - Don't use sub-agents unless asked
 - After you have edited files, double check that you didn't accidentally add or delete empty lines at the end of the file
 - When debugging memory issues, there was a GCC migration recently in commit c6da0283310ec75a7c2e58267615ed74ac2d4e33 which changed a lot of memory layout with some fields looking unused and optimized away but actually being used
+
+---
+
+## Testing
+
+For a very thorough check, you can run the "full save state replay test suite". This is where all the replay file tests with save/load states should pass including all these variants:
+
+- regular replays, no save states
+- 1s spacing, 3 frame wait, 1s duration before load (default)
+- 10s spacing, 4 frame wait, 30s duration
+- 1s spacing, 3 frame wait, 1s duration with grenade cam and dam guard cam
+
+Since it takes such a long time, you should only run this if explicitly asked to. Run 3 emulators at once in headed mode and `Input/Driver=None` for maximum speed.
