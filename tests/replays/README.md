@@ -8,6 +8,21 @@ payload contains the expected values for every frame. Keeping these compact
 inputs alongside the seeds makes the first cause of a divergence visible
 without recording larger state that can be derived from them.
 
+## Replay guidelines
+
+When recording a run keep these in mind:
+
+- Make the recording as fast as possible
+- No lookdown
+- Let the intro cutscene, camera swirl and outro cutscene play for about 3 seconds each
+- Play a difficulty with all the level objectives
+- Nice to have but not required:
+   - Destroy and disturb props
+   - Load in assets by looking at unique characters and props
+   - Equip all level weapons
+   - Pick up collectibles like body armor
+   - Visit all the parts of the level
+
 ## Whole-ROM replay tests
 
 Run every fixture for one practice-ROM region through the new ares host-side
