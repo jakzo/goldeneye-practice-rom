@@ -74,10 +74,122 @@ static u8 g_ConvertedHandMatrices;
 static u8 g_LoadedFloatHandMatrices;
 static bool g_HasPausedFramebuffer;
 
+#define PRACTICE_UI_BACKGROUND_RECT_COUNT 32
+typedef struct PracticeUiBackgroundRect {
+  s16 left;
+  s16 top;
+  s16 right;
+  s16 bottom;
+} PracticeUiBackgroundRect;
+static PracticeUiBackgroundRect
+    g_PracticeUiBackgroundRects[PRACTICE_UI_BACKGROUND_RECT_COUNT];
+static s32 g_PracticeUiBackgroundRectCount;
+
 static void restore_matrices(RenderPosView *render_pos, s32 count);
 static void restore_model_matrices(Model *model);
 
 #define PAUSED_FRAMEBUFFER_TILE_HEIGHT 6
+
+bool practice_has_paused_framebuffer(void) {
+  return g_HasPausedFramebuffer;
+}
+
+Gfx *practice_cache_ui_background(Gfx *gdl, s32 left, s32 top, s32 right,
+                                  s32 bottom) {
+  u8 *source = viGetFrameBuf2();
+  s32 y;
+
+  if (z_buffer == 0 || g_viColorOutputMode == COLORMODE_32BIT ||
+      z_buffer_width * z_buffer_height < SCREEN_WIDTH * SCREEN_HEIGHT ||
+      g_PracticeUiBackgroundRectCount >= PRACTICE_UI_BACKGROUND_RECT_COUNT) {
+    return gdl;
+  }
+  if (left < 0)
+    left = 0;
+  if (top < 0)
+    top = 0;
+  if (right > SCREEN_WIDTH)
+    right = SCREEN_WIDTH;
+  if (bottom > SCREEN_HEIGHT)
+    bottom = SCREEN_HEIGHT;
+  if (left >= right || top >= bottom)
+    return gdl;
+
+  g_PracticeUiBackgroundRects[g_PracticeUiBackgroundRectCount].left = left;
+  g_PracticeUiBackgroundRects[g_PracticeUiBackgroundRectCount].top = top;
+  g_PracticeUiBackgroundRects[g_PracticeUiBackgroundRectCount].right = right;
+  g_PracticeUiBackgroundRects[g_PracticeUiBackgroundRectCount].bottom = bottom;
+  g_PracticeUiBackgroundRectCount++;
+
+  gDPPipeSync(gdl++);
+  gDPSetCycleType(gdl++, G_CYC_COPY);
+  gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
+  gDPSetTexturePersp(gdl++, G_TP_NONE);
+  gDPSetTextureFilter(gdl++, G_TF_POINT);
+  gDPSetAlphaCompare(gdl++, G_AC_NONE);
+  gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH,
+                SCREEN_HEIGHT);
+  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
+                   OS_K0_TO_PHYSICAL(z_buffer));
+
+  for (y = top; y < bottom; y += PAUSED_FRAMEBUFFER_TILE_HEIGHT) {
+    s32 tile_bottom = y + PAUSED_FRAMEBUFFER_TILE_HEIGHT;
+
+    if (tile_bottom > bottom)
+      tile_bottom = bottom;
+    gDPLoadTextureTile(
+        gdl++, OS_K0_TO_PHYSICAL(source), G_IM_FMT_RGBA, G_IM_SIZ_16b,
+        SCREEN_WIDTH, SCREEN_HEIGHT, left, y, right - 1, tile_bottom - 1, 0,
+        G_TX_CLAMP, G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
+        G_TX_NOLOD);
+    gSPTextureRectangle(gdl++, left << 2, y << 2, (right - 1) << 2,
+                        (tile_bottom - 1) << 2, G_TX_RENDERTILE, left << 5,
+                        y << 5, 4 << 10, 1 << 10);
+    gDPPipeSync(gdl++);
+  }
+
+  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
+                   OS_K0_TO_PHYSICAL(source));
+  return gdl;
+}
+
+void practice_capture_paused_framebuffer(void) {
+  u8 *source = viGetFrameBuf1();
+  u8 *destination = viGetFrameBuf2();
+  u8 *background = (u8 *)z_buffer;
+  u32 size = SCREEN_WIDTH * SCREEN_HEIGHT * 2;
+  s32 rect_index;
+
+  if (background == NULL || g_viColorOutputMode == COLORMODE_32BIT ||
+      z_buffer_width * z_buffer_height < SCREEN_WIDTH * SCREEN_HEIGHT ||
+      g_PracticeUiBackgroundRectCount == 0) {
+    g_HasPausedFramebuffer = FALSE;
+    return;
+  }
+
+  osInvalDCache(source, size);
+  osInvalDCache(background, size);
+  if (source != destination)
+    bcopy(source, destination, size);
+  /* Later UI elements may overlap earlier ones, so peel their saved
+   * backgrounds in reverse draw order. */
+  for (rect_index = g_PracticeUiBackgroundRectCount - 1; rect_index >= 0;
+       rect_index--) {
+    PracticeUiBackgroundRect *rect =
+        &g_PracticeUiBackgroundRects[rect_index];
+    s32 width = (rect->right - rect->left) * 2;
+    s32 y;
+
+    for (y = rect->top; y < rect->bottom; y++) {
+      u32 offset = (y * SCREEN_WIDTH + rect->left) * 2;
+      bcopy(background + offset, destination + offset, width);
+    }
+  }
+  osWritebackDCache(destination, size);
+  bcopy(destination, background, size);
+  osWritebackDCache(background, size);
+  g_HasPausedFramebuffer = TRUE;
+}
 
 Gfx *practice_cache_paused_framebuffer(Gfx *gdl) {
   u8 *source = viGetFrameBuf2();
@@ -89,8 +201,9 @@ Gfx *practice_cache_paused_framebuffer(Gfx *gdl) {
     return gdl;
   }
 
-  /* Preserve the completed scene before practice UI is composited. The RDP
-   * copies six scanlines at a time so each RGBA16 tile fits in its 4 KiB TMEM. */
+  /* Preserve the completed paused scene before practice UI is composited. The
+   * RDP copies six scanlines at a time so each RGBA16 tile fits in its 4 KiB
+   * TMEM. */
   gDPPipeSync(gdl++);
   gDPSetCycleType(gdl++, G_CYC_COPY);
   gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
@@ -672,6 +785,8 @@ void practice_begin_live_render(void) {
    * only conversions from this render can describe the buffers a following
    * paused frame inherits. */
   clear_converted_render_matrices();
+  g_HasPausedFramebuffer = FALSE;
+  g_PracticeUiBackgroundRectCount = 0;
 }
 
 static void initialize_model_matrices(Model *model) {

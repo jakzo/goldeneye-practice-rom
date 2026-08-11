@@ -12,6 +12,7 @@
 #include "practice_frigate_hostage_cam.h"
 #include "practice_lag.h"
 #include "practice_replay.h"
+#include "practice_render.h"
 #include <PR/os.h>
 #include <bondconstants.h>
 #include <bondtypes.h>
@@ -307,6 +308,15 @@ void practiceLogError(const char *fmt, ...) {
 // practice_ui_render so pills stack from the top down.
 static s32 g_PillStackY;
 
+static Gfx *cache_ui_background(Gfx *gdl, s32 left, s32 top, s32 right,
+                                s32 bottom) {
+  if (speedgraphframes != 0) {
+    gdl = practice_cache_ui_background(gdl, left, top, right, bottom);
+    gdl = microcode_constructor(gdl);
+  }
+  return gdl;
+}
+
 Gfx *practice_render_text_with_shadow(Gfx *gdl, s32 *x, s32 *y, s8 *text,
                                       s32 font_chars, s32 font, s32 text_color,
                                       u32 shadow_color, s16 view_x, s16 view_y,
@@ -357,6 +367,9 @@ Gfx *practice_ui_render_pill(Gfx *gdl, const char *text, u32 text_color,
   box_left = right_edge - text_w - 2 * PILL_PAD_X;
   box_top = g_PillStackY;
   box_bottom = box_top + text_h + 2 * PILL_PAD_Y;
+
+  gdl = cache_ui_background(gdl, box_left - 1, box_top - 1, box_right + 1,
+                            box_bottom + 1);
 
   // Filled background box (alpha byte of pill_color gives the opacity).
   gdl = microcode_constructor_related_to_menus(
@@ -441,6 +454,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
 #else
     u32 p_color = 0x00CC00FF;
 #endif
+    gdl = cache_ui_background(gdl, 0, hud_y - 1, 200, viGetY());
     gdl = renderText(gdl, &hud_x, &hud_y, "P", (s32)fontCharsZurich,
                      ptrFontZurichBold, p_color, viGetX(), viGetY());
     hud_x += 8;
@@ -573,6 +587,9 @@ Gfx *practice_ui_render(Gfx *gdl) {
       view_horiz = right_edge + (s32)slide_offset;
       view_vert = y_bottom - msg->height;
       view_top = y_bottom;
+
+      gdl = cache_ui_background(gdl, view_left - 1, view_vert - 1,
+                                view_horiz + 2, view_top + 2);
 
       // Draw dark background box
       gdl = draw_blackbox_to_screen(gdl, &view_left, &view_vert, &view_horiz,
