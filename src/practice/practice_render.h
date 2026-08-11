@@ -41,7 +41,8 @@ typedef struct PracticeRenderContext {
 
 extern bool g_IsRenderOnly;
 
-void practice_copy_paused_framebuffer(void);
+Gfx *practice_cache_paused_framebuffer(Gfx *gdl);
+Gfx *practice_restore_paused_framebuffer(Gfx *gdl);
 void practice_cache_equipped_weapon_matrix(PropRecord *weapon_prop);
 void practice_prepare_paused_render_state(PracticeRenderContext *context);
 void practice_prepare_character_render(PracticeRenderContext *context);

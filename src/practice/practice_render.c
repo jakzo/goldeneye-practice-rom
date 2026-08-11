@@ -10,11 +10,13 @@
 #include "game/matrixmath.h"
 #include "game/objecthandler.h"
 #include "game/player.h"
+#include "game/viewport.h"
 #include "fr.h"
 #include "practice_render.h"
 
 extern s32 object_interaction(PropRecord *prop);
 extern s32 modelFindNodeMtxIndex(ModelNode *node, s32 arg1);
+extern s32 g_viColorOutputMode;
 
 typedef struct PracticeRenderJoint {
   void *model;
@@ -70,22 +72,81 @@ static u8 g_PausedPropOnscreen[(POS_DATA_ENTRY_LEN + 7) / 8];
 static u8 g_ConvertedPropMatrices[(POS_DATA_ENTRY_LEN + 7) / 8];
 static u8 g_ConvertedHandMatrices;
 static u8 g_LoadedFloatHandMatrices;
+static bool g_HasPausedFramebuffer;
 
 static void restore_matrices(RenderPosView *render_pos, s32 count);
 static void restore_model_matrices(Model *model);
 
-void practice_copy_paused_framebuffer(void) {
+#define PAUSED_FRAMEBUFFER_TILE_HEIGHT 6
+
+Gfx *practice_cache_paused_framebuffer(Gfx *gdl) {
+  u8 *source = viGetFrameBuf2();
+  s32 y;
+
+  if (z_buffer == 0 || g_viColorOutputMode == COLORMODE_32BIT ||
+      z_buffer_width * z_buffer_height < SCREEN_WIDTH * SCREEN_HEIGHT) {
+    g_HasPausedFramebuffer = FALSE;
+    return gdl;
+  }
+
+  /* Preserve the completed scene before practice UI is composited. The RDP
+   * copies six scanlines at a time so each RGBA16 tile fits in its 4 KiB TMEM. */
+  gDPPipeSync(gdl++);
+  gDPSetCycleType(gdl++, G_CYC_COPY);
+  gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
+  gDPSetTexturePersp(gdl++, G_TP_NONE);
+  gDPSetTextureFilter(gdl++, G_TF_POINT);
+  gDPSetAlphaCompare(gdl++, G_AC_NONE);
+  gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH,
+                SCREEN_HEIGHT);
+  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
+                   OS_K0_TO_PHYSICAL(z_buffer));
+
+  for (y = 0; y < SCREEN_HEIGHT; y += PAUSED_FRAMEBUFFER_TILE_HEIGHT) {
+    s32 bottom = y + PAUSED_FRAMEBUFFER_TILE_HEIGHT - 1;
+
+    if (bottom >= SCREEN_HEIGHT)
+      bottom = SCREEN_HEIGHT - 1;
+
+    gDPLoadTextureTile(
+        gdl++, OS_K0_TO_PHYSICAL(source), G_IM_FMT_RGBA, G_IM_SIZ_16b,
+        SCREEN_WIDTH, SCREEN_HEIGHT, 0, y, SCREEN_WIDTH - 1, bottom, 0,
+        G_TX_CLAMP, G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
+        G_TX_NOLOD);
+    gSPTextureRectangle(gdl++, 0, y << 2, (SCREEN_WIDTH - 1) << 2,
+                        bottom << 2, G_TX_RENDERTILE, 0, y << 5, 4 << 10,
+                        1 << 10);
+    gDPPipeSync(gdl++);
+  }
+
+  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
+                   OS_K0_TO_PHYSICAL(source));
+  g_HasPausedFramebuffer = TRUE;
+  return gdl;
+}
+
+Gfx *practice_restore_paused_framebuffer(Gfx *gdl) {
   u8 *source = viGetFrameBuf1();
   u8 *destination = viGetFrameBuf2();
   u32 size = SCREEN_WIDTH * SCREEN_HEIGHT * 2;
 
-  /* Keep VI's double buffers in sync without re-entering gameplay renderers. */
-  if (source == destination)
-    return;
+  if (g_HasPausedFramebuffer && z_buffer != 0 &&
+      z_buffer_width * z_buffer_height >= SCREEN_WIDTH * SCREEN_HEIGHT) {
+    source = (u8 *)z_buffer;
+  }
 
-  osInvalDCache(source, size);
-  bcopy(source, destination, size);
-  osWritebackDCache(destination, size);
+  if (source != destination) {
+    osInvalDCache(source, size);
+    bcopy(source, destination, size);
+    osWritebackDCache(destination, size);
+  }
+
+  /* UI-only display lists do not call video_related_F, so explicitly retarget
+   * the RDP when VI advances to the other framebuffer while paused. */
+  gDPPipeSync(gdl++);
+  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
+                   OS_K0_TO_PHYSICAL(destination));
+  return gdl;
 }
 
 void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,

@@ -977,7 +977,7 @@ Gfx* lvlRender(Gfx* DL)
     {
 #ifdef PRACTICE_ROM
         if (speedgraphframes == 0 && !practice_needs_refreshed_render()) {
-            practice_copy_paused_framebuffer();
+            DL = practice_restore_paused_framebuffer(DL);
             DL = practice_ui_render(DL);
             return DL;
         }
@@ -1205,6 +1205,7 @@ Gfx* lvlRender(Gfx* DL)
             practice_grenade_cam_tick();
             DL = practice_external_camera_render(DL);
         }
+        DL = practice_cache_paused_framebuffer(DL);
         DL = practice_ui_render(DL);
 #endif
 
