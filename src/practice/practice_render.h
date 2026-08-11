@@ -56,6 +56,7 @@ void practice_restore_render_matrices(void);
 void practice_begin_live_render(void);
 void practice_mark_converted_render_matrices(RenderPosView *render_pos);
 bool practice_hand_render_matrices_are_fixed(s32 hand);
+bool practice_prop_render_matrices_are_fixed(PropRecord *prop);
 void practice_clear_loaded_hand_matrices_float(void);
 void practice_mark_loaded_hand_matrices_float(s32 hand);
 void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,

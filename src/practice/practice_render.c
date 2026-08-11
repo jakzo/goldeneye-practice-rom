@@ -752,6 +752,14 @@ bool practice_hand_render_matrices_are_fixed(s32 hand) {
          (g_ConvertedHandMatrices & (1 << hand)) != 0;
 }
 
+bool practice_prop_render_matrices_are_fixed(PropRecord *prop) {
+  s32 prop_index = prop != NULL ? prop - pos_data_entry : -1;
+
+  return prop_index >= 0 && prop_index < POS_DATA_ENTRY_LEN &&
+         (g_ConvertedPropMatrices[prop_index >> 3] &
+          (1 << (prop_index & 7))) != 0;
+}
+
 void practice_clear_loaded_hand_matrices_float(void) {
   g_LoadedFloatHandMatrices = 0;
 }
@@ -1028,11 +1036,11 @@ void practice_finish_character_render(PracticeRenderContext *context) {
     }
   }
 
-  /* Nested/offscreen child objects can be rendered through a visible parent
-   * without receiving a temporary render_pos allocation of their own. Restore
-   * every buffer the paused alpha pass actually converted before discarding
-   * any temporary visible-model pointers. */
-  restore_refreshed_render_matrices();
+  /* The current display list still points at the fixed-point matrices emitted
+   * by the paused render. Do not convert those buffers back to floats before
+   * the RSP has consumed them; doing so stretches arbitrary prop triangles
+   * across the frame. Restore only gameplay-owned pointers and root data here.
+   * The first live tick rebuilds float matrices before its render. */
   restore_model_root_data(context);
   if (!context->rendered_all_characters) {
     restore_model_render_positions(context);
@@ -1051,10 +1059,6 @@ void practice_finish_character_render(PracticeRenderContext *context) {
   g_CurrentPlayer->previous_model_pos = context->previous_model_pos;
   g_CurrentPlayer->current_room_pos = context->current_room_pos;
   restore_watch_state(context);
-  /* Only buffers actually consumed by the paused alpha pass are fixed point.
-   * Leave skipped hand models in their existing float representation. */
-  restore_converted_hand_matrices();
-  clear_converted_render_matrices();
   g_IsRenderOnly = FALSE;
 }
 

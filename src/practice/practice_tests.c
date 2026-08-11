@@ -27,6 +27,7 @@
 #include "player.h"
 #include "practice_config.h"
 #include "practice_hotkeys.h"
+#include "practice_render.h"
 #include "practice_replay.h"
 #include "practice_timescale.h"
 #include "quaternion.h"
@@ -2085,6 +2086,16 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
       if (replay_chr_hidden_hash() != g_ReplaySaveChrHiddenHash) {
         emu_log("RUNWAY_LOAD_CHR_HIDDEN_MISMATCH expected=%08x actual=%08x",
                 g_ReplaySaveChrHiddenHash, replay_chr_hidden_hash());
+        emu_log("TEST_FAILED");
+        g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+        break;
+      }
+      if (g_CurrentPlayer->prop != NULL &&
+          (g_CurrentPlayer->prop->flags & PROPFLAG_ONSCREEN) &&
+          g_CurrentPlayer->prop->chr != NULL &&
+          g_CurrentPlayer->prop->chr->model != NULL &&
+          !practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop)) {
+        emu_log("RUNWAY_LOAD_VIEWER_MATRICES_RESTORED_BEFORE_RSP");
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
