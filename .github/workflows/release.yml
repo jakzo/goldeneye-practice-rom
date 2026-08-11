@@ -157,6 +157,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Checkout libdragon submodule
+        run: git submodule update --init --depth 1 libdragon
+
       - name: Install dependencies
         run: |
           sudo apt-get update
