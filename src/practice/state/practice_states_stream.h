@@ -10,7 +10,12 @@
 #define inline
 #endif
 
-#define STORAGE_PAGE_SIZE 4096
+/* This buffer lives in deserialize_game_state_from_storage's stack frame for
+ * the complete restore. Keep it small enough that cutscene player-model
+ * recreation and an SD/FatFs sector read cannot grow the 32 KiB main-thread
+ * stack into the adjacent scheduler stack. One KiB remains sector-aligned and
+ * still batches two 512-byte flashcart sectors per backend call. */
+#define STORAGE_PAGE_SIZE 1024
 
 typedef struct StateStream StateStream;
 

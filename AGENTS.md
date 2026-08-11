@@ -154,5 +154,6 @@ For a very thorough check, you can run the "full save state replay test suite". 
 - 1s spacing, 3 frame wait, 1s duration before load (default)
 - 10s spacing, 4 frame wait, 30s duration
 - 1s spacing, 3 frame wait, 1s duration with grenade cam and dam guard cam
+- Single level (eg. Facility) where you save state 60 frames after replay starts, play through to almost end, load state 30 frames before end, play through to end
 
 Since it takes such a long time, you should only run this if explicitly asked to. Run 3 emulators at once in headed mode and `Input/Driver=None` for maximum speed.

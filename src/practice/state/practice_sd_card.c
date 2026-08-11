@@ -1,10 +1,10 @@
 #include "practice_sd_card.h"
-#include "../../../libdragon/src/fatfs/diskio.h"
-#include "../../../libdragon/src/fatfs/ff.h"
-#include "../../../libdragon/src/libcart/cart.h"
-#include "../practice_ui.h"
 #include "practice_fatfs_config.h"
 #include "practice_libdragon_compat.h"
+#include "../../../libdragon/src/fatfs/ff.h"
+#include "../../../libdragon/src/fatfs/diskio.h"
+#include "../../../libdragon/src/libcart/cart.h"
+#include "../practice_ui.h"
 
 extern int sprintf(char *dst, const char *fmt, ...);
 

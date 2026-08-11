@@ -72,6 +72,16 @@ static bool is_active_gfx_range(const void *ptr, u32 size) {
   return addr >= start && end >= addr && end <= (u32)g_GfxMemPos;
 }
 
+static bool player_model_is_valid_for_chr(Model *model, ChrRecord *chr) {
+  if (!is_rdram_range(chr, sizeof(ChrRecord)) ||
+      !is_rdram_range(model, sizeof(Model)) || model->chr != chr ||
+      !is_rdram_range(model->obj, sizeof(ModelFileHeader))) {
+    return FALSE;
+  }
+
+  return is_rdram_range(model->obj->RootNode, sizeof(ModelNode));
+}
+
 static bool current_player_model_is_valid(void) {
   PropRecord *prop;
   ChrRecord *chr;
@@ -90,12 +100,11 @@ static bool current_player_model_is_valid(void) {
   }
 
   chr = prop->chr;
-  if (chr->model != model || model->chr != chr ||
-      !is_rdram_range(model->obj, sizeof(ModelFileHeader))) {
+  if (chr->prop != prop || chr->model != model) {
     return FALSE;
   }
 
-  return is_rdram_range(model->obj->RootNode, sizeof(ModelNode));
+  return player_model_is_valid_for_chr(model, chr);
 }
 
 static bool player_presence_prop_is_active(PropRecord *target) {
@@ -269,10 +278,25 @@ static void reconcile_current_player_model_presence(bool saved_had_model,
     Model *stale_model = g_CurrentPlayer->ptr_char_objectinstance;
 
     practiceLogDebug("Rebuilding invalid Bond model %08x", stale_model);
-    if (g_CurrentPlayer->prop != NULL && g_CurrentPlayer->prop->chr != NULL &&
-        g_CurrentPlayer->prop->chr->model == stale_model) {
-      g_CurrentPlayer->prop->chr->model = NULL;
+    if (g_CurrentPlayer->prop != NULL && g_CurrentPlayer->prop->chr != NULL) {
+      ChrRecord *chr = g_CurrentPlayer->prop->chr;
+
+      if (chr->prop == g_CurrentPlayer->prop) {
+        if (player_model_is_valid_for_chr(chr->model, chr)) {
+          disable_sounds_attached_to_player_then_something(
+              g_CurrentPlayer->prop);
+        } else {
+          /* Loading after the replay has ended restores the saved player
+           * pointers after the live Bond model has already been released.
+           * The ChrRecord can still belong to the viewer, but its model graph
+           * is no longer safe to walk. Establish the same free-slot markers
+           * as normal character teardown without touching the stale model. */
+          chr->model = NULL;
+          chr->chrnum = -1;
+        }
+      }
       g_CurrentPlayer->prop->chr = NULL;
+      sub_GAME_7F07DE9C(g_CurrentPlayer);
     }
     g_CurrentPlayer->ptr_char_objectinstance = NULL;
   }
@@ -1261,11 +1285,29 @@ bool load_viewer_players_state(StateStream *stream, bool force_model_rebuild) {
         return FALSE;
       }
       load_chr_allocation_state(stream, &allocation);
-      if (allocation.slot_index != viewer_chr - g_ChrSlots) {
-        practiceLogError("Viewer CHR slot mismatch player=%d saved=%d live=%d",
-                         player_index, allocation.slot_index,
-                         viewer_chr - g_ChrSlots);
+      if (allocation.slot_index < 0 ||
+          allocation.slot_index >= g_NumChrSlots) {
+        practiceLogError("Viewer CHR slot invalid player=%d saved=%d",
+                         player_index, allocation.slot_index);
         return FALSE;
+      }
+      if (allocation.slot_index != viewer_chr - g_ChrSlots) {
+        ChrRecord *target_chr = &g_ChrSlots[allocation.slot_index];
+
+        if (target_chr->model != NULL) {
+          practiceLogError(
+              "Viewer CHR slot occupied player=%d saved=%d live=%d",
+              player_index, allocation.slot_index, viewer_chr - g_ChrSlots);
+          return FALSE;
+        }
+        *target_chr = *viewer_chr;
+        target_chr->prop = g_CurrentPlayer->prop;
+        target_chr->model->chr = target_chr;
+        g_CurrentPlayer->prop->chr = target_chr;
+        bzero(viewer_chr, sizeof(*viewer_chr));
+        viewer_chr->unk180[0].unk00 = -1;
+        viewer_chr->unk180[1].unk00 = -1;
+        viewer_chr = target_chr;
       }
       load_chr_record(stream, viewer_chr, &attachments);
     }

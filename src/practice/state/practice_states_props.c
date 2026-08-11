@@ -680,6 +680,8 @@ static PropRecord *create_chr_prop(PropRecord *prop,
     target_chr->model->chr = target_chr;
     result->chr = target_chr;
     bzero(allocated_chr, sizeof(*allocated_chr));
+    allocated_chr->unk180[0].unk00 = -1;
+    allocated_chr->unk180[1].unk00 = -1;
   }
 
   result->chr->headnum = allocation->headnum;

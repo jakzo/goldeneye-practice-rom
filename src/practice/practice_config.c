@@ -169,6 +169,10 @@ static const struct PracticeOption s_save_state_storage[] = {
 
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
 static s32 frigate_apply(s32 stage_id) { return stage_id == LEVELID_FRIGATE; }
+static s32 sd_card_apply(s32 stage_id) {
+  (void)stage_id;
+  return practice_sd_card_is_available();
+}
 
 static s32 s_boot_level_option = LEVELID_TITLE;
 static s32 save_state_storage_options(s32 stage_id, s32 option_index,
@@ -262,7 +266,7 @@ static const struct PracticeSetting s_global_settings[] = {
     DYNAMIC_OPTIONS_SETTING("Save state storage", save_state_storage,
                             save_state_storage_options),
     INT_SLIDER_SETTING("Max SD save states", max_save_states, 1, 99,
-                       practice_sd_card_is_available),
+                       sd_card_apply),
     DYNAMIC_OPTIONS_SETTING("Replay mode", replay_mode, replay_mode_options),
 #if DEV
     OPTIONS_SETTING("Record replay seeds", record_replay_seeds, s_off_on, NULL),
