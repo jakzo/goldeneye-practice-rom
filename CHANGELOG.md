@@ -1,7 +1,5 @@
 ### Unreleased
 
-# 0.7.0
-
 ## Frigate practice tools
 
 - Added a Frigate option to make every freed hostage choose the fastest escape destination (PAD145)
