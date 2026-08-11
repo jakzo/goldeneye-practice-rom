@@ -3,5 +3,6 @@
 
 void practice_grenade_cam_tick(void);
 void practice_grenade_cam_refresh(void);
+void practice_grenade_cam_reset(void);
 
 #endif

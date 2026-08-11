@@ -32,6 +32,13 @@ static struct grenade_cam_slot g_GrenadeCamSlots[MAX_GRENADE_CAM_SLOTS];
 
 extern s32 g_ClockTimer;
 
+static void reset_slot(struct grenade_cam_slot *slot) {
+  slot->item_obj = NULL;
+  slot->item_last_stan = NULL;
+  slot->freeze_ticks = 0;
+  slot->active = FALSE;
+}
+
 static bool is_supported_thrown_item(struct ObjectRecord *obj) {
   if (obj == NULL)
     return FALSE;
@@ -116,15 +123,13 @@ void practice_grenade_cam_tick(void) {
 
   if (!practice.grenade_cam) {
     for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
-      g_GrenadeCamSlots[s].active = FALSE;
-      g_GrenadeCamSlots[s].item_obj = NULL;
+      reset_slot(&g_GrenadeCamSlots[s]);
     }
     return;
   }
 
   for (s = slot_limit; s < MAX_GRENADE_CAM_SLOTS; s++) {
-    g_GrenadeCamSlots[s].active = FALSE;
-    g_GrenadeCamSlots[s].item_obj = NULL;
+    reset_slot(&g_GrenadeCamSlots[s]);
   }
 
   for (s = 0; s < slot_limit; s++) {
@@ -135,8 +140,7 @@ void practice_grenade_cam_tick(void) {
     if (slot->freeze_ticks > 0) {
       slot->freeze_ticks -= g_ClockTimer;
       if (slot->freeze_ticks <= 0) {
-        slot->active = FALSE;
-        slot->item_obj = NULL;
+        reset_slot(slot);
       }
     } else {
       still_active =
@@ -219,13 +223,14 @@ void practice_grenade_cam_tick(void) {
 }
 
 void practice_grenade_cam_refresh(void) {
+  practice_grenade_cam_reset();
+  practice_grenade_cam_tick();
+}
+
+void practice_grenade_cam_reset(void) {
   s32 s;
 
   for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
-    g_GrenadeCamSlots[s].active = FALSE;
-    g_GrenadeCamSlots[s].item_obj = NULL;
-    g_GrenadeCamSlots[s].freeze_ticks = 0;
+    reset_slot(&g_GrenadeCamSlots[s]);
   }
-
-  practice_grenade_cam_tick();
 }

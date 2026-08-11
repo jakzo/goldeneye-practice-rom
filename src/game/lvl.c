@@ -4630,6 +4630,10 @@ void lvlViewMoveTick(void)
 
 void lvlUnloadStageTextData(void)
 {
+#ifdef PRACTICE_ROM
+    practice_grenade_cam_reset();
+#endif
+
     if (g_MpSoundStateRelated != NULL)
     {
         if (sndGetPlayingState(g_MpSoundStateRelated) != AL_STOPPED)
