@@ -1,10 +1,10 @@
 #include "practice_sd_card.h"
-#include "practice_fatfs_config.h"
-#include "practice_libdragon_compat.h"
-#include "../../../libdragon/src/fatfs/ff.h"
 #include "../../../libdragon/src/fatfs/diskio.h"
+#include "../../../libdragon/src/fatfs/ff.h"
 #include "../../../libdragon/src/libcart/cart.h"
 #include "../practice_ui.h"
+#include "practice_fatfs_config.h"
+#include "practice_libdragon_compat.h"
 
 extern int sprintf(char *dst, const char *fmt, ...);
 
@@ -41,16 +41,14 @@ DSTATUS disk_initialize(BYTE pdrv) {
 DSTATUS disk_status(BYTE pdrv) { return pdrv == 0 ? 0 : STA_NOINIT; }
 
 DRESULT disk_read(BYTE pdrv, BYTE *buff, LBA_t sector, UINT count) {
-  if (pdrv != 0 ||
-      practice_cart_card_rd_dram(buff, sector, count) != 0) {
+  if (pdrv != 0 || practice_cart_card_rd_dram(buff, sector, count) != 0) {
     return RES_ERROR;
   }
   return RES_OK;
 }
 
 DRESULT disk_write(BYTE pdrv, const BYTE *buff, LBA_t sector, UINT count) {
-  if (pdrv != 0 ||
-      practice_cart_card_wr_dram(buff, sector, count) != 0) {
+  if (pdrv != 0 || practice_cart_card_wr_dram(buff, sector, count) != 0) {
     return RES_ERROR;
   }
   return RES_OK;
@@ -330,8 +328,7 @@ bool practice_sd_card_begin_write(const char *level_name, s32 max_save_states) {
   /* The state serializer seeks backward to patch counts and offsets. Its
    * paged stream must read the already-written page before changing only part
    * of it, so a newly created save needs read as well as write access. */
-  result =
-      f_open(&g_SdCardFile, path, FA_READ | FA_WRITE | FA_CREATE_NEW);
+  result = f_open(&g_SdCardFile, path, FA_READ | FA_WRITE | FA_CREATE_NEW);
   if (result != FR_OK) {
     practiceLogWarn("Could not create SD-card save state (%d): %s", result,
                     path);

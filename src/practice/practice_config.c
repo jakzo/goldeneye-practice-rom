@@ -6,6 +6,7 @@
 #include "practice_sram.h"
 #include "practice_tests.h"
 #include "practice_ui.h"
+#include "state/practice_sd_card.h"
 #include "state/practice_states.h"
 #include <bondconstants.h>
 #include <fr.h>
@@ -134,9 +135,9 @@ struct PracticeSetting {
       .slider = { min, max, step }                                             \
     }                                                                          \
   }
-#define INT_SLIDER_SETTING(label, member, min, max)                            \
+#define INT_SLIDER_SETTING(label, member, min, max, applies_fn)                \
   {                                                                            \
-    label, CONFIG_OFFSET(member), PRACTICE_SETTING_INT_SLIDER, NULL, {         \
+    label, CONFIG_OFFSET(member), PRACTICE_SETTING_INT_SLIDER, applies_fn, {   \
       .slider = {min, max, 1.0f}                                               \
     }                                                                          \
   }
@@ -161,9 +162,9 @@ static const struct PracticeOption s_max_external_cameras[] = {
     {"2 (crashes likely)", 2},
 };
 static const struct PracticeOption s_save_state_storage[] = {
-    {"SRAM", PRACTICE_STORAGE_SRAM},
-    {"Ex-Pak", PRACTICE_STORAGE_EXPANSION_RAM},
     {"SD", PRACTICE_STORAGE_FLASHCART_SD},
+    {"Ex-Pak", PRACTICE_STORAGE_EXPANSION_RAM},
+    {"SRAM", PRACTICE_STORAGE_SRAM},
 };
 
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
@@ -178,13 +179,7 @@ static s32 save_state_storage_options(s32 stage_id, s32 option_index,
 
   for (i = 0; i < ARRAY_COUNT(s_save_state_storage); i++) {
     s32 location = s_save_state_storage[i].value;
-    /* Rendering this menu must not probe the flashcart. Flashcart access can
-     * block on PI/TLB activity and should only happen when storage is used. */
-    s32 available = location == PRACTICE_STORAGE_FLASHCART_SD
-                        ? TRUE
-                        : storage_location_is_available(location);
-
-    if (!available) {
+    if (!storage_location_is_available(location)) {
       continue;
     }
     if (available_index == option_index) {
@@ -266,7 +261,8 @@ static const struct PracticeSetting s_level_settings[] = {
 static const struct PracticeSetting s_global_settings[] = {
     DYNAMIC_OPTIONS_SETTING("Save state storage", save_state_storage,
                             save_state_storage_options),
-    INT_SLIDER_SETTING("Max SD save states", max_save_states, 1, 99),
+    INT_SLIDER_SETTING("Max SD save states", max_save_states, 1, 99,
+                       practice_sd_card_is_available),
     DYNAMIC_OPTIONS_SETTING("Replay mode", replay_mode, replay_mode_options),
 #if DEV
     OPTIONS_SETTING("Record replay seeds", record_replay_seeds, s_off_on, NULL),
