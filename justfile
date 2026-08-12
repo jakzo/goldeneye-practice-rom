@@ -89,7 +89,17 @@ test-replay-save-states REGION REPLAY_DIR:
     esac
     replay_dir="$(cd "{{ REPLAY_DIR }}" && pwd)"
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
-    docker run --rm -e REPLAY_SAVE_STATE_FILTER -e REPLAY_SAVE_STATE_EXCLUDE -e REPLAY_SAVE_STATE_SKIP_BUILD -e REPLAY_SAVE_STATE_SPACING_SECONDS -e REPLAY_SAVE_STATE_WAIT_FRAMES -e REPLAY_SAVE_STATE_DURATION_SECONDS -e REPLAY_SAVE_STATE_GRENADE_CAM -e REPLAY_SAVE_STATE_HOSTAGE_CAM -v "$(pwd):/home/dev" -v "$replay_dir:/replays:ro" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-replay-save-states /replays "$region"
+    docker run --rm -e REPLAY_SAVE_STATE_FILTER -e REPLAY_SAVE_STATE_EXCLUDE -e REPLAY_SAVE_STATE_SKIP_BUILD -e REPLAY_SAVE_STATE_SPACING_SECONDS -e REPLAY_SAVE_STATE_WAIT_FRAMES -e REPLAY_SAVE_STATE_DURATION_SECONDS -e REPLAY_SAVE_STATE_END_MARGIN_FRAMES -e REPLAY_SAVE_STATE_GRENADE_CAM -e REPLAY_SAVE_STATE_HOSTAGE_CAM -e REPLAY_SAVE_STATE_RESTART_BETWEEN_LOADS -e REPLAY_SAVE_STATE_JOBS -v "$(pwd):/home/dev" -v "$replay_dir:/replays:ro" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-replay-save-states /replays "$region"
+
+# Run the complete US save-state replay matrix, one step, or one replay.
+test-save-state-replay-suite STEP="all" REPLAY="":
+    bash ./scripts/run_full_save_state_replay_suite.sh "{{ STEP }}" "{{ REPLAY }}"
+
+test-save-state-replay-suite-step STEP REPLAY="":
+    just test-save-state-replay-suite "{{ STEP }}" "{{ REPLAY }}"
+
+test-save-state-replay-suite-replay REPLAY:
+    just test-save-state-replay-suite all "{{ REPLAY }}"
 
 # Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
 profile-ares ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007": build-ares
@@ -118,7 +128,7 @@ test-all JOBS="":
 
 # Run every regional SRAM replay against a release practice ROM using ares'
 # host-side state comparison. Known practice-ROM divergences remain failures.
-test-practice-replays REGION="us" ARTIFACTS="build/practice-replay-results": build-ares
+test-practice-replays REGION="us" ARTIFACTS="build/practice-replay-results" REPLAY="": build-ares
     #!/usr/bin/env bash
     set -euo pipefail
     region="$(printf '%s' "{{ REGION }}" | tr '[:upper:]' '[:lower:]')"
@@ -131,14 +141,22 @@ test-practice-replays REGION="us" ARTIFACTS="build/practice-replay-results": bui
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" -w /home/dev {{ test_image }} make -j{{ num_cpus() }} DEV=0 VERSION="$version" COMPARE=0 TEST_CASE=
     python3 scripts/patch_practice_rom.py "build/$outcode/ge007.$outcode.z64" --flags 1
-    python3 ares/tests/n64-replay/run.py \
-        --ares "{{ ares_bin }}" \
-        --rom "build/$outcode/ge007.$outcode.z64" \
-        --elf "build/$outcode/ge007.$outcode.elf" \
-        --fixture-dir tests/replays \
-        --region "$region" \
-        --jobs 3 \
-        --artifacts "{{ ARTIFACTS }}/$region"
+    run_replays() {
+        python3 ares/tests/n64-replay/run.py \
+            --ares "{{ ares_bin }}" \
+            --rom "build/$outcode/ge007.$outcode.z64" \
+            --elf "build/$outcode/ge007.$outcode.elf" \
+            --fixture-dir tests/replays \
+            --region "$region" \
+            --jobs 3 \
+            --artifacts "{{ ARTIFACTS }}/$region" \
+            "$@"
+    }
+    if [ -n "{{ REPLAY }}" ]; then
+        run_replays --replay "{{ REPLAY }}"
+    else
+        run_replays
+    fi
 
 sc64-dev BOOT_LEVEL="TITLE":
     docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}

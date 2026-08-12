@@ -598,6 +598,7 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, is_timer_active);
   write_u32(stream, g_PlayerInvincible);
   write_u32(stream, g_bondviewForceDisarm);
+  write_bytes(stream, &g_ForceBondMoveOffset, sizeof(g_ForceBondMoveOffset));
   write_bytes(stream, &flt_CODE_bss_800799E8,
               sizeof(flt_CODE_bss_800799E8));
   write_u32(stream, get_prop_index(dword_CODE_bss_800799F4));
@@ -695,6 +696,18 @@ void save_global_state(StateStream *stream) {
   write_bytes(stream, list_visible_rooms_in_cur_global_vis_packet,
               sizeof(list_visible_rooms_in_cur_global_vis_packet));
   write_bytes(stream, roomStatusFlags, sizeof(roomStatusFlags));
+  {
+    s32 matrix;
+
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
+      if (roomIndices[matrix] < -1 ||
+          roomIndices[matrix] >= g_MaxNumRooms) {
+        practiceLogError("Live room transform mapping is invalid (%d -> %d)",
+                         matrix, roomIndices[matrix]);
+        assert(FALSE);
+      }
+    }
+  }
   write_bytes(stream, roomIndices, sizeof(roomIndices));
   write_bytes(stream, roomOwners, sizeof(roomOwners));
   {
@@ -802,6 +815,7 @@ void load_global_state_pre_props(StateStream *stream) {
   is_timer_active = read_u32(stream);
   g_PlayerInvincible = read_u32(stream);
   g_bondviewForceDisarm = read_u32(stream);
+  read_bytes(stream, &g_ForceBondMoveOffset, sizeof(g_ForceBondMoveOffset));
   read_bytes(stream, &flt_CODE_bss_800799E8,
              sizeof(flt_CODE_bss_800799E8));
   saved_death_camera_prop_index = read_u32(stream);
@@ -924,10 +938,11 @@ void load_global_state_pre_props(StateStream *stream) {
     }
     for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
       room = roomIndices[matrix];
-      if (room < 0) {
+      if (room == -1) {
         continue;
       }
-      if (room >= g_MaxNumRooms || g_BgRoomInfo[room].field_36 != -1) {
+      if (room < -1 || room >= g_MaxNumRooms ||
+          g_BgRoomInfo[room].field_36 != -1) {
         practiceLogError("Saved room transform mapping is invalid (%d -> %d)",
                          matrix, room);
         assert(FALSE);

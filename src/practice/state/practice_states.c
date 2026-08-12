@@ -6,6 +6,7 @@
 #include "../practice_replay.h"
 #include "../practice_sfx.h"
 #include "../practice_sram.h"
+#include "../practice_tests.h"
 #include "../practice_timescale.h"
 #include "emu_log.h"
 #include "game/lvl.h"
@@ -21,7 +22,6 @@ extern void store_osgetcount(void);
 static SaveStateHeader g_SavedHeader __attribute__((aligned(16)));
 bool g_HasSavedState = FALSE;
 static PracticeStorageLocation g_SaveStateStorage = PRACTICE_STORAGE_SRAM;
-static u32 g_SaveStateTestMinimumSize = 0;
 
 static u32 get_save_state_storage_offset(void) {
   return g_SaveStateStorage == PRACTICE_STORAGE_SRAM ? SAVE_STATE_SRAM_OFFSET
@@ -50,14 +50,10 @@ void practice_states_notify_sram_overwritten(void) {
   }
 }
 
-void practice_states_set_test_minimum_size(u32 minimum_size) {
-  g_SaveStateTestMinimumSize = minimum_size;
-}
-
 void practice_states_log_test_fixture(void) {
   static const char hex[] = "0123456789abcdef";
   StorageCursor cursor;
-  u8 bytes[128];
+  u8 bytes[128] __attribute__((aligned(16)));
   char encoded[sizeof(bytes) * 2 + 1];
   u32 offset = 0;
 
@@ -128,15 +124,6 @@ static SaveSerializationResult serialize_game_state(StateStream *stream,
   }
   result.props_saved = TRUE;
 
-  if (g_SaveStateTestMinimumSize > stream->total_processed) {
-    static const u8 padding[128] = {0};
-    while (stream->total_processed < g_SaveStateTestMinimumSize) {
-      u32 remaining = g_SaveStateTestMinimumSize - stream->total_processed;
-      u32 chunk = remaining < sizeof(padding) ? remaining : sizeof(padding);
-      write_bytes(stream, padding, chunk);
-    }
-  }
-
   /* Flush the remaining bytes in the storage stream. */
   stream_flush(stream);
   result.size = stream->total_processed;
@@ -196,7 +183,8 @@ void save_game_state(void) {
     return;
   }
 
-  if (g_SaveStateStorage == PRACTICE_STORAGE_SRAM) {
+  if (g_SaveStateStorage == PRACTICE_STORAGE_SRAM &&
+      g_practice_test_case != PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES) {
     practice_replay_stop_recording();
     practice_replay_stop_playback();
     practice_replay_invalidate_saved();

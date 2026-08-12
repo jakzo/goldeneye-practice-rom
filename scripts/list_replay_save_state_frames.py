@@ -56,12 +56,45 @@ def replay_frame_boundaries(path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("replay_sram", type=Path)
+    parser.add_argument(
+        "--duration-before-end",
+        type=int,
+        metavar="MARGIN_FRAMES",
+        help=(
+            "print the exact replay-frame duration from the first save "
+            "boundary to this many frames before the replay ends"
+        ),
+    )
+    parser.add_argument(
+        "--spacing-frames",
+        type=int,
+        default=60,
+        help="first save spacing used with --duration-before-end (default: 60)",
+    )
     args = parser.parse_args()
 
     try:
         boundaries, duration = replay_frame_boundaries(args.replay_sram)
     except (OSError, ValueError, struct.error) as error:
         parser.error(str(error))
+
+    if args.duration_before_end is not None:
+        if args.duration_before_end < 1 or args.spacing_frames < 1:
+            parser.error("frame spacing and end margin must be positive")
+        try:
+            first_save = next(
+                boundary
+                for boundary in boundaries
+                if boundary >= args.spacing_frames
+            )
+        except StopIteration:
+            parser.error("replay ends before the requested save spacing")
+        load_target = duration - args.duration_before_end
+        exact_duration = load_target - first_save
+        if exact_duration < 1 or exact_duration > 0xffff:
+            parser.error("requested near-end duration is outside 1..65535 frames")
+        print(exact_duration)
+        return
 
     snapshots = []
     boundary_index = 0

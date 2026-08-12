@@ -49,7 +49,6 @@ void load_game_state(void);
 bool practice_states_set_storage_location(PracticeStorageLocation location);
 PracticeStorageLocation practice_states_get_storage_location(void);
 void practice_states_notify_sram_overwritten(void);
-void practice_states_set_test_minimum_size(u32 minimum_size);
 void practice_states_log_test_fixture(void);
 
 #endif /* PRACTICE_STATES_H */

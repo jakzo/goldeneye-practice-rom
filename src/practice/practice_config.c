@@ -362,21 +362,18 @@ static u32 rom_config_checksum(const struct PracticeRomConfig *config) {
          PRACTICE_ROM_CONFIG_CHECKSUM_SALT;
 }
 
-static void apply_rom_config(void) {
-  union {
-    u64 alignment;
-    struct PracticeRomConfig config;
-  } buffer;
-  struct PracticeRomConfig *config = &buffer.config;
-
+static bool read_rom_config(struct PracticeRomConfig *config) {
   romCopy(config, (void *)PRACTICE_ROM_CONFIG_OFFSET, sizeof(*config));
   if (config->magic != PRACTICE_ROM_CONFIG_MAGIC ||
       config->version != PRACTICE_ROM_CONFIG_VERSION ||
       config->size != sizeof(*config) ||
       config->checksum != rom_config_checksum(config)) {
-    return;
+    return FALSE;
   }
+  return TRUE;
+}
 
+static void apply_rom_config(const struct PracticeRomConfig *config) {
   if (config->boot_level != LEVELID_NONE) {
     practice.boot_level = config->boot_level;
   }
@@ -389,6 +386,9 @@ static void apply_rom_config(void) {
   if (config->test_case != 0) {
     s32 test_boot_level;
 
+    practice_tests_set_restart_save_state_mode(
+        (config->flags &
+         PRACTICE_ROM_CONFIG_FLAG_RESTART_SAVE_STATE_TEST) != 0);
     practice_tests_set_case(config->test_case, config->test_param);
     test_boot_level = practice_tests_boot_level(config->test_case);
     if (test_boot_level != LEVELID_NONE) {
@@ -401,10 +401,16 @@ static void apply_rom_config(void) {
 }
 
 void practice_config_load(void) {
+  union {
+    u64 alignment;
+    struct PracticeRomConfig config;
+  } rom_config_buffer;
+  struct PracticeRomConfig *rom_config = &rom_config_buffer.config;
   u8 config_sram_bytes[CONFIG_SRAM_SIZE];
   struct StoredPracticeConfig *stored =
       (struct StoredPracticeConfig *)&config_sram_bytes;
   u32 size = CONFIG_HEADER_SIZE + CONFIG_HEADER_SIZE - CONFIG_HEADER_SIZE % 16;
+  bool has_rom_config = read_rom_config(rom_config);
 
   if (sram_read(CONFIG_SRAM_OFFSET, &config_sram_bytes, size) == 0 &&
       stored->magic == CONFIG_MAGIC && stored->size != 0 &&
@@ -421,10 +427,20 @@ void practice_config_load(void) {
   if (practice.max_save_states < 1 || practice.max_save_states > 20) {
     practice.max_save_states = 5;
   }
+  /* Flashcart detection performs PI I/O and can add retraces before a level
+   * starts. Host-driven replay tests either do not use save states or select
+   * SRAM explicitly, so keep their boot timing deterministic by avoiding the
+   * optional storage probe. */
+  if (has_rom_config &&
+      (rom_config->flags & PRACTICE_ROM_CONFIG_FLAG_BASE_REPLAY)) {
+    practice.save_state_storage = PRACTICE_STORAGE_SRAM;
+  }
   practice.save_state_storage =
       resolve_save_state_storage(practice.save_state_storage);
   practice_states_set_storage_location(practice.save_state_storage);
-  apply_rom_config();
+  if (has_rom_config) {
+    apply_rom_config(rom_config);
+  }
 }
 
 static s32 setting_applies(const struct PracticeSetting *setting,

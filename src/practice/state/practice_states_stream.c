@@ -175,19 +175,44 @@ static void storage_stream_read_bytes_impl(StateStream *stream, void *dst,
 static void storage_stream_seek_impl(StateStream *stream,
                                      u32 absolute_offset) {
   StorageStream *storage = (StorageStream *)stream;
-  u32 intra_page = absolute_offset % STORAGE_PAGE_SIZE;
-  u32 page_start = absolute_offset - intra_page;
+  u32 relative_offset;
+  u32 intra_page;
+  u32 page_start;
+
+  if (absolute_offset < stream->base_address ||
+      absolute_offset > storage->capacity) {
+    storage->error = TRUE;
+    return;
+  }
+
+  /* Buffered pages are based at base_address, which is 0x280 for SRAM save
+   * states rather than a natural 1 KiB boundary. Keep seeks on that same grid;
+   * changing the grid after a header/count patch can make a later flush
+   * overwrite bytes which were already written on the original grid. */
+  relative_offset = absolute_offset - stream->base_address;
+  intra_page = relative_offset % STORAGE_PAGE_SIZE;
+  page_start = absolute_offset - intra_page;
 
   if (storage->current_page_addr == page_start) {
+    /* A write which ended exactly at a page boundary has advanced the address
+     * but has not loaded that next page. Reload it before seeking into its
+     * middle, or subsequent partial writes would flush stale page contents. */
+    if (storage->is_write && !storage->is_dirty &&
+        storage->page_offset == 0 && intra_page != 0) {
+      StorageCursor cursor;
+      u32 size = STORAGE_PAGE_SIZE;
+
+      if (size > storage->capacity - page_start) {
+        size = storage->capacity - page_start;
+      }
+      storage_cursor_init(&cursor, storage->location, page_start);
+      storage_read(&cursor, storage->page, size);
+      storage->error |= cursor.error;
+    }
     storage->page_offset = intra_page;
   } else {
     StorageCursor cursor;
     u32 size = STORAGE_PAGE_SIZE;
-
-    if (page_start > storage->capacity) {
-      storage->error = TRUE;
-      return;
-    }
 
     // Evict current page if dirty
     storage_stream_flush_impl(stream);

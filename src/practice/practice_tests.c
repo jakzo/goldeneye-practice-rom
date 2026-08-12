@@ -104,6 +104,9 @@ extern void __ull_divremi(unsigned long long *quotient,
 #define REPLAY_STATE_PARAM_DURATION_SHIFT 16
 #define REPLAY_STATE_PARAM_GRENADE_CAM 0x01000000
 #define REPLAY_STATE_PARAM_HOSTAGE_CAM 0x02000000
+#define REPLAY_STATE_PARAM_EXACT_DURATION 0x40000000
+#define REPLAY_RESTART_CHECKPOINT_TIMESTAMP_MASK 0xffff
+#define REPLAY_RESTART_CHECKPOINT_ELAPSED_SHIFT 16
 #if defined(VERSION_EU)
 #define REPLAY_STATE_FRAMES_PER_SECOND 50
 #else
@@ -206,6 +209,8 @@ static u32 replay_chr_hidden_hash(void) {
 #define g_RunwaySaveStatePhase g_ReplayTestPhase
 #define g_RunwaySaveStatePausedFrames g_ReplayTestHotkeyFrame
 #define g_RunwaySaveStateLastTimestamp g_ReplayTestInitialInvert
+#define g_ReplayRestartSaveStateMode g_ReplayTestPlaybackSeen
+#define g_ReplaySaveViewerMatricesFixed g_LevelRestartTestPhase
 
 enum ReplaySaveStatePhase {
   REPLAY_STATE_WAIT_TO_SAVE,
@@ -225,20 +230,44 @@ static s32 replay_state_param_value(s32 shift, s32 default_value) {
   return value != 0 ? value : default_value;
 }
 
+static bool replay_state_uses_exact_duration(void) {
+  return ((u32)g_ReplayTestPlaybackCount &
+          REPLAY_STATE_PARAM_EXACT_DURATION) != 0;
+}
+
 static s32 replay_state_spacing_frames(void) {
+  if (replay_state_uses_exact_duration()) {
+    return REPLAY_STATE_FRAMES_PER_SECOND;
+  }
   return replay_state_param_value(0, 1) * REPLAY_STATE_FRAMES_PER_SECOND;
 }
 
 static s32 replay_state_wait_frames(void) {
+  if (g_ReplayRestartSaveStateMode) {
+    return 3;
+  }
+  if (replay_state_uses_exact_duration()) {
+    return replay_state_param_value(REPLAY_STATE_PARAM_DURATION_SHIFT, 3);
+  }
   return replay_state_param_value(REPLAY_STATE_PARAM_WAIT_SHIFT, 3);
 }
 
 static s32 replay_state_duration_frames(void) {
+  if (replay_state_uses_exact_duration()) {
+    return (u32)g_ReplayTestPlaybackCount & 0xffff;
+  }
   return replay_state_param_value(REPLAY_STATE_PARAM_DURATION_SHIFT, 1) *
          REPLAY_STATE_FRAMES_PER_SECOND;
 }
 
+void practice_tests_set_restart_save_state_mode(s32 enabled) {
+  g_ReplayRestartSaveStateMode = enabled;
+}
+
 void practice_tests_set_case(s32 test_case, s32 test_param) {
+  bool restart_save_state_mode =
+      test_case == REPLAY_RUNWAY_SAVE_STATES && g_ReplayRestartSaveStateMode;
+
   g_practice_test_case = test_case;
   g_save_test_timer = -1;
   case_delta = 0;
@@ -255,25 +284,46 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
   g_PausedStateLoadTestPhase = 0;
 
   if (test_case == REPLAY_RUNWAY_SAVE_STATES) {
+    g_ReplayRestartSaveStateMode = restart_save_state_mode;
     g_ReplayTestPlaybackCount = test_param;
     practice_replay_use_test_rom_fixture();
-    if (!practice_states_set_storage_location(
-            PRACTICE_STORAGE_EXPANSION_RAM)) {
-      emu_log("EXPANSION_RAM_NOT_AVAILABLE");
-      emu_log("TEST_FAILED");
+    if (g_ReplayRestartSaveStateMode) {
+      u32 packed_checkpoint = (u32)test_param;
+
+      practice_states_set_storage_location(PRACTICE_STORAGE_SRAM);
+      g_ReplaySaveCheckpoint.timestamp =
+          packed_checkpoint & REPLAY_RESTART_CHECKPOINT_TIMESTAMP_MASK;
+      g_ReplaySaveCheckpoint.elapsed_video_frames =
+          (f32)(packed_checkpoint >> REPLAY_RESTART_CHECKPOINT_ELAPSED_SHIFT);
+      g_RunwaySaveStateTarget = g_ReplaySaveCheckpoint.timestamp;
+      if (g_RunwaySaveStateTarget != 0) {
+        if (!g_HasSavedState) {
+          emu_log("RESTART_STATE_NOT_AVAILABLE timestamp=%d",
+                  g_RunwaySaveStateTarget);
+          emu_log("TEST_FAILED");
+        }
+        g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_LOAD;
+      }
+    } else {
+      if (!practice_states_set_storage_location(
+              PRACTICE_STORAGE_EXPANSION_RAM)) {
+        emu_log("EXPANSION_RAM_NOT_AVAILABLE");
+        emu_log("TEST_FAILED");
+      }
     }
-    practice_states_set_test_minimum_size(132 * 1024);
   }
 
   practice.grenade_cam =
       test_case == REPLAY_GRENADE_CAM || test_case == REPLAY_FRIGATE ||
       (test_case == REPLAY_RUNWAY_SAVE_STATES &&
+       !g_ReplayRestartSaveStateMode &&
        (test_param & REPLAY_STATE_PARAM_GRENADE_CAM));
 
   // Crashes...
   practice.frigate_hostage_cam =
       test_case == REPLAY_FRIGATE ||
       (test_case == REPLAY_RUNWAY_SAVE_STATES &&
+       !g_ReplayRestartSaveStateMode &&
        (test_param & REPLAY_STATE_PARAM_HOSTAGE_CAM));
 
   if (test_case == REPLAY) {
@@ -1956,6 +2006,8 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_ReplaySaveFreeListHash = replay_free_list_hash();
     g_ReplaySaveChrFlagsHash = replay_chr_flags_hash();
     g_ReplaySaveChrHiddenHash = replay_chr_hidden_hash();
+    g_ReplaySaveViewerMatricesFixed =
+        practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop);
     practice_replay_get_checkpoint(&g_ReplaySaveCheckpoint);
     g_SimulatedButtons = trigger | D_JPAD;
     g_SimulatedButtonsPressed = D_JPAD;
@@ -1968,6 +2020,26 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
         emu_log("RUNWAY_STATE_SAVE_FAILED timestamp=%d",
                 g_RunwaySaveStateTarget);
         emu_log("TEST_FAILED");
+        g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+        break;
+      }
+      if (g_ReplayRestartSaveStateMode) {
+        if (g_ReplaySaveCheckpoint.timestamp > 0xffff ||
+            g_ReplaySaveCheckpoint.elapsed_video_frames < 0.0f ||
+            g_ReplaySaveCheckpoint.elapsed_video_frames > 65535.0f ||
+            g_ReplaySaveCheckpoint.elapsed_video_frames !=
+                (f32)(u32)g_ReplaySaveCheckpoint.elapsed_video_frames) {
+          emu_log("RESTART_CHECKPOINT_OUT_OF_RANGE timestamp=%d elapsed=%f",
+                  g_ReplaySaveCheckpoint.timestamp,
+                  g_ReplaySaveCheckpoint.elapsed_video_frames);
+          emu_log("TEST_FAILED");
+        } else {
+          practice_states_log_test_fixture();
+          emu_log("RUNWAY_RESTART_SEGMENT_COMPLETE timestamp=%d elapsed=%d",
+                  g_ReplaySaveCheckpoint.timestamp,
+                  (u32)g_ReplaySaveCheckpoint.elapsed_video_frames);
+          emu_log("TEST_COMPLETE");
+        }
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
@@ -2045,12 +2117,13 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
-      if (g_CurrentPlayer->pos.x != g_ReplaySavePlayerPos.x ||
+      if (!g_ReplayRestartSaveStateMode &&
+          (g_CurrentPlayer->pos.x != g_ReplaySavePlayerPos.x ||
           g_CurrentPlayer->pos.y != g_ReplaySavePlayerPos.y ||
           g_CurrentPlayer->pos.z != g_ReplaySavePlayerPos.z ||
           g_CurrentPlayer->prop->pos.x != g_ReplaySavePropPos.x ||
           g_CurrentPlayer->prop->pos.y != g_ReplaySavePropPos.y ||
-          g_CurrentPlayer->prop->pos.z != g_ReplaySavePropPos.z) {
+          g_CurrentPlayer->prop->pos.z != g_ReplaySavePropPos.z)) {
         emu_log("RUNWAY_LOAD_POSITION_MISMATCH player=%f,%f,%f/%f,%f,%f prop=%f,%f,%f/%f,%f,%f",
                 g_ReplaySavePlayerPos.x, g_ReplaySavePlayerPos.y,
                 g_ReplaySavePlayerPos.z, g_CurrentPlayer->pos.x,
@@ -2062,40 +2135,47 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
-      if (replay_active_list_hash() != g_ReplaySaveActiveListHash) {
+      if (!g_ReplayRestartSaveStateMode &&
+          replay_active_list_hash() != g_ReplaySaveActiveListHash) {
         emu_log("RUNWAY_LOAD_ACTIVE_LIST_MISMATCH expected=%08x actual=%08x",
                 g_ReplaySaveActiveListHash, replay_active_list_hash());
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
-      if (replay_free_list_hash() != g_ReplaySaveFreeListHash) {
+      if (!g_ReplayRestartSaveStateMode &&
+          replay_free_list_hash() != g_ReplaySaveFreeListHash) {
         emu_log("RUNWAY_LOAD_FREE_LIST_MISMATCH expected=%08x actual=%08x",
                 g_ReplaySaveFreeListHash, replay_free_list_hash());
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
-      if (replay_chr_flags_hash() != g_ReplaySaveChrFlagsHash) {
+      if (!g_ReplayRestartSaveStateMode &&
+          replay_chr_flags_hash() != g_ReplaySaveChrFlagsHash) {
         emu_log("RUNWAY_LOAD_CHR_FLAGS_MISMATCH expected=%08x actual=%08x",
                 g_ReplaySaveChrFlagsHash, replay_chr_flags_hash());
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
-      if (replay_chr_hidden_hash() != g_ReplaySaveChrHiddenHash) {
+      if (!g_ReplayRestartSaveStateMode &&
+          replay_chr_hidden_hash() != g_ReplaySaveChrHiddenHash) {
         emu_log("RUNWAY_LOAD_CHR_HIDDEN_MISMATCH expected=%08x actual=%08x",
                 g_ReplaySaveChrHiddenHash, replay_chr_hidden_hash());
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
-      if (g_CurrentPlayer->prop != NULL &&
-          (g_CurrentPlayer->prop->flags & PROPFLAG_ONSCREEN) &&
+      if (!g_ReplayRestartSaveStateMode && g_CurrentPlayer->prop != NULL &&
           g_CurrentPlayer->prop->chr != NULL &&
           g_CurrentPlayer->prop->chr->model != NULL &&
-          !practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop)) {
-        emu_log("RUNWAY_LOAD_VIEWER_MATRICES_RESTORED_BEFORE_RSP");
+          practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop) !=
+              g_ReplaySaveViewerMatricesFixed) {
+        emu_log("RUNWAY_LOAD_VIEWER_MATRIX_FORMAT_MISMATCH expected=%d actual=%d",
+                g_ReplaySaveViewerMatricesFixed,
+                practice_prop_render_matrices_are_fixed(
+                    g_CurrentPlayer->prop));
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
@@ -2106,6 +2186,10 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_SimulatedButtonsPressed = 0;
     if (++g_RunwaySaveStatePausedFrames >= replay_state_wait_frames()) {
       g_RunwaySaveStateLastTimestamp = g_RunwaySaveStateTarget;
+      if (g_ReplayRestartSaveStateMode) {
+        g_RunwaySaveStateSegmentEnd =
+            g_RunwaySaveStateTarget + REPLAY_STATE_FRAMES_PER_SECOND;
+      }
       g_RunwaySaveStatePhase = REPLAY_STATE_PLAY_BEFORE_SAVE;
     }
     break;
@@ -2204,6 +2288,20 @@ void practice_tests_frame() {
       emu_log("RUNWAY_STATE_REPLAY_COMPLETE timestamp=%d", replay_timestamp);
       emu_log("TEST_COMPLETE");
       g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+    } else if (g_ReplayRestartSaveStateMode) {
+      if (g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_TO_SAVE &&
+          replay_timestamp >= REPLAY_STATE_FRAMES_PER_SECOND) {
+        g_RunwaySaveStatePausedFrames = 0;
+        g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_SAVE;
+      } else if (g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_SAVE &&
+                 replay_timestamp !=
+                     (u32)g_RunwaySaveStateLastTimestamp) {
+        g_RunwaySaveStateLastTimestamp = replay_timestamp;
+        if (replay_timestamp >= (u32)g_RunwaySaveStateSegmentEnd) {
+          g_RunwaySaveStatePausedFrames = 0;
+          g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_SAVE;
+        }
+      }
     } else if (g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_TO_SAVE &&
                replay_timestamp >= (u32)replay_state_spacing_frames()) {
       g_RunwaySaveStatePausedFrames = 0;

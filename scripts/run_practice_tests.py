@@ -38,6 +38,7 @@ SAVE_STATE_MAGIC = 0x47455353
 TEST_SAVE_STATE_SRAM_OFFSET = 0x280
 TEST_REPLAY_ROM_OFFSET = 0x00FE0000
 ROM_CONFIG_OFFSET = 0x00FFFFC0
+ROM_CONFIG_FLAG_RESTART_SAVE_STATE_TEST = 0x2
 
 ROOT = Path(__file__).resolve().parent.parent
 TESTS_FILE = ROOT / "src/practice/practice_tests.c"
@@ -181,6 +182,14 @@ def parse_args():
         type=Path,
         metavar="PATH",
         help="extract every emitted interval state into this directory",
+    )
+    parser.add_argument(
+        "--restart-between-loads",
+        action="store_true",
+        help=(
+            "restart ares after every replay save, then load the SRAM state "
+            "during the next boot"
+        ),
     )
     parser.add_argument(
         "--timeout",
@@ -342,7 +351,10 @@ def print_test_line(test_case, line, *, file=sys.stdout):
         print(f"{prefix} {line}", file=file, flush=True)
 
 
-def select_test(test_case, rom, test_param=0, boot_level=None):
+def select_test(
+    test_case, rom, test_param=0, boot_level=None, config_flags=0
+):
+    flags = config_flags | (1 if boot_level is not None else 0)
     command = [
         sys.executable,
         str(PATCH_ROM_SCRIPT),
@@ -352,7 +364,7 @@ def select_test(test_case, rom, test_param=0, boot_level=None):
         "--test-param",
         str(test_param),
         "--flags",
-        "1" if boot_level is not None else "0",
+        str(flags),
     ]
     if boot_level is not None:
         command.extend(("--boot-level", str(boot_level)))
@@ -706,6 +718,187 @@ def stop_video_capture(process):
             process.wait()
 
 
+def signed_u32(value):
+    return value if value < 0x80000000 else value - 0x100000000
+
+
+def run_restart_save_state_test_case(
+    test_case,
+    command,
+    rom_path,
+    temp_dir,
+    stop_event,
+    timeout,
+    wait_for_emulator_exit,
+    version,
+    replay_fixture,
+):
+    test_dir = temp_dir / test_case
+    test_dir.mkdir()
+    rom = test_dir / rom_path.name
+    shutil.copyfile(rom_path, rom)
+
+    try:
+        boot_level = install_replay_fixture(
+            test_case,
+            rom,
+            version,
+            replay_fixture=replay_fixture,
+        )
+    except (OSError, ValueError) as error:
+        return TestResult(test_case, False, f"fixture setup failed: {error}", 0.0)
+
+    started_at = time.monotonic()
+    checkpoint_param = 0
+    previous_timestamp = -1
+    boot_count = 0
+    combined_output = []
+    segment_marker = re.compile(
+        r"^RUNWAY_RESTART_SEGMENT_COMPLETE timestamp=(\d+) elapsed=(\d+)$",
+        re.MULTILINE,
+    )
+
+    while True:
+        boot_count += 1
+        print_test_line(
+            test_case,
+            f"=== restart boot {boot_count} from timestamp "
+            f"{checkpoint_param & 0xffff} ===",
+        )
+        if not select_test(
+            test_case,
+            rom,
+            signed_u32(checkpoint_param),
+            boot_level,
+            ROM_CONFIG_FLAG_RESTART_SAVE_STATE_TEST,
+        ):
+            return TestResult(
+                test_case,
+                False,
+                "ROM patch failed",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+
+        try:
+            passed, detail, output = run_test(
+                test_case,
+                command,
+                rom,
+                test_dir,
+                stop_event,
+                timeout,
+                wait_for_emulator_exit,
+            )
+        except OSError as error:
+            passed = False
+            detail = f"could not start emulator: {error}"
+            output = ""
+        combined_output.append(
+            "".join(
+                line
+                for line in output.splitlines(keepends=True)
+                if not line.startswith("RUNWAY_STATE_DATA ")
+            )
+        )
+        if not passed:
+            return TestResult(
+                test_case,
+                False,
+                f"restart boot {boot_count}: {detail}",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+
+        if "RUNWAY_STATE_REPLAY_COMPLETE" in output:
+            return TestResult(
+                test_case,
+                True,
+                f"completed after {boot_count} emulator boots",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+
+        match = segment_marker.search(output)
+        if match is None:
+            return TestResult(
+                test_case,
+                False,
+                f"restart boot {boot_count} emitted no checkpoint",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+        timestamp = int(match.group(1))
+        elapsed = int(match.group(2))
+        if timestamp <= previous_timestamp or timestamp > 0xffff or elapsed > 0xffff:
+            return TestResult(
+                test_case,
+                False,
+                f"restart boot {boot_count} emitted invalid checkpoint "
+                f"timestamp={timestamp} elapsed={elapsed}",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+
+        state_path = test_dir / "restart-checkpoint.state"
+        try:
+            extract_test_save_state(output, state_path)
+            state = state_path.read_bytes()
+            sram = bytearray(rom.with_suffix(".ram").read_bytes())
+            if len(sram) != SRAM_SIZE_BYTES:
+                raise ValueError(f"SRAM has {len(sram)} bytes")
+            if len(state) > SRAM_SIZE_BYTES - TEST_SAVE_STATE_SRAM_OFFSET:
+                raise ValueError(
+                    f"state is too large for SRAM: {len(state)} bytes"
+                )
+            sram[TEST_SAVE_STATE_SRAM_OFFSET:] = bytes(
+                SRAM_SIZE_BYTES - TEST_SAVE_STATE_SRAM_OFFSET
+            )
+            state_end = TEST_SAVE_STATE_SRAM_OFFSET + len(state)
+            sram[TEST_SAVE_STATE_SRAM_OFFSET:state_end] = state
+            rom.with_suffix(".ram").write_bytes(sram)
+        except (OSError, ValueError) as error:
+            return TestResult(
+                test_case,
+                False,
+                f"restart boot {boot_count} could not persist SRAM state: {error}",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+        state_header = sram[
+            TEST_SAVE_STATE_SRAM_OFFSET : TEST_SAVE_STATE_SRAM_OFFSET + 16
+        ]
+        if int.from_bytes(
+            state_header[:4], "big"
+        ) != SAVE_STATE_MAGIC:
+            return TestResult(
+                test_case,
+                False,
+                f"restart boot {boot_count} did not persist a valid SRAM state",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+        state_size = int.from_bytes(state_header[12:16], "big")
+        if state_size == 0:
+            state_size = int.from_bytes(state_header[6:8], "big")
+        if state_size > SRAM_SIZE_BYTES - TEST_SAVE_STATE_SRAM_OFFSET:
+            return TestResult(
+                test_case,
+                False,
+                f"restart boot {boot_count} state is too large for SRAM: "
+                f"{state_size} bytes",
+                time.monotonic() - started_at,
+                "".join(combined_output),
+            )
+
+        print_test_line(
+            test_case,
+            f"persisted checkpoint {timestamp} ({state_size} state bytes)",
+        )
+        previous_timestamp = timestamp
+        checkpoint_param = timestamp | (elapsed << 16)
+
+
 def run_test_case(
     test_case,
     command,
@@ -720,8 +913,21 @@ def run_test_case(
     output_state=None,
     replay_fixture=None,
     output_state_dir=None,
+    restart_between_loads=False,
 ):
     timeout = max(timeout, MINIMUM_TEST_TIMEOUT_SECONDS.get(test_case, 0))
+    if restart_between_loads:
+        return run_restart_save_state_test_case(
+            test_case,
+            command,
+            rom_path,
+            temp_dir,
+            stop_event,
+            timeout,
+            wait_for_emulator_exit,
+            version,
+            replay_fixture,
+        )
     test_dir = temp_dir / test_case
     test_dir.mkdir()
     rom = test_dir / rom_path.name
@@ -911,6 +1117,21 @@ def main():
         )
         return 2
 
+    if args.restart_between_loads and (
+        args.test != "REPLAY_RUNWAY_SAVE_STATES"
+        or args.test_param
+        or args.state_fixture
+        or args.output_state
+        or args.output_state_dir
+    ):
+        print(
+            "error: --restart-between-loads requires "
+            "--test REPLAY_RUNWAY_SAVE_STATES and cannot be combined with "
+            "other state/test parameters",
+            file=sys.stderr,
+        )
+        return 2
+
     if args.version != "US" and (
         (args.test_param and args.test != "REPLAY_RUNWAY_SAVE_STATES")
         or args.state_fixture
@@ -1012,6 +1233,7 @@ def main():
                             args.output_state,
                             args.replay_fixture,
                             args.output_state_dir,
+                            args.restart_between_loads,
                         ): test_case
                         for test_case in test_cases
                     }

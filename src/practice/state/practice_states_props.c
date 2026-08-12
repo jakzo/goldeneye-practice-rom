@@ -15,6 +15,7 @@
 #include "loadobjectmodel.h"
 #include "lvl.h"
 #include "matrixmath.h"
+#include "mema.h"
 #include "objecthandler.h"
 #include "player.h"
 #include "practice_states.h"
@@ -4386,7 +4387,11 @@ static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
   }
 }
 
-bool load_props_state(StateStream *stream) {
+static bool load_props_state_with_scratch(
+    StateStream *stream, u32 totalPropsSize, u16 recordCount,
+    s16 indexOfFirstEntry, s16 indexOfCurrentEntry, s16 indexOfFinalEntry,
+    SavedPropLinks *savedLinks,
+    PendingChrAttachments *pendingChrAttachments, s32 pendingChrCapacity) {
   u32 dataStart;
   s32 i;
   u16 nextIndexToRemove = 0;
@@ -4395,25 +4400,7 @@ bool load_props_state(StateStream *stream) {
   s16 projectileOwnerPropIndices[PROJECTILES_ARR_MAX];
   s16 projectileObjPropIndices[PROJECTILES_ARR_MAX];
   s32 previousSavedPropIndex = -1;
-  u32 totalPropsSize = read_u32(stream);
-  u16 recordCount = read_u16(stream);
-  s16 indexOfFirstEntry = read_u16(stream);
-  s16 indexOfCurrentEntry = read_u16(stream);
-  s16 indexOfFinalEntry = read_u16(stream);
   s32 pendingChrCount = 0;
-  s32 pendingChrCapacity = g_NumChrSlots > 0 ? g_NumChrSlots : 1;
-
-  if (recordCount > POS_DATA_ENTRY_LEN) {
-    practiceLogWarn("Invalid prop record count %d", recordCount);
-    return FALSE;
-  }
-  if (pendingChrCapacity > POS_DATA_ENTRY_LEN) {
-    pendingChrCapacity = POS_DATA_ENTRY_LEN;
-  }
-
-  SavedPropLinks savedLinks[recordCount > 0 ? recordCount : 1];
-  PendingChrAttachments
-      pendingChrAttachments[pendingChrCapacity > 0 ? pendingChrCapacity : 1];
 
   dataStart = stream->base_address + stream->total_processed;
 
@@ -5203,4 +5190,60 @@ bool load_props_state(StateStream *stream) {
   load_onscreen_prop_list(stream);
 
   return TRUE;
+}
+
+bool load_props_state(StateStream *stream) {
+  u32 totalPropsSize = read_u32(stream);
+  u16 recordCount = read_u16(stream);
+  s16 indexOfFirstEntry = read_u16(stream);
+  s16 indexOfCurrentEntry = read_u16(stream);
+  s16 indexOfFinalEntry = read_u16(stream);
+  s32 pendingChrCapacity = g_NumChrSlots > 0 ? g_NumChrSlots : 1;
+  u32 savedLinksSize;
+  u32 pendingAttachmentsSize;
+  u32 scratchSize;
+  u8 *scratch;
+  SavedPropLinks *savedLinks;
+  PendingChrAttachments *pendingChrAttachments;
+  bool result;
+
+  if (recordCount > POS_DATA_ENTRY_LEN) {
+    practiceLogWarn("Invalid prop record count %d", recordCount);
+    return FALSE;
+  }
+  if (pendingChrCapacity > POS_DATA_ENTRY_LEN) {
+    pendingChrCapacity = POS_DATA_ENTRY_LEN;
+  }
+
+  /* These tables stay live while missing character and object models are
+   * recreated. Keeping them as VLAs makes the texture inflater's deep call
+   * stack overflow the 32 KiB main-thread stack on prop-heavy levels. Mema is
+   * the game's freeable scratch heap, so use one aligned temporary allocation
+   * and release it on every exit from the loader. */
+  savedLinksSize =
+      ((recordCount > 0 ? recordCount : 1) * sizeof(SavedPropLinks) + 0xf) &
+      ~0xf;
+  pendingAttachmentsSize =
+      ((pendingChrCapacity > 0 ? pendingChrCapacity : 1) *
+           sizeof(PendingChrAttachments) +
+       0xf) &
+      ~0xf;
+  scratchSize = savedLinksSize + pendingAttachmentsSize;
+  scratch = memaAlloc(scratchSize);
+  if (scratch == NULL) {
+    practiceLogError("Could not allocate %d bytes for prop restore scratch",
+                     scratchSize);
+    return FALSE;
+  }
+
+  savedLinks = (SavedPropLinks *)scratch;
+  pendingChrAttachments =
+      (PendingChrAttachments *)(scratch + savedLinksSize);
+  result = load_props_state_with_scratch(
+      stream, totalPropsSize, recordCount, indexOfFirstEntry,
+      indexOfCurrentEntry, indexOfFinalEntry, savedLinks,
+      pendingChrAttachments, pendingChrCapacity);
+  memaFree(scratch, scratchSize);
+
+  return result;
 }
