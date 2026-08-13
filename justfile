@@ -126,6 +126,15 @@ test-all JOBS="":
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -v "$(pwd):/home/dev" -e PRACTICE_TEST_JOBS="{{ JOBS }}" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --build-mode release
 
+# Show or run one deterministic, duration-balanced full-suite shard.
+test-shard-plan SHARDS="12":
+    python3 scripts/run_test_shard.py --shard "1/{{ SHARDS }}" --list
+
+test-shard SHARD: build-ares
+    if test -z "$(docker images -q {{ image }})"; then just setup; fi
+    for version in US EU JP; do docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} VERSION="$version" DEV=0 COMPARE=0 TEST_CASE=; done
+    ARES="{{ ares_bin }}" ARES_ARGS="--setting Audio/Driver=None --setting Input/Driver=None" python3 scripts/run_test_shard.py --shard "{{ SHARD }}"
+
 # Run every regional SRAM replay against a release practice ROM using ares'
 # host-side state comparison. Known practice-ROM divergences remain failures.
 test-practice-replays REGION="us" ARTIFACTS="build/practice-replay-results" REPLAY="": build-ares

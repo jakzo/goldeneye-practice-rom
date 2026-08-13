@@ -74,6 +74,8 @@ static u8 g_ConvertedHandMatrices;
 static u8 g_LoadedFloatHandMatrices;
 static bool g_HasPausedFramebuffer;
 
+static void clear_converted_render_matrices(void);
+
 #define PRACTICE_UI_BACKGROUND_RECT_COUNT 32
 typedef struct PracticeUiBackgroundRect {
   s16 left;
@@ -457,6 +459,11 @@ void practice_prepare_paused_render_state(PracticeRenderContext *context) {
 }
 
 void practice_invalidate_render_state(void) {
+  /* Loading can rebuild a model into a fresh float matrix buffer while the
+   * prop slot still carries the previous live render's fixed-point marker.
+   * The refreshed render never consumes the old buffers, so discard all of
+   * their representation metadata as soon as the state is invalidated. */
+  clear_converted_render_matrices();
   g_IsRenderStateInvalidated = TRUE;
 }
 

@@ -71,8 +71,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Test replay watchdog
-        run: python3 -m unittest tests.test_run_practice_tests
+      - name: Test test runners
+        run: python3 -m unittest discover -s tests
 
       - name: Determine ares cache key
         id: ares-revision
@@ -402,35 +402,16 @@ jobs:
           if-no-files-found: warn
           compression-level: 0
 
-  full-save-state-replay-suite:
+  full-test-suite:
     needs: build-ares
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
-        step:
-          - regular
-          - default
-          - long
-          - cameras
-          - near-end
-          - cold-restart
-        region:
-          - version: US
-            code: u
-            slug: us
-            secret: BASE_ROM_US_DOWNLOAD_LINK
-          - version: EU
-            code: e
-            slug: eu
-            secret: BASE_ROM_EU_DOWNLOAD_LINK
-          - version: JP
-            code: j
-            slug: jp
-            secret: BASE_ROM_JP_DOWNLOAD_LINK
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
-    name: full save-state replays (${{ matrix.region.version }}, ${{ matrix.step }})
+    name: full test suite (${{ matrix.shard }}/12)
 
     steps:
       - name: Checkout repository
@@ -443,6 +424,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            ffmpeg \
             libcanberra-gtk3-module \
             libcapstone-dev \
             libgl-dev \
@@ -457,43 +439,41 @@ jobs:
       - name: Download base ROMs
         env:
           BASE_ROM_US_URL: ${{ secrets.BASE_ROM_US_DOWNLOAD_LINK }}
-          TARGET_BASE_ROM_URL: ${{ secrets[matrix.region.secret] }}
-          TARGET_BASE_ROM: baserom.${{ matrix.region.code }}.z64
+          BASE_ROM_EU_URL: ${{ secrets.BASE_ROM_EU_DOWNLOAD_LINK }}
+          BASE_ROM_JP_URL: ${{ secrets.BASE_ROM_JP_DOWNLOAD_LINK }}
         run: |
           if [ -z "$BASE_ROM_US_URL" ]; then
             echo "::error::BASE_ROM_US_DOWNLOAD_LINK is required."
             exit 1
           fi
-          if [ -z "$TARGET_BASE_ROM_URL" ]; then
-            echo "::error::${{ matrix.region.secret }} is required."
+          if [ -z "$BASE_ROM_EU_URL" ]; then
+            echo "::error::BASE_ROM_EU_DOWNLOAD_LINK is required."
+            exit 1
+          fi
+          if [ -z "$BASE_ROM_JP_URL" ]; then
+            echo "::error::BASE_ROM_JP_DOWNLOAD_LINK is required."
             exit 1
           fi
           curl --fail --location --retry 3 --output baserom.u.z64 "$BASE_ROM_US_URL"
-          if [ "$TARGET_BASE_ROM" != "baserom.u.z64" ]; then
-            curl --fail --location --retry 3 --output "$TARGET_BASE_ROM" "$TARGET_BASE_ROM_URL"
-          fi
+          curl --fail --location --retry 3 --output baserom.e.z64 "$BASE_ROM_EU_URL"
+          curl --fail --location --retry 3 --output baserom.j.z64 "$BASE_ROM_JP_URL"
           test "$(stat --format=%s baserom.u.z64)" -ge 1000000
-          test "$(stat --format=%s "$TARGET_BASE_ROM")" -ge 1000000
+          test "$(stat --format=%s baserom.e.z64)" -ge 1000000
+          test "$(stat --format=%s baserom.j.z64)" -ge 1000000
 
       - name: Extract assets
-        env:
-          REGION_CODE: ${{ matrix.region.code }}
         run: |
           ./scripts/extract_baserom.u.sh
-          if [ "$REGION_CODE" = "e" ]; then
-            ./scripts/extract_diff.e.sh
-          elif [ "$REGION_CODE" = "j" ]; then
-            ./scripts/extract_diff.j.sh
-          fi
+          ./scripts/extract_diff.e.sh
+          ./scripts/extract_diff.j.sh
 
-      - name: Build release test ROM (${{ matrix.region.version }})
-        run: >-
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
-          make -j$(nproc)
-          VERSION=${{ matrix.region.version }}
-          DEV=0
-          COMPARE=0
-          TEST_CASE=
+      - name: Build regional release test ROMs
+        run: |
+          for version in US EU JP; do
+            docker run --rm --user "$(id -u):$(id -g)" \
+              -v "$PWD:/home/dev" goldeneye \
+              make -j"$(nproc)" VERSION="$version" DEV=0 COMPARE=0 TEST_CASE=
+          done
 
       - name: Restore ares cache
         uses: actions/cache/restore@v6
@@ -502,7 +482,7 @@ jobs:
           key: ${{ needs.build-ares.outputs.cache-key }}
           fail-on-cache-miss: true
 
-      - name: Run full-suite shard (${{ matrix.region.version }}, ${{ matrix.step }})
+      - name: Run full test shard ${{ matrix.shard }}/12
         env:
           ARES: ${{ env.ARES_PREFIX }}/bin/ares
           ARES_ARGS: >-
@@ -510,23 +490,22 @@ jobs:
             --no-file-prompt
             --setting Audio/Driver=None
             --setting Input/Driver=None
-          FULL_SAVE_STATE_SUITE_DIRECT: "1"
-          REPLAY_SAVE_STATE_JOBS: "1"
-          REPLAY_SAVE_STATE_SKIP_BUILD: "1"
+          PRACTICE_TEST_VIDEO_DIR: build/test-shards/videos
+          PRACTICE_TEST_VIDEO_SIZE: 640x480
+          SHARD: ${{ matrix.shard }}/12
           XDG_CONFIG_HOME: /tmp/ares-config
           XDG_DATA_HOME: /tmp/ares-data
         run: |
           xvfb-run --auto-servernum \
             --server-args="-screen 0 640x480x24 -nolisten tcp -ac" \
-            ./scripts/run_full_save_state_replay_suite.sh \
-              "${{ matrix.step }}" "" "${{ matrix.region.slug }}"
+            ./scripts/run_test_shard.py --shard "$SHARD"
 
-      - name: Upload failed replay artifacts
+      - name: Upload failed test artifacts
         if: failure()
         uses: actions/upload-artifact@v6
         with:
-          name: full-save-state-replay-failures-${{ matrix.region.slug }}-${{ matrix.step }}-${{ github.run_attempt }}
-          path: build/practice-replay-results
+          name: full-test-failures-shard-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: build/test-shards
           if-no-files-found: warn
           compression-level: 0
 

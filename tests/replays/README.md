@@ -67,6 +67,31 @@ After a save/load fix, run the ordinary practice-ROM replay suite against these
 unchanged fixtures first. Once it passes, run the replay save/load-state suite
 to find the next load-specific failure or regression.
 
+## Balanced full-suite shards
+
+The CI full suite combines release-build in-ROM tests, whole-ROM replays, and
+all replay save/load variants into 12 deterministic shards. Each runner uses
+one emulator at a time. In-ROM tests receive a fixed short-test estimate;
+replay estimates come from the recorded replay duration and are scaled for the
+extra playback or restart work in each save-state variant. Longest-estimated
+tests are assigned to the currently lightest shard, with task IDs and shard
+numbers used as stable tie-breakers.
+
+Inspect the complete assignment or run one shard locally with:
+
+```bash
+just test-shard-plan 12
+just test-shard 5/12
+```
+
+To reproduce one task without running the rest of its shard, use its ID from
+the plan:
+
+```bash
+python3 scripts/run_test_shard.py \
+  --task save-state/us/default/07-frigate
+```
+
 ## Existing guest replay tests
 
 The in-ROM replay feature tests remain available through commands such as:
