@@ -4,6 +4,7 @@
 #include <ultra64.h>
 
 #define PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES 29
+#define PRACTICE_TEST_STATE_RUNWAY_INTRO_DEATH_LOAD 30
 
 extern s32 g_practice_test_case;
 
@@ -15,5 +16,6 @@ void practice_tests_tick();
 void practice_tests_frame();
 void practice_tests_before_replay_frame_check(void);
 void practice_tests_before_hotkeys(s32 pending_gfx_tasks);
+void practice_tests_before_player_model_reconcile(void);
 
 #endif /* PRACTICE_TESTS_H */

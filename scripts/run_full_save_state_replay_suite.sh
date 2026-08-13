@@ -4,13 +4,25 @@ set -euo pipefail
 
 step="${1:-all}"
 replay="${2:-}"
-replay_dir="tests/replays/us"
+region="${3:-us}"
+region="$(printf '%s' "$region" | tr '[:upper:]' '[:lower:]')"
+case "$region" in
+    us) version=US; region_code=u ;;
+    eu) version=EU; region_code=e ;;
+    jp) version=JP; region_code=j ;;
+    *)
+        echo "error: region must be one of: us, eu, jp" >&2
+        exit 2
+        ;;
+esac
+replay_dir="tests/replays/$region"
 save_state_built=0
+suite_jobs="${REPLAY_SAVE_STATE_JOBS:-3}"
 
 steps=(regular default long cameras near-end cold-restart)
 
 usage() {
-    echo "usage: $0 [all|regular|default|long|cameras|near-end|cold-restart] [REPLAY]" >&2
+    echo "usage: $0 [all|regular|default|long|cameras|near-end|cold-restart] [REPLAY] [us|eu|jp]" >&2
 }
 
 if [ "$step" != "all" ]; then
@@ -30,20 +42,42 @@ fi
 if [ -n "$replay" ]; then
     replay="$(basename "$replay" .ram)"
     if [ ! -f "$replay_dir/$replay.ram" ]; then
-        echo "error: US replay fixture not found: $replay" >&2
+        echo "error: $version replay fixture not found: $replay" >&2
         exit 2
     fi
 fi
 
 run_regular() {
+    local -a replay_args=()
+
     echo "=== full replay suite step: regular ==="
-    just test-practice-replays us build/practice-replay-results "$replay"
+    if [ -n "${FULL_SAVE_STATE_SUITE_DIRECT:-}" ]; then
+        if [ -n "$replay" ]; then
+            replay_args=(--replay "$replay")
+        fi
+        python3 scripts/patch_practice_rom.py \
+            "build/$region_code/ge007.$region_code.z64" --flags 1
+        python3 ares/tests/n64-replay/run.py \
+            --ares "${ARES:-ares}" \
+            --rom "build/$region_code/ge007.$region_code.z64" \
+            --elf "build/$region_code/ge007.$region_code.elf" \
+            --fixture-dir tests/replays \
+            --region "$region" \
+            --jobs "$suite_jobs" \
+            --artifacts "build/practice-replay-results/$region" \
+            "${replay_args[@]}"
+    else
+        just test-practice-replays "$region" build/practice-replay-results "$replay"
+    fi
 }
 
 run_save_state() {
     local selected_step="$1"
     local selected_replay="$replay"
-    local -a environment=(REPLAY_SAVE_STATE_JOBS=3)
+    local -a environment=(
+        REPLAY_SAVE_STATE_BUILD_MODE=release
+        REPLAY_SAVE_STATE_JOBS="$suite_jobs"
+    )
 
     if [ "$save_state_built" -ne 0 ]; then
         environment+=(REPLAY_SAVE_STATE_SKIP_BUILD=1)
@@ -68,7 +102,15 @@ run_save_state() {
         near-end)
             environment+=(REPLAY_SAVE_STATE_END_MARGIN_FRAMES=30)
             if [ -z "$selected_replay" ]; then
-                selected_replay="02-facility"
+                if [ -f "$replay_dir/02-facility.ram" ]; then
+                    selected_replay="02-facility"
+                else
+                    local fallback_replay
+                    for fallback_replay in "$replay_dir"/*.ram; do
+                        selected_replay="$(basename "$fallback_replay" .ram)"
+                        break
+                    done
+                fi
             fi
             ;;
         cold-restart)
@@ -81,7 +123,13 @@ run_save_state() {
     fi
 
     echo "=== full replay suite step: $selected_step ==="
-    env "${environment[@]}" just test-replay-save-states us "$replay_dir"
+    if [ -n "${FULL_SAVE_STATE_SUITE_DIRECT:-}" ]; then
+        env "${environment[@]}" ./scripts/run_replay_save_state_tests.sh \
+            "$replay_dir" "$version"
+    else
+        env "${environment[@]}" just test-replay-save-states \
+            "$region" "$replay_dir"
+    fi
     save_state_built=1
 }
 

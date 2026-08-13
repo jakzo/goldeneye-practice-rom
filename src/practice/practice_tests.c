@@ -2033,6 +2033,19 @@ void practice_tests_tick() {
 void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
   u16 trigger;
 
+  if (g_practice_test_case == STATE_RUNWAY_INTRO_DEATH_LOAD &&
+      g_PausedStateLoadTestPhase == 3) {
+    trigger = hotkey_trigger();
+    g_SimulatedButtons = trigger;
+    g_SimulatedButtonsPressed = 0;
+    if (pending_gfx_tasks == 0) {
+      g_SimulatedButtons |= U_JPAD;
+      g_SimulatedButtonsPressed = U_JPAD;
+      g_PausedStateLoadTestPhase = 6;
+    }
+    return;
+  }
+
   if (g_practice_test_case != REPLAY_RUNWAY_SAVE_STATES) {
     return;
   }
@@ -2373,34 +2386,14 @@ void practice_tests_frame() {
         g_PausedStateLoadTestPhase = 1;
         emu_log("INTRO_STATE_SAVED");
       }
-    } else if (g_PausedStateLoadTestPhase == 3) {
-      Model *model = g_CurrentPlayer->ptr_char_objectinstance;
-      ModelNode *root = model != NULL && model->obj != NULL
-                            ? model->obj->RootNode
-                            : NULL;
-      ModelNode *child = root != NULL ? root->Child : NULL;
-
-      if (child == NULL) {
-        emu_log("DEATH_MODEL_CHILD_NOT_FOUND");
-        emu_log("TEST_FAILED");
-        g_PausedStateLoadTestPhase = -1;
-      } else {
-        /* Reproduce the reported failure mode: the top-level model and root
-         * are still valid, but a descendant's parent points at overwritten
-         * model buffer data. The load must reject the graph before walking
-         * it. */
-        child->Parent = (ModelNode *)0x7fc86030;
-        emu_log("INJECTED_STALE_DEATH_MODEL_PARENT");
-        g_SimulatedButtons = hotkey_trigger() | U_JPAD;
-        g_SimulatedButtonsPressed = U_JPAD;
-        practice_check_hotkeys(0);
-        g_SimulatedButtons = 0;
-        g_SimulatedButtonsPressed = 0;
-        unpause();
-        g_PausedStateLoadTestPhase = 4;
-        g_save_test_timer = 0;
-        emu_log("THIRD_PERSON_DEATH_LOAD_DONE");
-      }
+    } else if (g_PausedStateLoadTestPhase == 6 &&
+               g_CameraMode == CAMERAMODE_SWIRL) {
+      g_SimulatedButtons = 0;
+      g_SimulatedButtonsPressed = 0;
+      unpause();
+      g_PausedStateLoadTestPhase = 4;
+      g_save_test_timer = 0;
+      emu_log("THIRD_PERSON_DEATH_LOAD_DONE");
     }
   }
 
@@ -2612,4 +2605,31 @@ void practice_tests_frame() {
   default:
     break;
   }
+}
+
+void practice_tests_before_player_model_reconcile(void) {
+  Model *model;
+  ModelNode *root;
+  ModelNode *child;
+
+  if (g_practice_test_case != STATE_RUNWAY_INTRO_DEATH_LOAD ||
+      g_PausedStateLoadTestPhase != 6) {
+    return;
+  }
+
+  model = g_CurrentPlayer->ptr_char_objectinstance;
+  root = model != NULL && model->obj != NULL ? model->obj->RootNode : NULL;
+  child = root != NULL ? root->Child : NULL;
+  if (child == NULL) {
+    emu_log("DEATH_MODEL_CHILD_NOT_FOUND");
+    emu_log("TEST_FAILED");
+    g_PausedStateLoadTestPhase = -1;
+    return;
+  }
+
+  /* Inject only after the deferred load has begun. Corrupting the live graph
+   * while waiting for graphics tasks lets a render walk it before the loader,
+   * which makes the regression timing-dependent on slower CI runners. */
+  child->Parent = (ModelNode *)0x7fc86030;
+  emu_log("INJECTED_STALE_DEATH_MODEL_PARENT");
 }

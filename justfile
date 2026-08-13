@@ -91,15 +91,15 @@ test-replay-save-states REGION REPLAY_DIR:
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
     docker run --rm -e REPLAY_SAVE_STATE_FILTER -e REPLAY_SAVE_STATE_EXCLUDE -e REPLAY_SAVE_STATE_SKIP_BUILD -e REPLAY_SAVE_STATE_SPACING_SECONDS -e REPLAY_SAVE_STATE_WAIT_FRAMES -e REPLAY_SAVE_STATE_DURATION_SECONDS -e REPLAY_SAVE_STATE_END_MARGIN_FRAMES -e REPLAY_SAVE_STATE_GRENADE_CAM -e REPLAY_SAVE_STATE_HOSTAGE_CAM -e REPLAY_SAVE_STATE_RESTART_BETWEEN_LOADS -e REPLAY_SAVE_STATE_JOBS -v "$(pwd):/home/dev" -v "$replay_dir:/replays:ro" {{ test_image }} bash ./scripts/run_practice_tests_docker.sh --test-replay-save-states /replays "$region"
 
-# Run the complete US save-state replay matrix, one step, or one replay.
-test-save-state-replay-suite STEP="all" REPLAY="":
-    bash ./scripts/run_full_save_state_replay_suite.sh "{{ STEP }}" "{{ REPLAY }}"
+# Run the complete regional save-state replay matrix, one step, or one replay.
+test-save-state-replay-suite STEP="all" REPLAY="" REGION="us":
+    bash ./scripts/run_full_save_state_replay_suite.sh "{{ STEP }}" "{{ REPLAY }}" "{{ REGION }}"
 
-test-save-state-replay-suite-step STEP REPLAY="":
-    just test-save-state-replay-suite "{{ STEP }}" "{{ REPLAY }}"
+test-save-state-replay-suite-step STEP REPLAY="" REGION="us":
+    just test-save-state-replay-suite "{{ STEP }}" "{{ REPLAY }}" "{{ REGION }}"
 
-test-save-state-replay-suite-replay REPLAY:
-    just test-save-state-replay-suite all "{{ REPLAY }}"
+test-save-state-replay-suite-replay REPLAY REGION="us":
+    just test-save-state-replay-suite all "{{ REPLAY }}" "{{ REGION }}"
 
 # Run the symbol-aware ares profiler. Leave the level normally to flush the capture.
 profile-ares ROM="build/u/ge007.u.z64" ELF="build/u/ge007.u.elf" OUTPUT="build/profile/ge007": build-ares

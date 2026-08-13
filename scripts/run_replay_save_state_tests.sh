@@ -4,6 +4,7 @@ set -euo pipefail
 
 replay_dir="${1:?replay directory required}"
 version="${2:-US}"
+build_mode="${REPLAY_SAVE_STATE_BUILD_MODE:-release}"
 filter="${REPLAY_SAVE_STATE_FILTER:-}"
 exclude="${REPLAY_SAVE_STATE_EXCLUDE:-}"
 skip_build="${REPLAY_SAVE_STATE_SKIP_BUILD:+--skip-build}"
@@ -14,6 +15,15 @@ restart_between_loads="${REPLAY_SAVE_STATE_RESTART_BETWEEN_LOADS:+--restart-betw
 end_margin_frames="${REPLAY_SAVE_STATE_END_MARGIN_FRAMES:-}"
 jobs="${REPLAY_SAVE_STATE_JOBS:-1}"
 camera_flags=0
+
+case "$build_mode" in
+    release) dev=0 ;;
+    dev) dev=1 ;;
+    *)
+        echo "error: replay save-state build mode must be release or dev" >&2
+        exit 2
+        ;;
+esac
 
 if [ -n "${REPLAY_SAVE_STATE_GRENADE_CAM:-}" ]; then
     camera_flags=$((camera_flags | 1))
@@ -100,6 +110,7 @@ run_replay() {
             --test REPLAY_RUNWAY_SAVE_STATES \
             --replay-fixture "$replay" \
             --version "$version" \
+            --build-mode "$build_mode" \
             --restart-between-loads \
             --timeout 1200 \
             "${build_args[@]}"
@@ -108,6 +119,7 @@ run_replay() {
             --test REPLAY_RUNWAY_SAVE_STATES \
             --replay-fixture "$replay" \
             --version "$version" \
+            --build-mode "$build_mode" \
             --test-param "$test_param" \
             --timeout 1200 \
             "${build_args[@]}"
@@ -118,7 +130,7 @@ next_replay=0
 if [ -z "$skip_build" ]; then
     build_jobs="${PRACTICE_TEST_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
     echo "=== building replay save-state test ROM ==="
-    make -j"$build_jobs" VERSION="$version" DEV=1
+    make -j"$build_jobs" VERSION="$version" DEV="$dev"
     skip_build="--skip-build"
 fi
 

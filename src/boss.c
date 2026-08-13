@@ -512,7 +512,9 @@ void bossMainloop(void)
                             joyConsumeRegularSamples();
                             if (g_StageNum != LEVELID_TITLE) {
                                 if (g_practice_test_case ==
-                                        PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES) {
+                                        PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES ||
+                                    g_practice_test_case ==
+                                        PRACTICE_TEST_STATE_RUNWAY_INTRO_DEATH_LOAD) {
                                     practice_tests_before_hotkeys(pendingGfx);
                                 }
                                 practice_check_hotkeys(pendingGfx);

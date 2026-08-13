@@ -11,6 +11,7 @@
 #include "practice_states.h"
 #include "practice_states_chr.h"
 #include "practice_states_utils.h"
+#include "practice_tests.h"
 #include "practice_ui.h"
 #include "watch.h"
 #include <assert.h>
@@ -1108,6 +1109,7 @@ static void load_current_player_state(StateStream *stream,
   /* 9. Restore head-bob and third-person model animation/root transforms.
    * This must follow hand-model loading because both use the player's weapon
    * buffers; rebuilding a hand model can invalidate the intro's Bond model. */
+  practice_tests_before_player_model_reconcile();
   reconcile_current_player_model_presence(saved_had_model, force_model_rebuild);
 #ifdef DEV
   validate_current_player_model_invariant(saved_had_model);
