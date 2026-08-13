@@ -85,6 +85,8 @@
 
 ### Level features
 
+- **Bunker 1**
+    - Option to make the computer room keycard guard always pull a grenade for their first attack
 - **Dam**
     - Indicator for when the gate guard has loaded in
     - Third-person camera which tracks the gate guard

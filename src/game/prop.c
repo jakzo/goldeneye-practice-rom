@@ -23,6 +23,7 @@
 #include "objective_status.h"
 #include "objecthandler.h"
 #include "player.h"
+#include "practice/practice_bunker1.h"
 #include "prop.h"
 #include "stan.h"
 #include "token.h"
@@ -1545,7 +1546,12 @@ void proplvreset2(enum LEVELID stageId)
                         chr = chrFindByLiteralId(pdef_guarda->chrnum);
                         if ((chr && chr->prop) && chr->model)
                         {
+#ifdef PRACTICE_ROM
+                            chr->grenadeprob = practice_bunker1_guard_grenade_probability(
+                                stageId, chr->chrnum, prob);
+#else
                             chr->grenadeprob = prob;
+#endif
                         }
 #ifdef DEBUG
                         else

@@ -29,6 +29,7 @@
 #include "stan.h"
 #include "bondhead.h"
 #include "unk_0A1DA0.h"
+#include "practice/practice_bunker1.h"
 #include "practice/practice_frigate_fast_guard_death.h"
 #include "practice/practice_render.h"
 
@@ -11517,6 +11518,9 @@ bool actor_draws_throws_grenade_at_player_if_possible(ChrRecord *self)
         if (Right && (RightWep = Right->weapon, RightWep->weaponnum == ITEM_GRENADE))
         {
             chrlvThrowGrenadeAnimationRelated(self, Right, GUNRIGHT, 0);
+#ifdef PRACTICE_ROM
+            practice_bunker1_guard_pulled_grenade(self);
+#endif
 
             return TRUE;
         }
@@ -11524,6 +11528,9 @@ bool actor_draws_throws_grenade_at_player_if_possible(ChrRecord *self)
         if (Left && (LeftWep = Left->weapon, LeftWep->weaponnum == ITEM_GRENADE))
         {
             chrlvThrowGrenadeAnimationRelated(self, Left, GUNLEFT, 0);
+#ifdef PRACTICE_ROM
+            practice_bunker1_guard_pulled_grenade(self);
+#endif
 
             return TRUE;
         }
@@ -11545,6 +11552,9 @@ bool actor_draws_throws_grenade_at_player_if_possible(ChrRecord *self)
                 NewGrenadeObj->runtime_bitflags |= 0x800; //manual bitflags are more effecient
 
                 chrlvThrowGrenadeAnimationRelated(self, NewGrenadeProp, !Right ? GUNRIGHT : GUNLEFT, 1); //this matches
+#ifdef PRACTICE_ROM
+                practice_bunker1_guard_pulled_grenade(self);
+#endif
 
                 return TRUE;
             }
