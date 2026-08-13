@@ -40,6 +40,7 @@ extern u8 *g_VtxBuffers[3];
 extern u8 g_GfxActiveBufferIndex;
 
 #define MAX_SAVED_HAND_RENDER_MATRICES 256
+#define MAX_VALIDATED_MODEL_NODES 2048
 
 static const struct {
   u32 srcoff;
@@ -72,6 +73,55 @@ static bool is_active_gfx_range(const void *ptr, u32 size) {
   return addr >= start && end >= addr && end <= (u32)g_GfxMemPos;
 }
 
+static bool model_node_tree_is_valid(ModelNode *root) {
+  ModelNode *node = root;
+  s32 node_count = 0;
+  s32 traversal_steps = 0;
+
+  while (node != NULL) {
+    if (!is_rdram_range(node, sizeof(ModelNode)) ||
+        ++node_count > MAX_VALIDATED_MODEL_NODES ||
+        ++traversal_steps > MAX_VALIDATED_MODEL_NODES) {
+      return FALSE;
+    }
+    if ((node->Data != NULL && !is_rdram_range(node->Data, sizeof(u32))) ||
+        (node->Parent != NULL &&
+         !is_rdram_range(node->Parent, sizeof(ModelNode))) ||
+        (node->Next != NULL &&
+         !is_rdram_range(node->Next, sizeof(ModelNode))) ||
+        (node->Prev != NULL &&
+         !is_rdram_range(node->Prev, sizeof(ModelNode))) ||
+        (node->Child != NULL &&
+         !is_rdram_range(node->Child, sizeof(ModelNode)))) {
+      return FALSE;
+    }
+
+    if (node->Child != NULL) {
+      node = node->Child;
+    } else {
+      while (node != NULL && node != root && node->Next == NULL) {
+        ModelNode *parent = node->Parent;
+
+        if (parent != NULL &&
+            !is_rdram_range(parent, sizeof(ModelNode))) {
+          return FALSE;
+        }
+        node = parent;
+        if (++traversal_steps > MAX_VALIDATED_MODEL_NODES) {
+          return FALSE;
+        }
+      }
+      if (node != NULL && node != root &&
+          !is_rdram_range(node->Next, sizeof(ModelNode))) {
+        return FALSE;
+      }
+      node = node != NULL && node != root ? node->Next : NULL;
+    }
+  }
+
+  return node_count > 0;
+}
+
 static bool player_model_is_valid_for_chr(Model *model, ChrRecord *chr) {
   if (!is_rdram_range(chr, sizeof(ChrRecord)) ||
       !is_rdram_range(model, sizeof(Model)) || model->chr != chr ||
@@ -79,7 +129,7 @@ static bool player_model_is_valid_for_chr(Model *model, ChrRecord *chr) {
     return FALSE;
   }
 
-  return is_rdram_range(model->obj->RootNode, sizeof(ModelNode));
+  return model_node_tree_is_valid(model->obj->RootNode);
 }
 
 static bool current_player_model_is_valid(void) {

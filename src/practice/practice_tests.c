@@ -98,6 +98,7 @@ extern void __ull_divremi(unsigned long long *quotient,
 #define REPLAY_GRENADE_CAM 27
 #define REPLAY_FRIGATE 28
 #define REPLAY_RUNWAY_SAVE_STATES 29
+#define STATE_RUNWAY_INTRO_DEATH_LOAD 30
 // --- end test cases ---
 
 #define REPLAY_STATE_PARAM_WAIT_SHIFT 8
@@ -354,6 +355,7 @@ s32 practice_tests_boot_level(s32 test_case) {
   case STATE_CORRUPT_FREELIST:
   case STATE_DESTROYED_PROP:
   case STATE_RUNWAY_PLANE:
+  case STATE_RUNWAY_INTRO_DEATH_LOAD:
   case MIGRATION_PHASE3:
   case MIGRATION_PHASE4:
   case CRASH:
@@ -395,7 +397,8 @@ s32 practice_tests_should_disable_intro(s32 test_case) {
          test_case != REPLAY_FRIGATE && test_case != REPLAY_GRENADE_CAM &&
          test_case != REPLAY_ARCHIVES && test_case != REPLAY_ARCHIVES_04X &&
          test_case != REPLAY_ARCHIVES_HOTKEYS &&
-         test_case != REPLAY_RUNWAY_SAVE_STATES;
+         test_case != REPLAY_RUNWAY_SAVE_STATES &&
+         test_case != STATE_RUNWAY_INTRO_DEATH_LOAD;
 }
 
 #define MAX_SAVED_TEST_CHILDREN 8
@@ -486,6 +489,52 @@ void practice_tests_tick() {
   case_delta = 0;
 
   switch (g_practice_test_case) {
+  case STATE_RUNWAY_INTRO_DEATH_LOAD: {
+    if (g_PausedStateLoadTestPhase == 1) {
+      if (g_save_test_timer < 1200) {
+        g_SimulatedButtons |= U_CBUTTONS;
+      } else {
+        f32 lethal_damage =
+            g_CurrentPlayer->bondhealth * g_CurrentPlayer->actual_health +
+            g_CurrentPlayer->bondarmour * g_CurrentPlayer->actual_armor;
+
+        g_SimulatedButtons &= ~U_CBUTTONS;
+        emu_log("TRIGGER_DEATH");
+        bondviewCallRecordDamageKills(lethal_damage, 0.0f, -1, TRUE);
+        g_PausedStateLoadTestPhase = 2;
+      }
+    } else if (g_PausedStateLoadTestPhase == 2 &&
+               g_CameraMode == CAMERAMODE_DEATH_CAM_SP) {
+      g_LevelRestartTimer = g_save_test_timer;
+      g_PausedStateLoadTestPhase = 5;
+      emu_log("THIRD_PERSON_DEATH_REPLAY_STARTED");
+    } else if (g_PausedStateLoadTestPhase == 5 &&
+               g_save_test_timer >= g_LevelRestartTimer + 60) {
+      emu_log("TRIGGER_THIRD_PERSON_DEATH_LOAD camera=%d redblood=%d anim=%d",
+              g_CameraMode, g_CurrentPlayer->redbloodfinished,
+              g_CurrentPlayer->deathanimfinished);
+      if (g_CameraMode != CAMERAMODE_DEATH_CAM_SP ||
+          !g_CurrentPlayer->bonddead) {
+        emu_log("THIRD_PERSON_DEATH_WINDOW_MISSED");
+        emu_log("TEST_FAILED");
+        break;
+      }
+      pause();
+      g_PausedStateLoadTestPhase = 3;
+    } else if (g_PausedStateLoadTestPhase == 4 && after_frames(30)) {
+      if (g_CurrentPlayer->bonddead || g_CameraMode != CAMERAMODE_SWIRL ||
+          g_CurrentPlayer->ptr_char_objectinstance == NULL) {
+        emu_log("INTRO_STATE_NOT_RESTORED dead=%d camera=%d model=%08x",
+                g_CurrentPlayer->bonddead, g_CameraMode,
+                g_CurrentPlayer->ptr_char_objectinstance);
+        emu_log("TEST_FAILED");
+      } else {
+        emu_log("TEST_COMPLETE");
+      }
+    }
+    break;
+  }
+
   case MIGRATION_PHASE4: {
     static const u32 expected_random[] = {0x780b1177, 0x0d12f86a, 0xa90fd6a5,
                                           0xa9edb1cc};
@@ -2302,6 +2351,51 @@ void practice_tests_frame() {
       unpause();
       g_PausedStateLoadTestPhase = 11;
       emu_log("PAUSED_LOAD_RELEASED");
+    }
+  }
+
+  if (g_practice_test_case == STATE_RUNWAY_INTRO_DEATH_LOAD) {
+    if (g_PausedStateLoadTestPhase == 0 &&
+        g_CameraMode == CAMERAMODE_SWIRL &&
+        g_CurrentPlayer->ptr_char_objectinstance != NULL &&
+        ++g_LevelRestartTimer >= 60) {
+      emu_log("TRIGGER_INTRO_SAVE");
+      save_game_state();
+      if (!g_HasSavedState) {
+        emu_log("INTRO_STATE_SAVE_FAILED");
+        emu_log("TEST_FAILED");
+      } else {
+        g_PausedStateLoadTestPhase = 1;
+        emu_log("INTRO_STATE_SAVED");
+      }
+    } else if (g_PausedStateLoadTestPhase == 3) {
+      Model *model = g_CurrentPlayer->ptr_char_objectinstance;
+      ModelNode *root = model != NULL && model->obj != NULL
+                            ? model->obj->RootNode
+                            : NULL;
+      ModelNode *child = root != NULL ? root->Child : NULL;
+
+      if (child == NULL) {
+        emu_log("DEATH_MODEL_CHILD_NOT_FOUND");
+        emu_log("TEST_FAILED");
+        g_PausedStateLoadTestPhase = -1;
+      } else {
+        /* Reproduce the reported failure mode: the top-level model and root
+         * are still valid, but a descendant's parent points at overwritten
+         * model buffer data. The load must reject the graph before walking
+         * it. */
+        child->Parent = (ModelNode *)0x7fc86030;
+        emu_log("INJECTED_STALE_DEATH_MODEL_PARENT");
+        g_SimulatedButtons = hotkey_trigger() | U_JPAD;
+        g_SimulatedButtonsPressed = U_JPAD;
+        practice_check_hotkeys(0);
+        g_SimulatedButtons = 0;
+        g_SimulatedButtonsPressed = 0;
+        unpause();
+        g_PausedStateLoadTestPhase = 4;
+        g_save_test_timer = 0;
+        emu_log("THIRD_PERSON_DEATH_LOAD_DONE");
+      }
     }
   }
 
