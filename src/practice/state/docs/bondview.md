@@ -22,6 +22,11 @@ s32 copy_1stfonttable;
 s32 copy_2ndfonttable;
 
 // Saved: yes
+// Global multiplier applied to the natural volume of every game SFX slot. It
+// is normally 1.0 and becomes 0.5 during the single-player death replay.
+f32 g_sndSfxVolumeScale;
+
+// Saved: yes
 // Tank Physics and Turret State Tracking Globals:
 // - in_tank_flag: Boolean/state flag indicating if player is inside the tank (1 = in tank, 0 = regular gameplay).
 // - g_PlayerTankProp: Pointer to the tank PropRecord currently ridden by player.
@@ -341,7 +346,7 @@ struct player {
   ModelFileHeader *ptr_hand_weapon_buffer[2];
 
   // Saved: no (recomputed on load)
-  // Local copy of the weapon model file header for each hand, populated when the weapon model is loaded into the hand buffer. Contains pointers to the model's node hierarchy (RootNode), skeleton (Skeleton), switches (Switches), and textures (Textures). These internal pointers are offsets into the corresponding ptr_hand_weapon_buffer, so they become stale when the buffer is re-allocated on load. The struct itself is saved as raw bytes but only meaningful when paired with buffer contents. Regenerated on load via used_to_load_1st_person_model_on_demand() which calls load_object_fill_header() to repopulate the header from the weapon's model file data.
+  // Local copy of the weapon model file header for each hand, populated when the weapon model is loaded into the hand buffer. Contains pointers to the model's node hierarchy (RootNode), skeleton (Skeleton), switches (Switches), and textures (Textures). These internal pointers are offsets into the corresponding ptr_hand_weapon_buffer, so they become stale when the buffer is re-allocated or reused. Regenerated on load via used_to_load_1st_person_model_on_demand() which calls load_object_fill_header() to repopulate the header from the weapon's model file data. A live third-person Bond model sharing these buffers is reusable only after every reachable model node and its Data/Parent/Next/Prev/Child pointers have been validated, not merely its header and RootNode.
   ModelFileHeader copy_of_body_obj_header[2];
 
   // Saved: no (recomputed on load)

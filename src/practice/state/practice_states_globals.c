@@ -17,6 +17,7 @@
 #include "practice_states_utils.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
+#include "snd.h"
 #include "unk_092E50.h"
 #include <assert.h>
 #include <ultra64.h>
@@ -43,6 +44,7 @@ extern f32 g_TankEnterBondVertAngleDeg;
 extern s32 g_TankEngineSfxVolume;
 extern f32 g_TankEnteringSitHeight;
 extern f32 g_TankEnteringSitHeightRemain;
+extern f32 g_sndSfxVolumeScale;
 extern struct coord3d g_TankModelPositionOffset;
 extern s32 g_GlobalTimer;
 extern s32 mission_timer;
@@ -618,6 +620,9 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, g_ViShakeIntensity);
   write_u32(stream, g_ViShakeTimer);
 
+  // Audio
+  write_f32(stream, g_sndSfxVolumeScale);
+
   // Level activity
   write_u32(stream, sub_GAME_7F0BD8F0());
   write_u32(stream, lvlGetControlsLockedFlag());
@@ -844,6 +849,20 @@ void load_global_state_pre_props(StateStream *stream) {
   watch_transition_time = read_f32(stream);
   g_ViShakeIntensity = read_u32(stream);
   g_ViShakeTimer = read_u32(stream);
+
+  // Audio
+  {
+    f32 sfx_volume_scale = read_f32(stream);
+
+    if (g_IsTimePaused) {
+      /* practice_sfx_pause has temporarily replaced the natural slot volumes
+       * with zero. Install only the scale here; practice_sfx_resume will
+       * restore every natural volume and apply this saved scale. */
+      g_sndSfxVolumeScale = sfx_volume_scale;
+    } else {
+      sndSetScalerApplyVolumeAllSfxSlot(sfx_volume_scale);
+    }
+  }
 
   // Level activity
   sub_GAME_7F0BD8FC(read_u32(stream));

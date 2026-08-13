@@ -50,6 +50,7 @@ extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern u64 g_randomSeed;
 extern u64 g_chrObjRandomSeed;
 extern u64 g_tlbRandomSeed;
+extern f32 g_sndSfxVolumeScale;
 extern s32 propdoorInteract(PropRecord *doorprop);
 extern s32 object_interaction(PropRecord *prop);
 extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
@@ -514,8 +515,9 @@ void practice_tests_tick() {
               g_CameraMode, g_CurrentPlayer->redbloodfinished,
               g_CurrentPlayer->deathanimfinished);
       if (g_CameraMode != CAMERAMODE_DEATH_CAM_SP ||
-          !g_CurrentPlayer->bonddead) {
-        emu_log("THIRD_PERSON_DEATH_WINDOW_MISSED");
+          !g_CurrentPlayer->bonddead || g_sndSfxVolumeScale != 0.5f) {
+        emu_log("THIRD_PERSON_DEATH_WINDOW_MISSED scale=%f",
+                g_sndSfxVolumeScale);
         emu_log("TEST_FAILED");
         break;
       }
@@ -523,10 +525,13 @@ void practice_tests_tick() {
       g_PausedStateLoadTestPhase = 3;
     } else if (g_PausedStateLoadTestPhase == 4 && after_frames(30)) {
       if (g_CurrentPlayer->bonddead || g_CameraMode != CAMERAMODE_SWIRL ||
-          g_CurrentPlayer->ptr_char_objectinstance == NULL) {
-        emu_log("INTRO_STATE_NOT_RESTORED dead=%d camera=%d model=%08x",
+          g_CurrentPlayer->ptr_char_objectinstance == NULL ||
+          g_sndSfxVolumeScale != 1.0f) {
+        emu_log("INTRO_STATE_NOT_RESTORED dead=%d camera=%d model=%08x "
+                "sfx_scale=%f",
                 g_CurrentPlayer->bonddead, g_CameraMode,
-                g_CurrentPlayer->ptr_char_objectinstance);
+                g_CurrentPlayer->ptr_char_objectinstance,
+                g_sndSfxVolumeScale);
         emu_log("TEST_FAILED");
       } else {
         emu_log("TEST_COMPLETE");

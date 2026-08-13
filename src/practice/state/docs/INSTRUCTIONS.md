@@ -18,7 +18,6 @@ Read through [INSTRUCTIONS.md](src/practice/state/docs/INSTRUCTIONS.md) and impl
 
 ## Remaining
 
-- After dying the game shows a replay of your death and turns the sfx volume down, but when loading state back to alive the volume stays lowered
 - Saving object deformation vertices can cost 20kb+, can we save the seeds used to deform them instead?
 - Lighting that slowly changes regardless of time scale (not sure if part of state or time scale bug?)
 
@@ -126,11 +125,17 @@ Add any general advice helpful for future agents working on this feature here. B
   reloading track data; never serialize marker or instrument pointers. Seeking
   past earlier MIDI program changes without restoring channel state makes every
   channel use the bank's default instrument.
-- **SFX During Practice Pause**: Sound effects advance on the audio clock, not
-  `g_ClockTimer`. Practice pause snapshots and mutes all seven SFX slot volumes,
-  then restores each slot on resume. The active sound graph keeps running
-  silently, so continuous effects such as sliding doors, alarms, vehicles, and
-  toxic gas remain available without maintaining an owner-by-owner list.
+- **SFX Volume and Practice Pause**: Sound effects advance on the audio clock,
+  not `g_ClockTimer`. Practice pause snapshots and mutes the six game SFX slot
+  volumes, leaving the seventh slot for practice feedback, then restores each
+  game slot on resume. The active sound graph keeps running silently, so
+  continuous effects such as sliding doors, alarms, vehicles, and toxic gas
+  remain available without maintaining an owner-by-owner list. The death
+  replay sets the separate global `g_sndSfxVolumeScale` to `0.5`; level setup
+  normally resets it to `1.0`. Save and restore that scale. During a paused
+  hotkey load, assign the restored scale without applying it to the temporarily
+  zeroed natural slot volumes; `practice_sfx_resume` applies it when restoring
+  those volumes.
 - **A Practice-Paused Frame Is Render-Only**: Loading through the hotkey is
   deferred until graphics tasks have drained, then the restored state is shown
   while practice time remains paused. Do not run gameplay side effects during
@@ -278,6 +283,13 @@ Add any general advice helpful for future agents working on this feature here. B
   the saved attachment graph. Reusing only the old prop/object payload leaves
   stale model-buffer pointers; keeping both children duplicates the held weapon
   and corrupts ownership links.
+- **Validate Complete Model Node Graphs Before Reuse**: A `Model`, its header,
+  and its root node can remain in RDRAM while a descendant node still contains
+  stale `Data`, `Parent`, sibling, or child pointers into an overwritten hand
+  buffer. Validate every reachable node and link with a traversal bound before
+  treating a live third-person Bond model as reusable. If validation fails,
+  discard and rebuild the model rather than passing the graph to model setup,
+  whose pointer-promotion and RW-data walks assume every descendant is valid.
 - **Dynamic Collision Coefficients Are Authoritative**: Object collision
   geometry is rebuilt from the restored transform, but the cached coefficient
   words at `collision_data::unk24` are not reproduced bit-identically. Save the
