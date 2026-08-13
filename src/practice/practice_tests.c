@@ -112,6 +112,7 @@ extern void __ull_divremi(unsigned long long *quotient,
 #else
 #define REPLAY_STATE_FRAMES_PER_SECOND 60
 #endif
+#define REPLAY_STATUS_INTERVAL_FRAMES REPLAY_STATE_FRAMES_PER_SECOND
 
 // Left out of test cases since it cannot assert
 #define CRASH 999
@@ -128,6 +129,8 @@ static s32 g_mission_timer_start;
 static s32 g_ReplayTestPhase;
 static s32 g_ReplayTestPlaybackSeen;
 static s32 g_ReplayTestPlaybackCount;
+static s32 g_ReplayStatusActive;
+static u32 g_ReplayStatusTimestamp;
 static s32 g_ReplayTestInitialInvert;
 static s32 g_ReplayTestHotkeyFrame;
 static s32 g_LevelRestartTestPhase;
@@ -277,6 +280,8 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
   g_ReplayTestPhase = 0;
   g_ReplayTestPlaybackSeen = FALSE;
   g_ReplayTestPlaybackCount = 0;
+  g_ReplayStatusActive = FALSE;
+  g_ReplayStatusTimestamp = 0;
   g_ReplayTestInitialInvert = FALSE;
   g_ReplayTestHotkeyFrame = 0;
   g_LevelRestartTestPhase = 0;
@@ -2221,6 +2226,35 @@ void practice_tests_frame() {
   const s32 SETTLE_FRAMES = 30;
   const s32 LOG_FRAMES = 30;
   const s32 NUM_ITERATIONS = 10;
+
+  if (g_practice_test_case == REPLAY ||
+      g_practice_test_case == REPLAY_DAM ||
+      g_practice_test_case == REPLAY_RUNWAY ||
+      g_practice_test_case == REPLAY_FRIGATE ||
+      g_practice_test_case == REPLAY_GRENADE_CAM ||
+      g_practice_test_case == REPLAY_ARCHIVES ||
+      g_practice_test_case == REPLAY_ARCHIVES_04X ||
+      g_practice_test_case == REPLAY_ARCHIVES_HOTKEYS ||
+      g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES) {
+    if (g_ReplayIsPlaying) {
+      u32 timestamp = practice_replay_get_timestamp();
+      u32 duration = practice_replay_get_duration();
+
+      if (!g_ReplayStatusActive) {
+        emu_log("REPLAY_STARTED frames=%d duration=%d", duration, duration);
+        g_ReplayStatusActive = TRUE;
+        g_ReplayStatusTimestamp = timestamp;
+      } else if (timestamp < g_ReplayStatusTimestamp ||
+                 timestamp - g_ReplayStatusTimestamp >=
+                     REPLAY_STATUS_INTERVAL_FRAMES) {
+        emu_log("REPLAY_STATUS frame=%d/%d", timestamp, duration);
+        g_ReplayStatusTimestamp = timestamp;
+      }
+    } else {
+      g_ReplayStatusActive = FALSE;
+    }
+  }
+
   if (g_practice_test_case == STATE_CAVERNS_ATTACHMENTS) {
     if (g_PausedStateLoadTestPhase == 1) {
       s32 live_header = g_CurrentPlayer->hands[0].field_B70;

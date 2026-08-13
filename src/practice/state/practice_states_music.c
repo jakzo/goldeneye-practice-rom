@@ -252,17 +252,24 @@ static void restore_music_track(s32 index, MusicTrackState *state) {
     state->was_playing = FALSE;
   }
 
+  /* Reuse an already-loaded sequence when restoring the same track. Starting
+   * it again waits for the asynchronous pause-time stop to finish, but a load
+   * from the paused frame can prevent that state transition from advancing. */
   switch (index) {
   case 0:
-    musicTrack1Stop();
     if (state->track != M_NONE) {
-      musicTrack1ApplySeqpVol(0);
-      musicTrack1Play(state->track);
-      stop_new_music_track(player);
+      if (g_musicXTrack1CurrentTrackNum != state->track) {
+        musicTrack1Stop();
+        musicTrack1ApplySeqpVol(0);
+        musicTrack1Play(state->track);
+        stop_new_music_track(player);
+      }
       seq = &g_musicXTrack1Seq;
       alCSeqNewMarker(seq, &marker, state->ticks);
       alCSeqSetLoc(seq, &marker);
       restore_music_channels(player, state);
+    } else {
+      musicTrack1Stop();
     }
     musicTrack1ApplySeqpVol(state->volume);
     g_musicXTrack1Fade = state->fade;
@@ -271,15 +278,19 @@ static void restore_music_track(s32 index, MusicTrackState *state) {
     g_musicXTrack1FadeRemainingFrames = state->fade_remaining_frames;
     break;
   case 1:
-    musicTrack2Stop();
     if (state->track != M_NONE) {
-      musicTrack2ApplySeqpVol(0);
-      musicTrack2Play(state->track);
-      stop_new_music_track(player);
+      if (g_musicXTrack2CurrentTrackNum != state->track) {
+        musicTrack2Stop();
+        musicTrack2ApplySeqpVol(0);
+        musicTrack2Play(state->track);
+        stop_new_music_track(player);
+      }
       seq = &g_musicXTrack2Seq;
       alCSeqNewMarker(seq, &marker, state->ticks);
       alCSeqSetLoc(seq, &marker);
       restore_music_channels(player, state);
+    } else {
+      musicTrack2Stop();
     }
     musicTrack2ApplySeqpVol(state->volume);
     g_musicXTrack2Fade = state->fade;
@@ -288,15 +299,19 @@ static void restore_music_track(s32 index, MusicTrackState *state) {
     g_musicXTrack2FadeRemainingFrames = state->fade_remaining_frames;
     break;
   default:
-    musicTrack3Stop();
     if (state->track != M_NONE) {
-      musicTrack3ApplySeqpVol(0);
-      musicTrack3Play(state->track);
-      stop_new_music_track(player);
+      if (g_musicXTrack3CurrentTrackNum != state->track) {
+        musicTrack3Stop();
+        musicTrack3ApplySeqpVol(0);
+        musicTrack3Play(state->track);
+        stop_new_music_track(player);
+      }
       seq = &g_musicXTrack3Seq;
       alCSeqNewMarker(seq, &marker, state->ticks);
       alCSeqSetLoc(seq, &marker);
       restore_music_channels(player, state);
+    } else {
+      musicTrack3Stop();
     }
     musicTrack3ApplySeqpVol(state->volume);
     g_musicXTrack3Fade = state->fade;

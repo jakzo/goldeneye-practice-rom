@@ -71,6 +71,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      - name: Test replay watchdog
+        run: python3 -m unittest tests.test_run_practice_tests
+
       - name: Determine ares cache key
         id: ares-revision
         run: echo "cache-key=ares-${RUNNER_OS}-${RUNNER_ARCH}-$(git rev-parse HEAD:ares)" >> "$GITHUB_OUTPUT"

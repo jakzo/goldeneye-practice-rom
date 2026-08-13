@@ -22,12 +22,9 @@ from pathlib import Path
 WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
+REPLAY_STATUS_TIMEOUT_SECONDS = 30
 MINIMUM_TEST_TIMEOUT_SECONDS = {
     "FIRE_SLOWMO": 180,
-    "REPLAY": 180,
-    "REPLAY_DAM": 300,
-    "REPLAY_FRIGATE": 360,
-    "REPLAY_RUNWAY_SAVE_STATES": 600,
 }
 SRAM_SIZE_BYTES = 128 * 1024
 REPLAY_HEADER_OFFSET = 0x280
@@ -556,6 +553,10 @@ def stream_output(process, output_queue):
     output_queue.put(None)
 
 
+def is_replay_test(test_case):
+    return test_case == "REPLAY" or test_case.startswith("REPLAY_")
+
+
 def stop_emulator(process):
     if process.poll() is not None:
         return
@@ -594,9 +595,13 @@ def run_test(
         target=stream_output, args=(process, output_queue), daemon=True
     )
     output_thread.start()
-    deadline = time.monotonic() + timeout
+    replay_test = is_replay_test(test_case)
+    deadline = time.monotonic() + (
+        REPLAY_STATUS_TIMEOUT_SECONDS if replay_test else timeout
+    )
     output = []
     test_completed = False
+    replay_started = False
 
     try:
         while True:
@@ -605,6 +610,17 @@ def run_test(
 
             remaining = deadline - time.monotonic()
             if remaining <= 0:
+                if replay_test:
+                    detail = (
+                        "no replay status update received"
+                        if replay_started
+                        else "replay did not start"
+                    )
+                    return (
+                        False,
+                        f"{detail} within {REPLAY_STATUS_TIMEOUT_SECONDS}s",
+                        "".join(output),
+                    )
                 return (
                     False,
                     f"timed out after {timeout}s",
@@ -634,6 +650,11 @@ def run_test(
             output.append(line)
             if not line.startswith("RUNWAY_STATE_DATA "):
                 print_test_line(test_case, line.rstrip("\r\n"))
+            if replay_test and (
+                "REPLAY_STARTED" in line or "REPLAY_STATUS" in line
+            ):
+                replay_started = True
+                deadline = time.monotonic() + REPLAY_STATUS_TIMEOUT_SECONDS
             if line.startswith(WARNING_PREFIX) or line.startswith(ERROR_PREFIX):
                 return False, line.strip(), "".join(output)
             if "TEST_FAILED" in line:
@@ -643,11 +664,17 @@ def run_test(
             if "TEST_COMPLETE" in line:
                 if wait_for_emulator_exit:
                     test_completed = True
+                    if replay_test:
+                        deadline = (
+                            time.monotonic() + REPLAY_STATUS_TIMEOUT_SECONDS
+                        )
                 else:
                     return True, "completed", "".join(output)
     finally:
         stop_emulator(process)
         output_thread.join(timeout=1)
+        if process.stdout is not None:
+            process.stdout.close()
 
 
 def start_video_capture(test_case):

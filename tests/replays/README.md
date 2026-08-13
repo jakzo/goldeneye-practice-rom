@@ -83,6 +83,12 @@ beside its temporary ROM, validates its recorded region, and relocates legacy
 skip guest replay tests which have no fixture for that region; explicitly
 requesting one is an error.
 
+Guest replay tests use progress-based timeouts rather than a maximum replay
+duration. The ROM reports `REPLAY_STARTED` when playback begins and emits a
+`REPLAY_STATUS frame=current/total` heartbeat once per emulated second. The
+runner stops ares if either playback does not start or no new heartbeat arrives
+for 30 seconds, while allowing healthy long recordings to finish.
+
 To add another whole-ROM fixture, add its `.ram` and populated `.state` files to
 the appropriate regional directory. To add a new guest feature test as well,
 add its test constant and behavior in `src/practice/practice_tests.c`, then map
