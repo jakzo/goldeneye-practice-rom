@@ -128,10 +128,9 @@ jobs:
           cmake --build /tmp/ares-build --parallel 2
           cmake --install /tmp/ares-build
 
-  build-and-test:
+  build-roms:
     needs:
       - metadata
-      - build-ares
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
@@ -167,16 +166,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
-            ffmpeg \
-            libcanberra-gtk3-module \
-            libcapstone-dev \
-            libgl-dev \
-            libgtk-3-dev \
             make \
-            mesa-vulkan-drivers \
-            xauth \
-            xdelta3 \
-            xvfb
+            xdelta3
 
       - name: Build pinned ROM toolchain image
         run: docker build --target goldeneye --tag goldeneye .
@@ -238,6 +229,7 @@ jobs:
           name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
           path: |
             build/${{ matrix.region.code }}/.build_config
+            build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf
             build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.map
             build/${{ matrix.region.code }}/metadata/
             build/${{ matrix.region.code }}/checks/
@@ -254,14 +246,105 @@ jobs:
           patched_rom="${BASE_ROM%.z64} (patched).z64"
           sha256sum "$BUILT_ROM" "$patched_rom"
           cmp "$BUILT_ROM" "$patched_rom"
+          sha256sum "$BUILT_ROM" > "$PATCH_FILE.sha256"
           ls -lh "$PATCH_FILE"
 
       - name: Upload patch artifact
         uses: actions/upload-artifact@v6
         with:
           name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
-          path: ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
+          path: |
+            ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
+            ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta.sha256
           if-no-files-found: error
+
+  test-roms:
+    needs:
+      - metadata
+      - build-ares
+      - build-roms
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        build:
+          - mode: release
+          - mode: dev
+        region:
+          - version: US
+            code: u
+            slug: us
+            secret: BASE_ROM_US_DOWNLOAD_LINK
+          - version: EU
+            code: e
+            slug: pal
+            secret: BASE_ROM_EU_DOWNLOAD_LINK
+          - version: JP
+            code: j
+            slug: jp
+            secret: BASE_ROM_JP_DOWNLOAD_LINK
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes \
+            binutils-mips-linux-gnu \
+            ffmpeg \
+            libcanberra-gtk3-module \
+            libcapstone-dev \
+            libgl-dev \
+            libgtk-3-dev \
+            mesa-vulkan-drivers \
+            xauth \
+            xdelta3 \
+            xvfb
+
+      - name: Download base ROM
+        env:
+          BASE_ROM_URL: ${{ secrets[matrix.region.secret] }}
+          BASE_ROM: baserom.${{ matrix.region.code }}.z64
+        run: |
+          if [ -z "$BASE_ROM_URL" ]; then
+            echo "::error::${{ matrix.region.secret }} is required."
+            exit 1
+          fi
+          curl --fail --location --retry 3 --output "$BASE_ROM" "$BASE_ROM_URL"
+          test "$(stat --format=%s "$BASE_ROM")" -ge 1000000
+          sha256sum "$BASE_ROM"
+
+      - name: Download ROM patch
+        uses: actions/download-artifact@v8
+        with:
+          name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rom-patch
+
+      - name: Download build metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build-metadata
+
+      - name: Reconstruct practice ROM from patch
+        env:
+          BASE_ROM: baserom.${{ matrix.region.code }}.z64
+          BUILT_ROM: build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.z64
+          PATCH_FILE: ${{ runner.temp }}/rom-patch/${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
+        run: |
+          mkdir -p "$(dirname "$BUILT_ROM")"
+          xdelta3 -d -s "$BASE_ROM" "$PATCH_FILE" "$BUILT_ROM"
+          sha256sum --check "$PATCH_FILE.sha256"
+          elf_file=$(find "$RUNNER_TEMP/build-metadata" -type f \
+            -name 'ge007.${{ matrix.region.code }}.elf' -print -quit)
+          if [ -z "$elf_file" ]; then
+            echo "::error::Build artifact does not contain the expected ELF."
+            exit 1
+          fi
+          cp "$elf_file" "${BUILT_ROM%.z64}.elf"
 
       - name: Restore ares cache
         uses: actions/cache/restore@v6
@@ -342,8 +425,7 @@ jobs:
             threshold_args=(--max-base-regression-percent 50)
           fi
           set +e
-          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye \
-            python3 scripts/performance/profile_summary.py \
+          python3 scripts/performance/profile_summary.py \
             --elf "build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf" \
             --csv "$(python3 scripts/performance/select_profile_capture.py "build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/archives")-game-frames.csv" \
             --phase "Tested ${{ matrix.build.mode }} ${{ matrix.region.version }}" \
@@ -379,7 +461,7 @@ jobs:
           if [ ! -s "$SUMMARY_FILE" ]; then
             printf '# Practice ROM tests — %s / %s\n\n' \
               '${{ matrix.build.mode }}' '${{ matrix.region.version }}' > "$SUMMARY_FILE"
-            printf 'Tests did not finish because the build job failed before producing a test summary.\n' \
+            printf 'Tests did not finish before producing a test summary.\n' \
               >> "$SUMMARY_FILE"
           fi
 
@@ -403,7 +485,10 @@ jobs:
           compression-level: 0
 
   full-test-suite:
-    needs: build-ares
+    needs:
+      - metadata
+      - build-ares
+      - build-roms
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
@@ -417,8 +502,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Checkout test submodules
-        run: git submodule update --init --depth 1 ares libdragon
+      - name: Checkout ares test submodule
+        run: git submodule update --init --depth 1 ares
 
       - name: Install dependencies
         run: |
@@ -431,10 +516,8 @@ jobs:
             libgtk-3-dev \
             mesa-vulkan-drivers \
             xauth \
+            xdelta3 \
             xvfb
-
-      - name: Build pinned ROM toolchain image
-        run: docker build --target goldeneye --tag goldeneye .
 
       - name: Download base ROMs
         env:
@@ -461,18 +544,39 @@ jobs:
           test "$(stat --format=%s baserom.e.z64)" -ge 1000000
           test "$(stat --format=%s baserom.j.z64)" -ge 1000000
 
-      - name: Extract assets
-        run: |
-          ./scripts/extract_baserom.u.sh
-          ./scripts/extract_diff.e.sh
-          ./scripts/extract_diff.j.sh
+      - name: Download release ROM patches
+        uses: actions/download-artifact@v8
+        with:
+          pattern: goldeneye-practice-rom-patch-release-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rom-patches
+          merge-multiple: true
 
-      - name: Build regional release test ROMs
+      - name: Download release build metadata
+        uses: actions/download-artifact@v8
+        with:
+          pattern: build-metadata-release-*-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/build-metadata
+
+      - name: Reconstruct regional release ROMs from patches
+        env:
+          FILE_PREFIX: ${{ needs.metadata.outputs.file_prefix }}
         run: |
-          for version in US EU JP; do
-            docker run --rm --user "$(id -u):$(id -g)" \
-              -v "$PWD:/home/dev" goldeneye \
-              make -j"$(nproc)" VERSION="$version" DEV=0 COMPARE=0 TEST_CASE=
+          for region in u:us e:pal j:jp; do
+            code="${region%%:*}"
+            slug="${region##*:}"
+            base_rom="baserom.$code.z64"
+            built_rom="build/$code/ge007.$code.z64"
+            patch_file="$RUNNER_TEMP/rom-patches/${FILE_PREFIX}_${slug}_release.xdelta"
+            mkdir -p "$(dirname "$built_rom")"
+            xdelta3 -d -s "$base_rom" "$patch_file" "$built_rom"
+            sha256sum --check "$patch_file.sha256"
+            elf_file=$(find "$RUNNER_TEMP/build-metadata" -type f \
+              -name "ge007.$code.elf" -print -quit)
+            if [ -z "$elf_file" ]; then
+              echo "::error::Build artifacts do not contain ge007.$code.elf."
+              exit 1
+            fi
+            cp "$elf_file" "build/$code/ge007.$code.elf"
           done
 
       - name: Restore ares cache
@@ -511,7 +615,7 @@ jobs:
 
   update-performance-baselines:
     needs:
-      - build-and-test
+      - test-roms
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
@@ -551,12 +655,12 @@ jobs:
   release:
     needs:
       - metadata
-      - build-and-test
+      - build-roms
     if: >-
       always() &&
       github.event_name != 'pull_request' &&
       needs.metadata.result == 'success' &&
-      (needs.metadata.outputs.prerelease == 'true' || needs.build-and-test.result == 'success')
+      needs.build-roms.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -578,37 +682,11 @@ jobs:
           path: ${{ runner.temp }}/release
           merge-multiple: true
 
-      - name: Download test result summaries
-        if: needs.metadata.outputs.prerelease == 'true'
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          pattern: practice-test-summary-*-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/summaries
-          merge-multiple: true
-
       - name: Prepare release notes
         env:
           RELEASE_BODY: ${{ needs.metadata.outputs.body }}
-          PRERELEASE: ${{ needs.metadata.outputs.prerelease }}
         run: |
           printf '%s' "$RELEASE_BODY" > "$RUNNER_TEMP/release-notes.md"
-          if [ "$PRERELEASE" = "true" ]; then
-            mkdir -p "$RUNNER_TEMP/summaries"
-            summary_count=$(find "$RUNNER_TEMP/summaries" -type f -name '*.md' | wc -l)
-            if [ "$summary_count" -ne 6 ]; then
-              echo "::warning::Expected 6 test summaries, found $summary_count. Publishing available summaries."
-            fi
-            printf '\n\n---\n\n' >> "$RUNNER_TEMP/release-notes.md"
-            if [ "$summary_count" -gt 0 ]; then
-              find "$RUNNER_TEMP/summaries" -type f -name '*.md' -print0 \
-                | sort -z \
-                | xargs -0 cat >> "$RUNNER_TEMP/release-notes.md"
-            else
-              printf 'Test summaries were unavailable because the build jobs failed before testing finished.\n' \
-                >> "$RUNNER_TEMP/release-notes.md"
-            fi
-          fi
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
