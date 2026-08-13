@@ -63,7 +63,14 @@ class BalancingTests(unittest.TestCase):
         self.assertEqual(practice.estimate_frames, RUNNER.SHORT_TEST_ESTIMATE_FRAMES)
         self.assertEqual(RUNNER.estimate_label(practice), "short")
         self.assertGreater(replay.estimate_frames, practice.estimate_frames)
-        self.assertEqual(cold_restart.estimate_frames, replay.estimate_frames * 4)
+        cold_restart_multiplier = RUNNER.SAVE_STATE_ESTIMATE_MULTIPLIERS[
+            "cold-restart"
+        ]
+        self.assertEqual(cold_restart_multiplier, 6)
+        self.assertEqual(
+            cold_restart.estimate_frames,
+            replay.estimate_frames * cold_restart_multiplier,
+        )
 
     def test_save_state_tasks_force_one_emulator_and_release_build(self):
         task = next(

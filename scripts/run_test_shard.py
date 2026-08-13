@@ -33,10 +33,10 @@ REPLAY_OFFSETS = (0x280, 0x600)
 SHORT_TEST_ESTIMATE_FRAMES = 600
 SAVE_STATE_ESTIMATE_MULTIPLIERS = {
     "default": 2,
-    "long": 4,
+    "long": 6,
     "cameras": 2,
     "near-end": 2,
-    "cold-restart": 4,
+    "cold-restart": 6,
 }
 MANUAL_PRACTICE_TESTS = {"REPLAY_RUNWAY_SAVE_STATES"}
 PRACTICE_REPLAY_FIXTURES = {

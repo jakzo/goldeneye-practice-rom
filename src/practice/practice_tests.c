@@ -51,6 +51,7 @@ extern u64 g_randomSeed;
 extern u64 g_chrObjRandomSeed;
 extern u64 g_tlbRandomSeed;
 extern f32 g_sndSfxVolumeScale;
+extern void bondviewKillCurrentPlayer(void);
 extern s32 propdoorInteract(PropRecord *doorprop);
 extern s32 object_interaction(PropRecord *prop);
 extern void propExecuteTickOperation(PropRecord *prop, INV_ITEM_TYPE op);
@@ -495,13 +496,9 @@ void practice_tests_tick() {
       if (g_save_test_timer < 1200) {
         g_SimulatedButtons |= U_CBUTTONS;
       } else {
-        f32 lethal_damage =
-            g_CurrentPlayer->bondhealth * g_CurrentPlayer->actual_health +
-            g_CurrentPlayer->bondarmour * g_CurrentPlayer->actual_armor;
-
         g_SimulatedButtons &= ~U_CBUTTONS;
         emu_log("TRIGGER_DEATH");
-        bondviewCallRecordDamageKills(lethal_damage, 0.0f, -1, TRUE);
+        bondviewKillCurrentPlayer();
         g_PausedStateLoadTestPhase = 2;
       }
     } else if (g_PausedStateLoadTestPhase == 2 &&
@@ -548,6 +545,7 @@ void practice_tests_tick() {
     u8 stack[32];
     u64 saved_random_seed;
     u64 saved_tlb_seed;
+    OSIntMask saved_interrupt_mask;
     bool passed = TRUE;
     s32 i;
 
@@ -557,7 +555,6 @@ void practice_tests_tick() {
 
     emu_log("PHASE4_RNG_START");
     saved_random_seed = g_randomSeed;
-    saved_tlb_seed = g_tlbRandomSeed;
     g_randomSeed = 0x0123456789abcdefULL;
     for (i = 0; i < ARRAYCOUNT(expected_random); i++) {
       u32 actual = randomGetNext();
@@ -567,6 +564,10 @@ void practice_tests_tick() {
         passed = FALSE;
       }
     }
+    /* The TLB manager also advances this seed. Keep its interrupt-driven use
+     * from observing the two 32-bit stores GCC emits for a u64 assignment. */
+    saved_interrupt_mask = osSetIntMask(OS_IM_NONE);
+    saved_tlb_seed = g_tlbRandomSeed;
     g_tlbRandomSeed = 0x0123456789abcdefULL;
     {
       u32 actual0 = tlbRandomGetNext();
@@ -577,8 +578,9 @@ void practice_tests_tick() {
         passed = FALSE;
       }
     }
-    g_randomSeed = saved_random_seed;
     g_tlbRandomSeed = saved_tlb_seed;
+    osSetIntMask(saved_interrupt_mask);
+    g_randomSeed = saved_random_seed;
 
     emu_log("PHASE4_STRING_START");
     if (strtol(" -0x2a!", &end, 0) != -42 || *end != '!') {
