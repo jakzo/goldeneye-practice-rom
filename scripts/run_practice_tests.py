@@ -554,7 +554,11 @@ def stream_output(process, output_queue):
 
 
 def is_replay_test(test_case):
-    return test_case == "REPLAY" or test_case.startswith("REPLAY_")
+    # REPLAY records player input before starting playback, so it can
+    # legitimately go longer than the fixture heartbeat timeout without a
+    # REPLAY_STARTED marker. REPLAY_* fixtures begin playback immediately and
+    # use REPLAY_STATUS as a progress heartbeat.
+    return test_case.startswith("REPLAY_")
 
 
 def stop_emulator(process):
