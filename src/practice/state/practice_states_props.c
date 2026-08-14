@@ -3597,6 +3597,7 @@ static void skip_prop_data(StateStream *stream, u8 type,
     bzero(&temp_door, sizeof(temp_door));
     load_object_base(stream, &temp_obj, NULL, NULL);
     load_door_record(stream, &temp_door);
+    load_object_collision_coefficients(stream, NULL);
   } else if (type == PROP_TYPE_OBJ || type == PROP_TYPE_WEAPON) {
     TempObjectRecord temp_obj;
     bzero(&temp_obj, sizeof(temp_obj));
@@ -3763,6 +3764,7 @@ bool save_props_state(StateStream *stream) {
         write_u32(stream, door->portalNumber);
         write_u32(stream, door->lastcalc60i);
       }
+      save_object_collision_coefficients(stream, (ObjectRecord *)door);
       break;
     }
 
@@ -4797,6 +4799,7 @@ static bool load_props_state_with_scratch(
           sub_GAME_7F052D8C(door);
         }
       }
+      load_object_collision_coefficients(stream, obj);
 
       if (door->openPosition > 0.0f) {
         doorActivatePortal(door);

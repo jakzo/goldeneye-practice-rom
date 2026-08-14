@@ -88,6 +88,22 @@ class ReplayTimeoutTests(unittest.TestCase):
         self.assertFalse(passed)
         self.assertEqual(detail, "timed out after 0.1s")
 
+    def test_recording_replay_keeps_overall_timeout(self):
+        previous = RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS
+        RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS = 0.1
+        try:
+            passed, detail, _ = self.run_script(
+                "REPLAY",
+                "import time; time.sleep(0.2); "
+                "print('TEST_COMPLETE', flush=True)",
+                0.4,
+            )
+        finally:
+            RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS = previous
+
+        self.assertTrue(passed)
+        self.assertEqual(detail, "completed")
+
 
 if __name__ == "__main__":
     unittest.main()

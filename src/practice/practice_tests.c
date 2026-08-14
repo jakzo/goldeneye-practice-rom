@@ -151,6 +151,10 @@ static u32 g_ReplaySaveActiveListHash;
 static u32 g_ReplaySegmentActiveListHash;
 static u32 g_ReplaySegmentFreeListHash;
 static u32 g_ReplaySaveFreeListHash;
+static s32 g_ReplaySaveFreeListHead;
+static s32 g_ReplaySaveFreeListCount;
+static u32 g_ReplaySaveFreeListXor;
+static u32 g_ReplaySaveFreeListSum;
 static u32 g_ReplaySaveChrFlagsHash;
 static u32 g_ReplaySaveChrHiddenHash;
 static PracticeReplayCheckpoint g_ReplaySaveCheckpoint;
@@ -180,6 +184,38 @@ static u32 replay_free_list_hash(void) {
     prop = prop->prev;
   }
   return (hash ^ count) * 16777619U;
+}
+
+static void replay_free_list_summary(s32 *head, s32 *count,
+                                     u32 *unordered_hash, u32 *index_sum) {
+  PropRecord *prop = ptr_obj_pos_list_final_entry;
+
+  *head = get_prop_index(prop);
+  *count = 0;
+  *unordered_hash = 0;
+  *index_sum = 0;
+  while (prop != NULL && *count < POS_DATA_ENTRY_LEN) {
+    u32 index = get_prop_index(prop);
+    *unordered_hash ^= index * 2654435761U;
+    *index_sum += index;
+    (*count)++;
+    prop = prop->prev;
+  }
+}
+
+static void replay_log_free_list_mismatch(const char *phase) {
+  s32 actual_head;
+  s32 actual_count;
+  u32 actual_xor;
+  u32 actual_sum;
+
+  replay_free_list_summary(&actual_head, &actual_count, &actual_xor,
+                           &actual_sum);
+  emu_log("RUNWAY_FREE_LIST_SUMMARY phase=%s head=%d/%d count=%d/%d "
+          "xor=%08x/%08x sum=%08x/%08x",
+          phase, g_ReplaySaveFreeListHead, actual_head,
+          g_ReplaySaveFreeListCount, actual_count, g_ReplaySaveFreeListXor,
+          actual_xor, g_ReplaySaveFreeListSum, actual_sum);
 }
 
 static u32 replay_chr_flags_hash(void) {
@@ -2091,6 +2127,9 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_ReplaySavePropPos = g_CurrentPlayer->prop->pos;
     g_ReplaySaveActiveListHash = replay_active_list_hash();
     g_ReplaySaveFreeListHash = replay_free_list_hash();
+    replay_free_list_summary(
+        &g_ReplaySaveFreeListHead, &g_ReplaySaveFreeListCount,
+        &g_ReplaySaveFreeListXor, &g_ReplaySaveFreeListSum);
     g_ReplaySaveChrFlagsHash = replay_chr_flags_hash();
     g_ReplaySaveChrHiddenHash = replay_chr_hidden_hash();
     g_ReplaySaveViewerMatricesFixed =
@@ -2140,8 +2179,9 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
         break;
       }
       if (replay_free_list_hash() != g_ReplaySaveFreeListHash) {
-        emu_log("RUNWAY_LOAD_FREE_LIST_MISMATCH expected=%08x actual=%08x",
+        emu_log("RUNWAY_SAVE_FREE_LIST_MUTATED expected=%08x actual=%08x",
                 g_ReplaySaveFreeListHash, replay_free_list_hash());
+        replay_log_free_list_mismatch("after-save");
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
@@ -2236,6 +2276,7 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
           replay_free_list_hash() != g_ReplaySaveFreeListHash) {
         emu_log("RUNWAY_LOAD_FREE_LIST_MISMATCH expected=%08x actual=%08x",
                 g_ReplaySaveFreeListHash, replay_free_list_hash());
+        replay_log_free_list_mismatch("after-load");
         emu_log("TEST_FAILED");
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
