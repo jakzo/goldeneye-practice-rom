@@ -310,7 +310,12 @@ def emulator_command():
 
 def build_tests(build_mode, version):
     jobs = available_cpu_count()
-    command = ["make", f"-j{jobs}", f"VERSION={version}"]
+    command = [
+        "make",
+        f"-j{jobs}",
+        f"VERSION={version}",
+        "PRACTICE_TEST_ROM=1",
+    ]
     if build_mode == "dev":
         command.append("DEV=1")
     with tempfile.TemporaryFile(mode="w+") as build_log:
@@ -422,7 +427,7 @@ def install_replay_fixture(
             f"for {version}"
         )
     boot_level = sram[replay_header_offset + 0x11]
-    if test_case == "REPLAY_RUNWAY_SAVE_STATES":
+    if is_fixture_replay_test(test_case):
         if TEST_REPLAY_ROM_OFFSET + replay_size > ROM_CONFIG_OFFSET:
             raise ValueError(f"{fixture.name} is too large for the test ROM slot")
         with rom.open("r+b") as rom_file:

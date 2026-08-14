@@ -7,6 +7,7 @@
 #include "libultra/libc/xstdio.h"
 #include "crash.h"
 #include "rmon.h" /*<PR/rmon.h>*/
+#include "practice/practice_sc64.h"
 
 #ifdef ENABLE_USB
 
@@ -92,11 +93,17 @@ void rmonMain(void) {
         }
         }
 
+#ifdef PRACTICE_TEST_ROM
+        practice_sc64_poll();
+        /* N64 counter ticks per millisecond (46.875 MHz / 1000). */
+        osSetTimer(&rmonSleeptimer, 46875, 0, &rmonSleepMq, rmonSleepMesg);
+#else
 #ifdef __GNUC__
         /* One second is osClockRate ticks; avoid an unnecessary __udivdi3. */
         osSetTimer(&rmonSleeptimer, osClockRate, 0, &rmonSleepMq, rmonSleepMesg);
 #else
         osSetTimer(&rmonSleeptimer, OS_USEC_TO_CYCLES(1000000), 0, &rmonSleepMq, rmonSleepMesg);
+#endif
 #endif
         osRecvMesg(&rmonSleepMq, &rmonSleepMesg, OS_MESG_BLOCK);
     }

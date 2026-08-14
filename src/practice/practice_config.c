@@ -359,6 +359,7 @@ void practice_config_save() {
   }
 }
 
+#ifdef PRACTICE_TEST_ROM
 static u32 rom_config_checksum(const struct PracticeRomConfig *config) {
   return config->magic ^ config->version ^ config->size ^
          (u32)config->test_case ^ (u32)config->boot_level ^
@@ -403,18 +404,23 @@ static void apply_rom_config(const struct PracticeRomConfig *config) {
     }
   }
 }
+#endif
 
 void practice_config_load(void) {
+#ifdef PRACTICE_TEST_ROM
   union {
     u64 alignment;
     struct PracticeRomConfig config;
   } rom_config_buffer;
   struct PracticeRomConfig *rom_config = &rom_config_buffer.config;
+#endif
   u8 config_sram_bytes[CONFIG_SRAM_SIZE];
   struct StoredPracticeConfig *stored =
       (struct StoredPracticeConfig *)&config_sram_bytes;
   u32 size = CONFIG_HEADER_SIZE + CONFIG_HEADER_SIZE - CONFIG_HEADER_SIZE % 16;
+#ifdef PRACTICE_TEST_ROM
   bool has_rom_config = read_rom_config(rom_config);
+#endif
 
   if (sram_read(CONFIG_SRAM_OFFSET, &config_sram_bytes, size) == 0 &&
       stored->magic == CONFIG_MAGIC && stored->size != 0 &&
@@ -431,6 +437,7 @@ void practice_config_load(void) {
   if (practice.max_save_states < 1 || practice.max_save_states > 20) {
     practice.max_save_states = 5;
   }
+#ifdef PRACTICE_TEST_ROM
   /* Flashcart detection performs PI I/O and can add retraces before a level
    * starts. Host-driven replay tests either do not use save states or select
    * SRAM explicitly, so keep their boot timing deterministic by avoiding the
@@ -445,6 +452,7 @@ void practice_config_load(void) {
   if (has_rom_config) {
     apply_rom_config(rom_config);
   }
+#endif
 }
 
 static s32 setting_applies(const struct PracticeSetting *setting,

@@ -18,6 +18,7 @@
                 "VERSION_US",
                 "TARGET_N64",
                 "PRACTICE_ROM",
+                "PRACTICE_TEST_ROM",
                 "LANG_US",
                 "REFRESH_NTSC",
                 "LEFTOVERDEBUG",

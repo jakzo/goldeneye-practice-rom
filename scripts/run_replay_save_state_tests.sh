@@ -130,7 +130,7 @@ next_replay=0
 if [ -z "$skip_build" ]; then
     build_jobs="${PRACTICE_TEST_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
     echo "=== building replay save-state test ROM ==="
-    make -j"$build_jobs" VERSION="$version" DEV="$dev"
+    make -j"$build_jobs" VERSION="$version" DEV="$dev" PRACTICE_TEST_ROM=1
     skip_build="--skip-build"
 fi
 

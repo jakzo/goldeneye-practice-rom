@@ -10,6 +10,9 @@ VERSION := US
 VERBOSE := 2
 # If DEV is set (e.g. DEV=1), -DDEV is added to enable code with #ifdef DEV
 DEV := 0
+# If PRACTICE_TEST_ROM is 1, include the ROM-side test suite and SummerCart64
+# hardware test/reload support. Normal practice ROM releases leave both out.
+PRACTICE_TEST_ROM := 0
 # If COMPARE is 1, check the output sha1sum when building 'all', and if fail to match
 # then compare ELF sections to known md5 checksums.
 COMPARE := 0
@@ -111,6 +114,15 @@ ifeq ($(DEV), 1)
  ASMDEFS += --defsym DEV=1
 endif
 
+ifneq ($(strip $(TEST_CASE)),)
+ PRACTICE_TEST_ROM := 1
+endif
+
+ifeq ($(PRACTICE_TEST_ROM), 1)
+ LCDEFS += -DPRACTICE_TEST_ROM
+ ASMDEFS += --defsym PRACTICE_TEST_ROM=1
+endif
+
 ALLOWED_VERSIONS := US EU JP DEBUG USB
 ALLOWED_COUNTRYCODE := u e j
 
@@ -145,7 +157,12 @@ CODEOBJECTS := $(foreach file,$(CODEFILES),$(BUILD_DIR)/$(file:.c=.o))
 
 PRACTICEFILES_C := $(sort $(shell find src/practice -type f -name '*.c' \
 	! -path 'src/practice/state/practice_sd_card.c' \
-	! -path 'src/practice/state/practice_libdragon_compat.c'))
+	! -path 'src/practice/state/practice_libdragon_compat.c' \
+	! -path 'src/practice/practice_tests.c' \
+	! -path 'src/practice/practice_sc64.c'))
+ifeq ($(PRACTICE_TEST_ROM), 1)
+PRACTICEFILES_C += src/practice/practice_tests.c
+endif
 PRACTICEOBJECTS := $(foreach file,$(PRACTICEFILES_C),$(BUILD_DIR)/$(file:.c=.o))
 FLASHCARTSDPAGEDFILES_C := src/practice/state/practice_sd_card.c \
 	libdragon/src/fatfs/ff.c
@@ -155,6 +172,11 @@ FLASHCARTSDFILES_C := $(FLASHCARTSDPAGEDFILES_C) \
 	$(FLASHCARTSDRESIDENTFILES_C)
 FLASHCARTSDPAGEDOBJECTS := $(foreach file,$(FLASHCARTSDPAGEDFILES_C),$(BUILD_DIR)/$(file:.c=.o))
 FLASHCARTSDRESIDENTOBJECTS := $(foreach file,$(FLASHCARTSDRESIDENTFILES_C),$(BUILD_DIR)/$(file:.c=.o))
+ifeq ($(PRACTICE_TEST_ROM), 1)
+FLASHCARTSDRESIDENTOBJECTS += \
+	$(BUILD_DIR)/src/practice/practice_sc64.o \
+	$(BUILD_DIR)/src/practice/practice_sc64_reboot.o
+endif
 FLASHCARTSDOBJECTS := $(FLASHCARTSDPAGEDOBJECTS) $(FLASHCARTSDRESIDENTOBJECTS)
 PRACTICE_LINK_OBJECTS := $(PRACTICEOBJECTS) $(FLASHCARTSDPAGEDOBJECTS)
 PRACTICE_LINK_OBJECT := $(BUILD_DIR)/src/practice.o
@@ -325,6 +347,7 @@ $(BUILD_CONFIG_STAMP): FORCE
 		printf '%s\n' 'VERSION=$(VERSION)'; \
 		printf '%s\n' 'CC_GCC_VERSION=$(CC_GCC_VERSION)'; \
 		printf '%s\n' 'DEV=$(DEV)'; \
+		printf '%s\n' 'PRACTICE_TEST_ROM=$(PRACTICE_TEST_ROM)'; \
 		printf '%s\n' 'GCC_OPTIMIZATION=$(GCC_OPTIMIZATION)'; \
 		printf '%s\n' 'LCDEFS=$(LCDEFS)'; \
 		printf '%s\n' 'CFLAGS_GCC_PRACTICE=$(CFLAGS_GCC_PRACTICE)'; \
@@ -347,6 +370,7 @@ $(OBJECT_CONFIG_STAMP): FORCE
 		printf '%s\n' 'FINAL=$(FINAL)'; \
 		printf '%s\n' 'VERSION=$(VERSION)'; \
 		printf '%s\n' 'DEV=$(DEV)'; \
+		printf '%s\n' 'PRACTICE_TEST_ROM=$(PRACTICE_TEST_ROM)'; \
 		printf '%s\n' 'CC_GCC_VERSION=$(CC_GCC_VERSION)'; \
 		printf '%s\n' 'CFLAGS_GCC_PRACTICE=$(CFLAGS_GCC_PRACTICE)'; \
 		printf '%s\n' 'ASFLAGS=$(ASFLAGS)'; \

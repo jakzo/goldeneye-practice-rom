@@ -26,6 +26,16 @@ When adding new features or making significant changes, make sure to document it
 
 To avoid distributing copyrighted material, only patch files are to be included in this repository and saved by CI for download. No ready-made ROMs of Goldeneye.
 
+Hardware tests can run on a USB-connected SummerCart64. The first deployment
+may require one console Reset; later tests use the cart's cooperative ROM
+upload/reboot protocol and run back-to-back:
+
+    just sc64-test MIGRATION_MATH true
+    just sc64-test
+
+These targets build with `PRACTICE_TEST_ROM=1`. Normal release builds omit the
+ROM test suite and SummerCart64 reboot listener.
+
 ## Debugging
 
 Easiest way is to log to the screen with `practiceLogDebug`. These will also log to STDOUT of supported emulators (such as ares). If you want to only log to STDOUT you can use `emu_log_write`.

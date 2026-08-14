@@ -132,7 +132,7 @@ test-shard-plan SHARDS="12":
 
 test-shard SHARD: build-ares
     if test -z "$(docker images -q {{ image }})"; then just setup; fi
-    for version in US EU JP; do docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} VERSION="$version" DEV=0 COMPARE=0 TEST_CASE=; done
+    for version in US EU JP; do docker run --rm -v "$(pwd):/home/dev" {{ image }} make -j{{ num_cpus() }} VERSION="$version" DEV=0 COMPARE=0 PRACTICE_TEST_ROM=1 TEST_CASE=; done
     ARES="{{ ares_bin }}" ARES_ARGS="--setting Audio/Driver=None --setting Input/Driver=None" python3 scripts/run_test_shard.py --shard "{{ SHARD }}"
 
 # Run every regional SRAM replay against a release practice ROM using ares'
@@ -148,7 +148,7 @@ test-practice-replays REGION="us" ARTIFACTS="build/practice-replay-results" REPL
         *) echo "error: region must be one of: us, eu, jp" >&2; exit 2 ;;
     esac
     if test -z "$(docker images -q {{ test_image }})"; then docker build --target test -t {{ test_image }} .; fi
-    docker run --rm -v "$(pwd):/home/dev" -w /home/dev {{ test_image }} make -j{{ num_cpus() }} DEV=0 VERSION="$version" COMPARE=0 TEST_CASE=
+    docker run --rm -v "$(pwd):/home/dev" -w /home/dev {{ test_image }} make -j{{ num_cpus() }} DEV=0 VERSION="$version" COMPARE=0 PRACTICE_TEST_ROM=1 TEST_CASE=
     python3 scripts/patch_practice_rom.py "build/$outcode/ge007.$outcode.z64" --flags 1
     run_replays() {
         python3 ares/tests/n64-replay/run.py \
@@ -168,9 +168,31 @@ test-practice-replays REGION="us" ARTIFACTS="build/practice-replay-results" REPL
     fi
 
 sc64-dev BOOT_LEVEL="TITLE":
-    docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 BOOT_LEVEL={{ BOOT_LEVEL }}
-    sc64deployer upload build/u/ge007.u.z64
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=1 PRACTICE_TEST_ROM=1 BOOT_LEVEL={{ BOOT_LEVEL }}
+    sc64deployer upload --reboot build/u/ge007.u.z64
     sc64deployer debug
+
+# Build a release-optimized ROM containing the test suite and SC64 reboot hook.
+sc64-test-build:
+    docker run --rm -v $(pwd):/home/dev {{ image }} make -j{{ num_cpus() }} DEV=0 COMPARE=0 PRACTICE_TEST_ROM=1 TEST_CASE=
+
+# Run one test, or the ordinary test suite, on a connected SummerCart64.
+sc64-test TEST_CASE="" INITIAL="false": sc64-test-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=()
+    if [ -n "{{ TEST_CASE }}" ]; then args+=(--test "{{ TEST_CASE }}"); fi
+    if [ "{{ INITIAL }}" = "true" ]; then args+=(--initial-upload); fi
+    python3 scripts/run_sc64_tests.py "${args[@]}"
+
+# Run the US replay save-state matrix on a connected SummerCart64/N64.
+sc64-save-state-suite STEP="all" REPLAY="" INITIAL="false": sc64-test-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    args=(--step "{{ STEP }}")
+    if [ -n "{{ REPLAY }}" ]; then args+=(--replay "{{ REPLAY }}"); fi
+    if [ "{{ INITIAL }}" = "true" ]; then args+=(--initial-upload); fi
+    python3 scripts/run_sc64_save_state_tests.py "${args[@]}"
 
 # builds the rom and uploads it to a connected summercart64
 sc64: make

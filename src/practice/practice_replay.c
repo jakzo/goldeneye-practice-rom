@@ -81,6 +81,9 @@ static s32 g_RequestPlayback;
 static f32 g_PlaybackElapsedVideoFrames;
 static s32 g_PlaybackAdvanceFrame;
 static s32 g_UseTestRomFixture;
+#ifdef PRACTICE_TEST_ROM
+static u16 g_TestRealButtons;
+#endif
 
 bool g_ReplayIsRecording = FALSE;
 bool g_ReplayIsPlaying = FALSE;
@@ -385,6 +388,9 @@ static void start_playback(void) {
   g_ReplayDivergenceLogged = FALSE;
   g_PlaybackElapsedVideoFrames = 0.0f;
   g_PlaybackAdvanceFrame = FALSE;
+#ifdef PRACTICE_TEST_ROM
+  g_TestRealButtons = 0;
+#endif
   g_ReplayIsPlaying = TRUE;
 }
 
@@ -689,13 +695,23 @@ void practice_replay_on_frame_start(void) {
       char timestamp[16];
       format_timestamp(g_ReplayTimestamp, timestamp);
       practiceLogDebug(
-          "Divergence: frame %d rng %08x%08x/%08x%08x chr %08x%08x/%08x%08x",
+          "Divergence: frame %d rng %08x%08x/%08x%08x chr %08x%08x/%08x%08x"
+#ifdef PRACTICE_TEST_ROM
+          " input=%04x stick=%d,%d delta=%d real=%04x"
+#endif
+          ,
           g_ReplayFrameIndex, (u32)(g_randomSeed >> 32), (u32)g_randomSeed,
           (u32)(g_PlaybackFrame.random_seed >> 32),
           (u32)g_PlaybackFrame.random_seed,
           (u32)(g_chrObjRandomSeed >> 32), (u32)g_chrObjRandomSeed,
           (u32)(g_PlaybackFrame.chr_obj_random_seed >> 32),
-          (u32)g_PlaybackFrame.chr_obj_random_seed);
+          (u32)g_PlaybackFrame.chr_obj_random_seed
+#ifdef PRACTICE_TEST_ROM
+          , g_PlaybackFrame.buttons, g_PlaybackFrame.stick_x,
+          g_PlaybackFrame.stick_y, g_PlaybackFrame.delta_frames,
+          g_TestRealButtons
+#endif
+      );
       practiceLogError("Replay diverged at %s", timestamp);
       g_ReplayDivergenceLogged = TRUE;
     }
@@ -766,6 +782,9 @@ static s32 practice_replay_playback_callback(struct contsample *samples,
   real_buttons = joyGetButtons(0, ANY_BUTTON);
   real_pressed = joyGetButtonsPressedThisFrame(0, ANY_BUTTON);
   joySetContDataIndex(1);
+#ifdef PRACTICE_TEST_ROM
+  g_TestRealButtons = real_buttons;
+#endif
   if ((real_pressed & ~trigger) && !(real_buttons & trigger)) {
     char timestamp[16];
     format_timestamp(g_ReplayTimestamp, timestamp);

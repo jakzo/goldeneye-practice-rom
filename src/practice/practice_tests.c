@@ -1,4 +1,7 @@
 #include "practice_tests.h"
+#ifndef PRACTICE_TEST_ROM
+#error "practice_tests.c must only be compiled for PRACTICE_TEST_ROM builds"
+#endif
 #include "assets/obseg/text/LmiscE.h"
 #include "bg.h"
 #include "bondview.h"
@@ -29,6 +32,7 @@
 #include "practice_hotkeys.h"
 #include "practice_render.h"
 #include "practice_replay.h"
+#include "practice_sc64.h"
 #include "practice_timescale.h"
 #include "quaternion.h"
 #include "random.h"
@@ -291,10 +295,14 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
   g_LevelRestartTimer = 0;
   g_PausedStateLoadTestPhase = 0;
 
+  if (test_case >= REPLAY_RUNWAY &&
+      test_case <= REPLAY_RUNWAY_SAVE_STATES) {
+    practice_replay_use_test_rom_fixture();
+  }
+
   if (test_case == REPLAY_RUNWAY_SAVE_STATES) {
     g_ReplayRestartSaveStateMode = restart_save_state_mode;
     g_ReplayTestPlaybackCount = test_param;
-    practice_replay_use_test_rom_fixture();
     if (g_ReplayRestartSaveStateMode) {
       u32 packed_checkpoint = (u32)test_param;
 
@@ -315,8 +323,13 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
     } else {
       if (!practice_states_set_storage_location(
               PRACTICE_STORAGE_EXPANSION_RAM)) {
-        emu_log("EXPANSION_RAM_NOT_AVAILABLE");
-        emu_log("TEST_FAILED");
+        if (practice_sc64_is_present()) {
+          practice_states_set_storage_location(PRACTICE_STORAGE_SRAM);
+          emu_log("USING_SC64_SRAM_FOR_TEST_STATE");
+        } else {
+          emu_log("EXPANSION_RAM_NOT_AVAILABLE");
+          emu_log("TEST_FAILED");
+        }
       }
     }
   }
@@ -2108,7 +2121,9 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
                   g_ReplaySaveCheckpoint.elapsed_video_frames);
           emu_log("TEST_FAILED");
         } else {
-          practice_states_log_test_fixture();
+          if (!practice_sc64_is_present()) {
+            practice_states_log_test_fixture();
+          }
           emu_log("RUNWAY_RESTART_SEGMENT_COMPLETE timestamp=%d elapsed=%d",
                   g_ReplaySaveCheckpoint.timestamp,
                   (u32)g_ReplaySaveCheckpoint.elapsed_video_frames);
