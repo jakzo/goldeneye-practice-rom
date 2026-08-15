@@ -226,7 +226,7 @@ jobs:
       - name: Upload build metadata and checks
         uses: actions/upload-artifact@v6
         with:
-          name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}
           path: |
             build/${{ matrix.region.code }}/.build_config
             build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf
@@ -234,6 +234,7 @@ jobs:
             build/${{ matrix.region.code }}/metadata/
             build/${{ matrix.region.code }}/checks/
           if-no-files-found: error
+          overwrite: true
 
       - name: Generate xdelta patch
         env:
@@ -252,11 +253,12 @@ jobs:
       - name: Upload patch artifact
         uses: actions/upload-artifact@v6
         with:
-          name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}
           path: |
             ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
             ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta.sha256
           if-no-files-found: error
+          overwrite: true
 
   test-roms:
     needs:
@@ -320,13 +322,13 @@ jobs:
       - name: Download ROM patch
         uses: actions/download-artifact@v8
         with:
-          name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}
           path: ${{ runner.temp }}/rom-patch
 
       - name: Download build metadata
         uses: actions/download-artifact@v8
         with:
-          name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}
           path: ${{ runner.temp }}/build-metadata
 
       - name: Reconstruct practice ROM from patch
@@ -446,12 +448,13 @@ jobs:
         if: always() && matrix.region.version != 'JP'
         uses: actions/upload-artifact@v6
         with:
-          name: performance-stats-${{ matrix.build.mode }}-${{ matrix.region.slug }}-${{ github.run_attempt }}
+          name: performance-stats-${{ matrix.build.mode }}-${{ matrix.region.slug }}
           path: |
             build/performance/${{ matrix.build.mode }}/${{ matrix.region.code }}/
             ${{ runner.temp }}/practice-test-artifacts/performance-results.xml
           if-no-files-found: warn
           compression-level: 0
+          overwrite: true
 
       - name: Prepare missing test result summary
         if: always()
@@ -547,14 +550,14 @@ jobs:
       - name: Download release ROM patches
         uses: actions/download-artifact@v8
         with:
-          pattern: goldeneye-practice-rom-patch-release-*-${{ github.run_attempt }}
+          pattern: goldeneye-practice-rom-patch-release-*
           path: ${{ runner.temp }}/rom-patches
           merge-multiple: true
 
       - name: Download release build metadata
         uses: actions/download-artifact@v8
         with:
-          pattern: build-metadata-release-*-${{ github.run_attempt }}
+          pattern: build-metadata-release-*
           path: ${{ runner.temp }}/build-metadata
 
       - name: Reconstruct regional release ROMs from patches
@@ -630,7 +633,7 @@ jobs:
       - name: Download regional performance stats
         uses: actions/download-artifact@v8
         with:
-          pattern: performance-stats-*-${{ github.run_attempt }}
+          pattern: performance-stats-*
           path: ${{ runner.temp }}/performance
 
       - name: Update checked-in performance stats
@@ -670,7 +673,7 @@ jobs:
         if: needs.metadata.outputs.prerelease == 'true'
         uses: actions/download-artifact@v8
         with:
-          pattern: goldeneye-practice-rom-patch-*-${{ github.run_attempt }}
+          pattern: goldeneye-practice-rom-patch-*
           path: ${{ runner.temp }}/release
           merge-multiple: true
 
@@ -678,7 +681,7 @@ jobs:
         if: needs.metadata.outputs.prerelease != 'true'
         uses: actions/download-artifact@v8
         with:
-          pattern: goldeneye-practice-rom-patch-release-*-${{ github.run_attempt }}
+          pattern: goldeneye-practice-rom-patch-release-*
           path: ${{ runner.temp }}/release
           merge-multiple: true
 
