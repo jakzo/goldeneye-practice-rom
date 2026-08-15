@@ -247,6 +247,7 @@ jobs:
           patched_rom="${BASE_ROM%.z64} (patched).z64"
           sha256sum "$BUILT_ROM" "$patched_rom"
           cmp "$BUILT_ROM" "$patched_rom"
+          rm "$patched_rom"
           sha256sum "$BUILT_ROM" > "$PATCH_FILE.sha256"
           ls -lh "$PATCH_FILE"
 
@@ -257,6 +258,50 @@ jobs:
           path: |
             ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
             ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta.sha256
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Build GCC practice test ROM (${{ matrix.build.mode }}, ${{ matrix.region.version }})
+        run: >-
+          docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/home/dev" goldeneye
+          make -j$(nproc)
+          VERSION=${{ matrix.region.version }}
+          DEV=${{ matrix.build.dev }}
+          PRACTICE_TEST_ROM=1
+
+      - name: Upload test build metadata
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-metadata-test-${{ matrix.build.mode }}-${{ matrix.region.slug }}
+          path: |
+            build/${{ matrix.region.code }}/.build_config
+            build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.elf
+            build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.map
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Generate test ROM xdelta patch
+        env:
+          BASE_ROM: baserom.${{ matrix.region.code }}.z64
+          BUILT_ROM: build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.z64
+          PATCH_FILE: ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}_test.xdelta
+        run: |
+          xdelta3 -e -n -S none -A -s "$BASE_ROM" "$BUILT_ROM" "$PATCH_FILE"
+          npx --yes rom-patcher@3.1.0-b patch "$BASE_ROM" "$PATCH_FILE"
+          patched_rom="${BASE_ROM%.z64} (patched).z64"
+          sha256sum "$BUILT_ROM" "$patched_rom"
+          cmp "$BUILT_ROM" "$patched_rom"
+          rm "$patched_rom"
+          sha256sum "$BUILT_ROM" > "$PATCH_FILE.sha256"
+          ls -lh "$PATCH_FILE"
+
+      - name: Upload test ROM patch artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: goldeneye-practice-rom-test-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}
+          path: |
+            ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}_test.xdelta
+            ${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}_test.xdelta.sha256
           if-no-files-found: error
           overwrite: true
 
@@ -319,23 +364,23 @@ jobs:
           test "$(stat --format=%s "$BASE_ROM")" -ge 1000000
           sha256sum "$BASE_ROM"
 
-      - name: Download ROM patch
+      - name: Download test ROM patch
         uses: actions/download-artifact@v8
         with:
-          name: goldeneye-practice-rom-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}
+          name: goldeneye-practice-rom-test-patch-${{ matrix.build.mode }}-${{ matrix.region.slug }}
           path: ${{ runner.temp }}/rom-patch
 
-      - name: Download build metadata
+      - name: Download test build metadata
         uses: actions/download-artifact@v8
         with:
-          name: build-metadata-${{ matrix.build.mode }}-${{ matrix.region.slug }}
+          name: build-metadata-test-${{ matrix.build.mode }}-${{ matrix.region.slug }}
           path: ${{ runner.temp }}/build-metadata
 
       - name: Reconstruct practice ROM from patch
         env:
           BASE_ROM: baserom.${{ matrix.region.code }}.z64
           BUILT_ROM: build/${{ matrix.region.code }}/ge007.${{ matrix.region.code }}.z64
-          PATCH_FILE: ${{ runner.temp }}/rom-patch/${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}.xdelta
+          PATCH_FILE: ${{ runner.temp }}/rom-patch/${{ needs.metadata.outputs.file_prefix }}_${{ matrix.region.slug }}_${{ matrix.build.mode }}_test.xdelta
         run: |
           mkdir -p "$(dirname "$BUILT_ROM")"
           xdelta3 -d -s "$BASE_ROM" "$PATCH_FILE" "$BUILT_ROM"
@@ -547,17 +592,17 @@ jobs:
           test "$(stat --format=%s baserom.e.z64)" -ge 1000000
           test "$(stat --format=%s baserom.j.z64)" -ge 1000000
 
-      - name: Download release ROM patches
+      - name: Download release test ROM patches
         uses: actions/download-artifact@v8
         with:
-          pattern: goldeneye-practice-rom-patch-release-*
+          pattern: goldeneye-practice-rom-test-patch-release-*
           path: ${{ runner.temp }}/rom-patches
           merge-multiple: true
 
-      - name: Download release build metadata
+      - name: Download release test build metadata
         uses: actions/download-artifact@v8
         with:
-          pattern: build-metadata-release-*
+          pattern: build-metadata-test-release-*
           path: ${{ runner.temp }}/build-metadata
 
       - name: Reconstruct regional release ROMs from patches
@@ -569,7 +614,7 @@ jobs:
             slug="${region##*:}"
             base_rom="baserom.$code.z64"
             built_rom="build/$code/ge007.$code.z64"
-            patch_file="$RUNNER_TEMP/rom-patches/${FILE_PREFIX}_${slug}_release.xdelta"
+            patch_file="$RUNNER_TEMP/rom-patches/${FILE_PREFIX}_${slug}_release_test.xdelta"
             mkdir -p "$(dirname "$built_rom")"
             xdelta3 -d -s "$base_rom" "$patch_file" "$built_rom"
             sha256sum --check "$patch_file.sha256"
