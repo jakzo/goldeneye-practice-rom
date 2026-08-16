@@ -11,10 +11,15 @@
 #include "game/objecthandler.h"
 #include "game/player.h"
 #include "game/viewport.h"
+#ifdef PRACTICE_TEST_ROM
+#include <assert.h>
+#include "emu_log.h"
+#endif
 #include "fr.h"
 #include "practice_render.h"
 
 extern s32 object_interaction(PropRecord *prop);
+extern void sub_GAME_7F052D8C(DoorRecord *door);
 extern s32 modelFindNodeMtxIndex(ModelNode *node, s32 arg1);
 extern s32 g_viColorOutputMode;
 
@@ -75,6 +80,10 @@ static u8 g_LoadedFloatHandMatrices;
 static bool g_HasPausedFramebuffer;
 
 static void clear_converted_render_matrices(void);
+static void refresh_object_render_state(PropRecord *prop);
+#ifdef PRACTICE_TEST_ROM
+static void assert_visible_clipped_door_vertices_persistent(void);
+#endif
 
 #define PRACTICE_UI_BACKGROUND_RECT_COUNT 32
 typedef struct PracticeUiBackgroundRect {
@@ -795,6 +804,40 @@ static void clear_converted_render_matrices(void) {
   g_ConvertedHandMatrices = 0;
 }
 
+#ifdef PRACTICE_TEST_ROM
+static void assert_visible_clipped_door_vertices_persistent(void) {
+  PropRecord *prop;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    DoorRecord *door;
+    ModelNode *node;
+    struct ModelRwData_DisplayList_CollisionRecord *rwdata;
+
+    if (!(prop->flags & PROPFLAG_ONSCREEN) ||
+        prop->type != PROP_TYPE_DOOR || prop->door == NULL ||
+        !(prop->door->doorFlags & DOORFLAG_0004) ||
+        prop->door->unkcc == NULL || prop->door->model == NULL ||
+        prop->door->model->obj == NULL) {
+      continue;
+    }
+
+    door = prop->door;
+    node = door->model->obj->RootNode->Child->Child;
+    rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
+        modelGetNodeRwData(door->model, node);
+
+    if (rwdata->Vertices != door->unkcc) {
+      emu_log(
+          "PAUSED_DOOR_RETAINED_FRAME_VERTICES prop=%d vertices=%x cache=%x",
+          prop - pos_data_entry, rwdata->Vertices, door->unkcc);
+      emu_log("TEST_FAILED");
+      assert(FALSE);
+    }
+  }
+}
+#endif
+
 void practice_begin_live_render(void) {
   /* Gameplay/model ticks rebuild float matrices before each live render, so
    * only conversions from this render can describe the buffers a following
@@ -873,6 +916,37 @@ static void initialize_visible_object_tree(PropRecord *prop, s32 depth) {
   }
 }
 
+static void refresh_object_render_state(PropRecord *prop) {
+  object_interaction(prop);
+
+  if (prop->type == PROP_TYPE_DOOR &&
+      (prop->door->doorFlags & DOORFLAG_0004)) {
+    DoorRecord *door = prop->door;
+    Model *model = door->model;
+    ModelNode *node = model->obj->RootNode->Child->Child;
+    struct ModelRoData_DisplayList_CollisionRecord *rodata =
+        (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+    struct ModelRwData_DisplayList_CollisionRecord *rwdata =
+        (struct ModelRwData_DisplayList_CollisionRecord *)
+            modelGetNodeRwData(model, node);
+    s32 vertex;
+
+    /* object_interaction's render-only path rebuilds door matrices but skips
+     * the clipped vertex buffer normally produced by the gameplay tick. The
+     * paused arena is rewound, so that buffer must be current-frame data too.
+     * Copy the result into the door's stage-pool cache immediately: otherwise
+     * the next live stationary-door tick can read the retained arena pointer
+     * after the arena has been reused, then preserve that corruption in
+     * unkcc. */
+    sub_GAME_7F052D8C(door);
+
+    for (vertex = 0; vertex < rodata->numVertices; vertex++) {
+      door->unkcc[vertex] = rwdata->Vertices[vertex];
+    }
+    rwdata->Vertices = door->unkcc;
+  }
+}
+
 void practice_prepare_character_render(PracticeRenderContext *context) {
   PropRecord *prop;
 
@@ -901,6 +975,7 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
          prop->type == PROP_TYPE_WEAPON ||
          prop->type == PROP_TYPE_DOOR) &&
         prop->obj != NULL && prop->obj->model != NULL) {
+      refresh_object_render_state(prop);
       continue;
     }
 
@@ -925,6 +1000,10 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
       prop->zDepth = z_depth;
     }
   }
+
+#ifdef PRACTICE_TEST_ROM
+  assert_visible_clipped_door_vertices_persistent();
+#endif
 }
 
 void practice_prepare_refreshed_render(PracticeRenderContext *context) {
@@ -1006,7 +1085,7 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
          prop->type == PROP_TYPE_DOOR) &&
         prop->obj != NULL && prop->obj->model != NULL) {
       if (prop->flags & PROPFLAG_ONSCREEN) {
-        object_interaction(prop);
+        refresh_object_render_state(prop);
       }
       continue;
     }
@@ -1020,6 +1099,10 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
       chrTickBeams(prop);
     }
   }
+
+#ifdef PRACTICE_TEST_ROM
+  assert_visible_clipped_door_vertices_persistent();
+#endif
 
   chraiUpdateOnscreenPropCount();
 }

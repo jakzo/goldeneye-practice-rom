@@ -24,6 +24,15 @@ bool g_HasSavedState = FALSE;
 static PracticeStorageLocation g_SaveStateStorage = PRACTICE_STORAGE_SRAM;
 
 static u32 get_save_state_storage_offset(void) {
+#ifdef PRACTICE_TEST_ROM
+  /* Cold-restart replay tests carry their boot configuration in ROM, so their
+   * disposable SRAM image can use the practice-config block as well. Keep the
+   * base-game save area intact because the game validates it during boot. */
+  if (g_SaveStateStorage == PRACTICE_STORAGE_SRAM &&
+      practice_tests_uses_config_sram_save_state()) {
+    return CONFIG_SRAM_OFFSET;
+  }
+#endif
   return g_SaveStateStorage == PRACTICE_STORAGE_SRAM ? SAVE_STATE_SRAM_OFFSET
                                                      : 0;
 }

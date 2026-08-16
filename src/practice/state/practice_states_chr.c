@@ -1890,19 +1890,6 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   read_bytes(stream, &chr->prevpos, sizeof(coord3d));
   chr->lastwalk60 = read_u32(stream);
   chr->lastmoveok60 = read_u32(stream);
-  if (chr->prop != NULL) {
-    chr->collision_bounds.f[0] = chr->prop->pos.x + chr->chrwidth;
-    chr->collision_bounds.f[1] = chr->prop->pos.z;
-    chr->collision_bounds.f[2] = chr->prop->pos.x;
-    chr->collision_bounds.f[3] = chr->prop->pos.z + chr->chrwidth;
-    chr->collision_bounds.f[4] = chr->prop->pos.x - chr->chrwidth;
-    chr->collision_bounds.f[5] = chr->prop->pos.z;
-    chr->collision_bounds.f[6] = chr->prop->pos.x;
-    chr->collision_bounds.f[7] = chr->prop->pos.z - chr->chrwidth;
-  } else {
-    bzero(&chr->collision_bounds, sizeof(chr->collision_bounds));
-  }
-
   has_model_transform = read_u8(stream);
   if (has_model_transform) {
     read_bytes(stream, &model_offset, sizeof(coord3d));
@@ -1971,10 +1958,26 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
 
 void load_chr_prop_spatial_state(PropRecord *prop, const coord3d *pos,
                                  s32 stan_offset, const u8 rooms[4]) {
+  ChrRecord *chr = prop->chr;
+
   prop->pos = *pos;
   prop->stan = get_tile_by_offset(stan_offset);
   prop->rooms[0] = rooms[0];
   prop->rooms[1] = rooms[1];
   prop->rooms[2] = rooms[2];
   prop->rooms[3] = rooms[3];
+
+  /* collision_bounds is derived from the prop position, but the CHR payload
+   * loads before the prop's saved spatial state. Rebuild it only after the
+   * saved position is installed so collision tests do not use stale bounds. */
+  if (chr != NULL) {
+    chr->collision_bounds.f[0] = prop->pos.x + chr->chrwidth;
+    chr->collision_bounds.f[1] = prop->pos.z;
+    chr->collision_bounds.f[2] = prop->pos.x;
+    chr->collision_bounds.f[3] = prop->pos.z + chr->chrwidth;
+    chr->collision_bounds.f[4] = prop->pos.x - chr->chrwidth;
+    chr->collision_bounds.f[5] = prop->pos.z;
+    chr->collision_bounds.f[6] = prop->pos.x;
+    chr->collision_bounds.f[7] = prop->pos.z - chr->chrwidth;
+  }
 }

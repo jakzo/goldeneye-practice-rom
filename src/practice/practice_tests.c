@@ -248,6 +248,38 @@ static u32 replay_chr_hidden_hash(void) {
   return hash;
 }
 
+static bool replay_visible_clipped_doors_use_persistent_vertices(void) {
+  PropRecord *prop;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    DoorRecord *door;
+    Model *model;
+    ModelNode *node;
+    struct ModelRwData_DisplayList_CollisionRecord *rwdata;
+
+    if (!(prop->flags & PROPFLAG_ONSCREEN) ||
+        prop->type != PROP_TYPE_DOOR || prop->door == NULL ||
+        !(prop->door->doorFlags & DOORFLAG_0004)) {
+      continue;
+    }
+
+    door = prop->door;
+    model = door->model;
+    node = model->obj->RootNode->Child->Child;
+    rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
+        modelGetNodeRwData(model, node);
+
+    if (rwdata->Vertices != door->unkcc) {
+      emu_log("PAUSED_DOOR_RETAINED_FRAME_VERTICES prop=%d vertices=%x cache=%x",
+              prop - pos_data_entry, rwdata->Vertices, door->unkcc);
+      return FALSE;
+    }
+  }
+
+  return TRUE;
+}
+
 /* Test cases are mutually exclusive, so the replay save-state test can reuse
  * existing replay-test bookkeeping instead of reserving more release BSS. */
 #define g_RunwaySaveStateTarget g_mission_timer_start
@@ -308,6 +340,11 @@ static s32 replay_state_duration_frames(void) {
 
 void practice_tests_set_restart_save_state_mode(s32 enabled) {
   g_ReplayRestartSaveStateMode = enabled;
+}
+
+s32 practice_tests_uses_config_sram_save_state(void) {
+  return g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
+         g_ReplayRestartSaveStateMode;
 }
 
 void practice_tests_set_case(s32 test_case, s32 test_param) {
@@ -2229,6 +2266,12 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_AFTER_LOAD;
     break;
   case REPLAY_STATE_HOLD_AFTER_LOAD:
+    if (g_RunwaySaveStatePausedFrames > 0 &&
+        !replay_visible_clipped_doors_use_persistent_vertices()) {
+      emu_log("TEST_FAILED");
+      g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+      break;
+    }
     if (g_RunwaySaveStatePausedFrames == 0) {
       if (!g_IsTimePaused) {
         emu_log("RUNWAY_STATE_NOT_PAUSED timestamp=%d",

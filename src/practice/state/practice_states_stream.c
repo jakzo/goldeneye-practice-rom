@@ -118,9 +118,14 @@ static void storage_stream_write_bytes_impl(StateStream *stream,
           bytes_written < size &&
           size - bytes_written < STORAGE_PAGE_SIZE) {
         StorageCursor cursor;
+        u32 page_size = STORAGE_PAGE_SIZE;
+
+        if (page_size > capacity - storage->current_page_addr) {
+          page_size = capacity - storage->current_page_addr;
+        }
         storage_cursor_init(&cursor, storage->location,
                             storage->current_page_addr);
-        storage_read(&cursor, storage->page, STORAGE_PAGE_SIZE);
+        storage_read(&cursor, storage->page, page_size);
         storage->error |= cursor.error;
       }
     }

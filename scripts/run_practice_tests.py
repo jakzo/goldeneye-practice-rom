@@ -33,6 +33,7 @@ REPLAY_MAGIC = 0x47455250
 REPLAY_REGIONS = {"US": 1, "JP": 2, "EU": 3}
 SAVE_STATE_MAGIC = 0x47455353
 TEST_SAVE_STATE_SRAM_OFFSET = 0x280
+RESTART_SAVE_STATE_SRAM_OFFSET = 0x200
 TEST_REPLAY_ROM_OFFSET = 0x00FE0000
 ROM_CONFIG_OFFSET = 0x00FFFFC0
 ROM_CONFIG_FLAG_RESTART_SAVE_STATE_TEST = 0x2
@@ -883,15 +884,15 @@ def run_restart_save_state_test_case(
             sram = bytearray(rom.with_suffix(".ram").read_bytes())
             if len(sram) != SRAM_SIZE_BYTES:
                 raise ValueError(f"SRAM has {len(sram)} bytes")
-            if len(state) > SRAM_SIZE_BYTES - TEST_SAVE_STATE_SRAM_OFFSET:
+            if len(state) > SRAM_SIZE_BYTES - RESTART_SAVE_STATE_SRAM_OFFSET:
                 raise ValueError(
                     f"state is too large for SRAM: {len(state)} bytes"
                 )
-            sram[TEST_SAVE_STATE_SRAM_OFFSET:] = bytes(
-                SRAM_SIZE_BYTES - TEST_SAVE_STATE_SRAM_OFFSET
+            sram[RESTART_SAVE_STATE_SRAM_OFFSET:] = bytes(
+                SRAM_SIZE_BYTES - RESTART_SAVE_STATE_SRAM_OFFSET
             )
-            state_end = TEST_SAVE_STATE_SRAM_OFFSET + len(state)
-            sram[TEST_SAVE_STATE_SRAM_OFFSET:state_end] = state
+            state_end = RESTART_SAVE_STATE_SRAM_OFFSET + len(state)
+            sram[RESTART_SAVE_STATE_SRAM_OFFSET:state_end] = state
             rom.with_suffix(".ram").write_bytes(sram)
         except (OSError, ValueError) as error:
             return TestResult(
@@ -902,7 +903,7 @@ def run_restart_save_state_test_case(
                 "".join(combined_output),
             )
         state_header = sram[
-            TEST_SAVE_STATE_SRAM_OFFSET : TEST_SAVE_STATE_SRAM_OFFSET + 16
+            RESTART_SAVE_STATE_SRAM_OFFSET : RESTART_SAVE_STATE_SRAM_OFFSET + 16
         ]
         if int.from_bytes(
             state_header[:4], "big"
@@ -917,7 +918,7 @@ def run_restart_save_state_test_case(
         state_size = int.from_bytes(state_header[12:16], "big")
         if state_size == 0:
             state_size = int.from_bytes(state_header[6:8], "big")
-        if state_size > SRAM_SIZE_BYTES - TEST_SAVE_STATE_SRAM_OFFSET:
+        if state_size > SRAM_SIZE_BYTES - RESTART_SAVE_STATE_SRAM_OFFSET:
             return TestResult(
                 test_case,
                 False,
