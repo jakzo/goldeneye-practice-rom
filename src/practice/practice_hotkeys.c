@@ -78,12 +78,19 @@ void practice_check_hotkeys(s32 pending_gfx_tasks) {
 
     if (pressed & A_BUTTON) {
       if (practice_freecam_is_active()) {
+        practice_freecam_clear_pinned_camera();
         practice_freecam_disable();
-        unpause();
         practiceLogInfo("Freecam disabled");
       } else if (practice_freecam_enable(action_controller)) {
         practiceLogInfo("Freecam enabled");
       }
+      return;
+    }
+
+    if ((pressed & B_BUTTON) && practice_freecam_is_active()) {
+      practice_freecam_pin_camera();
+      practice_freecam_disable();
+      practiceLogInfo("Freecam view pinned");
       return;
     }
 

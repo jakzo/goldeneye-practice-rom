@@ -1082,6 +1082,79 @@ static void initialize_character_matrices(ChrRecord *chr) {
   }
 }
 
+static void initialize_missing_character_matrices(ChrRecord *chr) {
+  s32 hand;
+
+  if (chr->model != NULL && chr->model->render_pos == NULL)
+    initialize_model_matrices(chr->model);
+
+  for (hand = 0; hand < 2; hand++) {
+    PropRecord *held = chr->weapons_held[hand];
+
+    if (held != NULL && held->obj != NULL && held->obj->model != NULL &&
+        held->obj->model->render_pos == NULL) {
+      initialize_model_matrices(held->obj->model);
+    }
+  }
+
+  if (chr->handle_positiondata_hat != NULL &&
+      chr->handle_positiondata_hat->obj != NULL &&
+      chr->handle_positiondata_hat->obj->model != NULL &&
+      chr->handle_positiondata_hat->obj->model->render_pos == NULL) {
+    initialize_model_matrices(chr->handle_positiondata_hat->obj->model);
+  }
+}
+
+static void clear_prop_tree_render_positions(PropRecord *prop, s32 depth) {
+  PropRecord *child;
+  s32 child_guard = 0;
+  s32 hand;
+
+  if (prop == NULL || depth >= POS_DATA_ENTRY_LEN)
+    return;
+
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL && prop->obj->model != NULL) {
+    prop->obj->model->render_pos = NULL;
+  } else if ((prop->type == PROP_TYPE_CHR ||
+              prop->type == PROP_TYPE_VIEWER) &&
+             prop->chr != NULL) {
+    ChrRecord *chr = prop->chr;
+
+    if (chr->model != NULL)
+      chr->model->render_pos = NULL;
+
+    for (hand = 0; hand < 2; hand++) {
+      PropRecord *held = chr->weapons_held[hand];
+
+      if (held != NULL && held->obj != NULL && held->obj->model != NULL)
+        held->obj->model->render_pos = NULL;
+    }
+
+    if (chr->handle_positiondata_hat != NULL &&
+        chr->handle_positiondata_hat->obj != NULL &&
+        chr->handle_positiondata_hat->obj->model != NULL) {
+      chr->handle_positiondata_hat->obj->model->render_pos = NULL;
+    }
+  }
+
+  for (child = prop->child;
+       child != NULL && child_guard++ < POS_DATA_ENTRY_LEN;
+       child = child->prev) {
+    clear_prop_tree_render_positions(child, depth + 1);
+  }
+}
+
+static void clear_active_model_render_positions(void) {
+  PropRecord *prop;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    clear_prop_tree_render_positions(prop, 0);
+  }
+}
+
 static bool prop_or_ancestor_is_onscreen(PropRecord *prop) {
   s32 guard = 0;
 
@@ -1112,6 +1185,29 @@ static void initialize_visible_object_tree(PropRecord *prop, s32 depth) {
        child != NULL && child_guard++ < POS_DATA_ENTRY_LEN;
        child = child->prev) {
     initialize_visible_object_tree(child, depth + 1);
+  }
+}
+
+static void initialize_missing_visible_model_tree(PropRecord *prop,
+                                                  s32 depth) {
+  PropRecord *child;
+  s32 child_guard = 0;
+
+  if (prop == NULL || depth >= POS_DATA_ENTRY_LEN)
+    return;
+
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL && prop->obj->model != NULL &&
+      prop->obj->model->render_pos == NULL &&
+      prop_or_ancestor_is_onscreen(prop)) {
+    initialize_model_matrices(prop->obj->model);
+  }
+
+  for (child = prop->child;
+       child != NULL && child_guard++ < POS_DATA_ENTRY_LEN;
+       child = child->prev) {
+    initialize_missing_visible_model_tree(child, depth + 1);
   }
 }
 
@@ -1164,7 +1260,13 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
    * the pool when it is restored. */
   save_joint_pool(context);
   save_model_render_positions(context, FALSE);
-  prepare_freecam_prop_visibility(context);
+
+  /* Models not visible to the previous camera can become visible during the
+   * synthetic pass. Their retained render_pos points into an earlier paused
+   * arena generation, which may now contain this frame's saved state. Make
+   * the dispatcher either rebuild them or leave an explicit NULL for the
+   * post-dispatch completion pass below. */
+  clear_active_model_render_positions();
 
   /* Attached child props are delisted, but a visible ancestor can still
    * render their models recursively. Give those models current-arena storage
@@ -1172,6 +1274,20 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
     initialize_visible_object_tree(prop, 0);
+  }
+
+  /* Visibility preparation may update existing model buffers. Do it only
+   * after replacing pointers into the rewound paused arena. */
+  prepare_freecam_prop_visibility(context);
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    initialize_missing_visible_model_tree(prop, 0);
+    if ((prop->flags & PROPFLAG_ONSCREEN) &&
+        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL) {
+      initialize_missing_character_matrices(prop->chr);
+    }
   }
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
@@ -1251,7 +1367,7 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
 
         /*
          * Rewinding the paused render arena can make new_render_pos equal
-         * old_render_pos.  guMtxL2F is not safe when its input and output
+         * old_render_pos. guMtxL2F is not safe when its input and output
          * overlap, so finish reading the fixed matrix into stack storage
          * before writing the restored float matrix back to the arena.
          */
@@ -1278,7 +1394,29 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
    */
   save_joint_pool(context);
   save_model_render_positions(context, FALSE);
+
+  clear_active_model_render_positions();
+
+  /* The restored/freecam visibility dispatcher can write through model
+   * render_pos before deciding whether to relist a prop. Ensure currently
+   * visible object trees cannot alias the temporary monitor snapshot which
+   * the dispatcher saves immediately below. */
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    initialize_visible_object_tree(prop, 0);
+  }
+
   prepare_refreshed_prop_visibility(context);
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    initialize_missing_visible_model_tree(prop, 0);
+    if ((prop->flags & PROPFLAG_ONSCREEN) &&
+        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL) {
+      initialize_missing_character_matrices(prop->chr);
+    }
+  }
 
   /* The zero-time dispatcher above has already ticked every active prop once,
    * establishing visibility and current-arena matrices just as the ordinary

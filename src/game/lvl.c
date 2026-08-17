@@ -1044,6 +1044,16 @@ Gfx* lvlRender(Gfx* DL)
                 {
                     DL = sub_GAME_7F087A08(DL);
                 }
+                else if (practice_freecam_consume_camera_restore())
+                {
+                    bool saved_render_only = g_IsRenderOnly;
+
+                    /* Exiting freecam while remaining paused still needs one
+                     * normal camera build before culling can reuse it. */
+                    g_IsRenderOnly = TRUE;
+                    DL = sub_GAME_7F087A08(DL);
+                    g_IsRenderOnly = saved_render_only;
+                }
                 else if (camGetWorldToScreenMtxf() == NULL)
                 {
                     continue;
@@ -1207,14 +1217,28 @@ Gfx* lvlRender(Gfx* DL)
 #endif
 
 #ifdef PRACTICE_ROM
-        if (speedgraphframes != 0 &&
+        if (!practice_freecam_is_active() &&
             g_CurrentPlayer->watch_animation_state != WATCH_ANIMATION_0x5)
         {
+            bool has_pinned_freecam;
+
             practice_external_camera_begin_frame();
-            practice_dam_guard_cam_tick();
-            practice_frigate_hostage_cam_tick();
-            practice_grenade_cam_tick();
-            DL = practice_external_camera_render(DL);
+            has_pinned_freecam = practice_freecam_add_pinned_camera_view();
+
+            if (speedgraphframes != 0)
+            {
+                practice_dam_guard_cam_tick();
+                practice_frigate_hostage_cam_tick();
+                practice_grenade_cam_tick();
+            }
+
+            /* Pinning invalidates the paused framebuffer, so render the new
+             * PIP once into the replacement cached frame. Other external
+             * cameras remain live-only while gameplay is paused. */
+            if (speedgraphframes != 0 || has_pinned_freecam)
+            {
+                DL = practice_external_camera_render(DL);
+            }
         }
         if (speedgraphframes == 0)
         {
