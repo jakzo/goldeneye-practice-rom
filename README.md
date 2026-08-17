@@ -45,6 +45,11 @@
         - If you can reliably reproduce the crash, let me know so I can fix it (@jakzo on Discord)
     - "Why don't things play out the exact same way when I load state then leave the game alone?"
         - The game doesn't run with the **exact** same performance each time after restoring state and this causes the random number generator to become out of sync which means anything using randomness in the game (everything from visuals to collisions) will diverge
+- **Freecam**
+    - During gameplay press `L + A` to enable or disable freecam
+    - Gameplay remains paused and ignores controller input while freecam is active, then resumes with the normal camera when freecam is disabled
+    - Use the stick to look around; use either the C-buttons or D-pad to move forward/back and strafe
+    - Hold the shoulder trigger to move up, and Z to move down
 - **Replays**
     - On a level's briefing screen, set `Replay next level` to `Record` to record the next attempt
     - After a recording exists for that level, set it to `Playback` to replay the saved inputs, frame timing, control option changes, and initial random seeds

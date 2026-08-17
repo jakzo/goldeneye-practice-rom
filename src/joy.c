@@ -120,6 +120,11 @@ u32 g_ContBadReadsButtonsPressed[MAXCONTROLLERS] = {0};
 
 s32 g_ContBadReadTimer60 = 0; // Static variable?
 
+#ifdef PRACTICE_ROM
+static s32 g_PracticeInputSuppressed = FALSE;
+static s32 g_PracticeInputSuppressionBypass = FALSE;
+#endif
+
 void joyInit(void)
 {
     s32 i;
@@ -826,6 +831,13 @@ s8 joyGetStickX(s8 contpadnum)
     assert(contpadnum > 0); //j
 #endif
 
+#ifdef PRACTICE_ROM
+    if (g_PracticeInputSuppressed && !g_PracticeInputSuppressionBypass)
+    {
+        return 0;
+    }
+#endif
+
     if ((g_ContDataPtr->playbackcontcount < 0) && ((g_ConnectedControllers >> contpadnum & 1) == 0))
     {
         g_ContBadReadsStickX[contpadnum]++;
@@ -843,6 +855,13 @@ s8 joyGetStickX(s8 contpadnum)
 //duplicate?
 s8 joy7000C174(s8 contpadnum)
 {
+#ifdef PRACTICE_ROM
+    if (g_PracticeInputSuppressed && !g_PracticeInputSuppressionBypass)
+    {
+        return 0;
+    }
+#endif
+
     if ((g_ContDataPtr->playbackcontcount < 0) && ((g_ConnectedControllers >> contpadnum & 1) == 0))
     {
         g_ContBadReadsStickX[contpadnum]++;
@@ -854,6 +873,13 @@ s8 joy7000C174(s8 contpadnum)
 
 s8 joyGetStickY(s8 contpadnum)
 {
+#ifdef PRACTICE_ROM
+    if (g_PracticeInputSuppressed && !g_PracticeInputSuppressionBypass)
+    {
+        return 0;
+    }
+#endif
+
     if ((g_ContDataPtr->playbackcontcount < 0) && ((g_ConnectedControllers >> contpadnum & 1) == 0))
     {
         g_ContBadReadsStickY[contpadnum]++;
@@ -871,6 +897,13 @@ s8 joyGetStickY(s8 contpadnum)
 
 s8 joy7000C284(s8 contpadnum)
 {
+#ifdef PRACTICE_ROM
+    if (g_PracticeInputSuppressed && !g_PracticeInputSuppressionBypass)
+    {
+        return 0;
+    }
+#endif
+
     if ((g_ContDataPtr->playbackcontcount < 0) && ((g_ConnectedControllers >> contpadnum & 1) == 0))
     {
         g_ContBadReadsStickY[contpadnum]++;
@@ -892,10 +925,25 @@ void joyUpdateSimulatedButtons(void) {
     g_SimulatedButtonsPressed = g_SimulatedButtons & ~g_PrevSimulatedButtons;
     g_PrevSimulatedButtons = g_SimulatedButtons;
 }
+
+void joySetInputSuppressed(s32 suppressed) {
+    g_PracticeInputSuppressed = suppressed;
+}
+
+s32 joyIsInputSuppressed(void) {
+    return g_PracticeInputSuppressed;
+}
 #endif
 
 u16 joyGetButtons(s8 contpadnum, u16 mask)
 {
+#ifdef PRACTICE_ROM
+    if (g_PracticeInputSuppressed && !g_PracticeInputSuppressionBypass)
+    {
+        return 0;
+    }
+#endif
+
     if ((g_ContDataPtr->playbackcontcount < 0) && ((g_ConnectedControllers >> contpadnum & 1) == 0))
     {
         g_ContBadReadsButtons[contpadnum]++;
@@ -918,6 +966,13 @@ u16 joyGetButtons(s8 contpadnum, u16 mask)
 
 u16 joyGetButtonsPressedThisFrame(s8 contpadnum, u16 mask)
 {
+#ifdef PRACTICE_ROM
+    if (g_PracticeInputSuppressed && !g_PracticeInputSuppressionBypass)
+    {
+        return 0;
+    }
+#endif
+
     if ((g_ContDataPtr->playbackcontcount < 0) && ((g_ConnectedControllers >> contpadnum & 1) == 0))
     {
         g_ContBadReadsButtonsPressed[contpadnum]++;
@@ -937,6 +992,44 @@ u16 joyGetButtonsPressedThisFrame(s8 contpadnum, u16 mask)
     return g_ContDataPtr->buttonspressed[contpadnum] & mask;
 #endif
 }
+
+#ifdef PRACTICE_ROM
+s8 joyGetStickXRaw(s8 contpadnum)
+{
+    s8 value;
+    g_PracticeInputSuppressionBypass = TRUE;
+    value = joyGetStickX(contpadnum);
+    g_PracticeInputSuppressionBypass = FALSE;
+    return value;
+}
+
+s8 joyGetStickYRaw(s8 contpadnum)
+{
+    s8 value;
+    g_PracticeInputSuppressionBypass = TRUE;
+    value = joyGetStickY(contpadnum);
+    g_PracticeInputSuppressionBypass = FALSE;
+    return value;
+}
+
+u16 joyGetButtonsRaw(s8 contpadnum, u16 mask)
+{
+    u16 value;
+    g_PracticeInputSuppressionBypass = TRUE;
+    value = joyGetButtons(contpadnum, mask);
+    g_PracticeInputSuppressionBypass = FALSE;
+    return value;
+}
+
+u16 joyGetButtonsPressedThisFrameRaw(s8 contpadnum, u16 mask)
+{
+    u16 value;
+    g_PracticeInputSuppressionBypass = TRUE;
+    value = joyGetButtonsPressedThisFrame(contpadnum, mask);
+    g_PracticeInputSuppressionBypass = FALSE;
+    return value;
+}
+#endif
 
 void joy7000C430(s8 *bytes, u16 bitfield)
 {

@@ -754,11 +754,19 @@ static void practice_replay_record_callback(struct contsample *samples,
 
   frame.random_seed = g_randomSeed;
   frame.chr_obj_random_seed = g_chrObjRandomSeed;
-  frame.buttons = samples[end_idx].pads[0].button | g_SimulatedButtons;
-  frame.stick_x = g_SimulatedStickEnabled ? g_SimulatedStickX
-                                          : samples[end_idx].pads[0].stick_x;
-  frame.stick_y = g_SimulatedStickEnabled ? g_SimulatedStickY
-                                          : samples[end_idx].pads[0].stick_y;
+  frame.buttons = joyIsInputSuppressed()
+                      ? 0
+                      : samples[end_idx].pads[0].button | g_SimulatedButtons;
+  frame.stick_x = joyIsInputSuppressed()
+                      ? 0
+                      : (g_SimulatedStickEnabled
+                             ? g_SimulatedStickX
+                             : samples[end_idx].pads[0].stick_x);
+  frame.stick_y = joyIsInputSuppressed()
+                      ? 0
+                      : (g_SimulatedStickEnabled
+                             ? g_SimulatedStickY
+                             : samples[end_idx].pads[0].stick_y);
   frame.delta_frames = speedgraphframes;
   write_frame(&g_ReplayDma.writer, &frame);
   if (g_ReplayDma.writer.failed) {

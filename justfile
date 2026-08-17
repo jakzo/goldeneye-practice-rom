@@ -46,7 +46,7 @@ make-clean: reset
 
 # Incrementally build the custom ares submodule used by host-side recipes.
 build-ares:
-    cd ares && DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --preset macos
+    cd ares && DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --preset macos -DARES_CORES=n64 -DARES_BUILD_OPTIONAL_TARGETS=OFF
     DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}" cmake --build ares/build_macos --config Release --parallel {{ num_cpus() }}
 
 ares: build-ares

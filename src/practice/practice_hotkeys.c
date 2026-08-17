@@ -2,6 +2,7 @@
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
+#include "practice_freecam.h"
 #include "practice_replay.h"
 #include "practice_splits.h"
 #include "practice_timescale.h"
@@ -34,9 +35,11 @@ void practice_check_hotkeys(s32 pending_gfx_tasks) {
   if (g_ReplayIsPlaying)
     joySetContDataIndex(0);
 
+  practice_freecam_tick(trigger);
+
   for (controller = 0; controller < MAXCONTROLLERS; controller++) {
-    u16 buttons = joyGetButtons(controller, ANY_BUTTON);
-    u16 pressed = joyGetButtonsPressedThisFrame(controller, ANY_BUTTON);
+    u16 buttons = joyGetButtonsRaw(controller, ANY_BUTTON);
+    u16 pressed = joyGetButtonsPressedThisFrameRaw(controller, ANY_BUTTON);
 
     if (buttons & trigger) {
       trigger_held = TRUE;
@@ -58,7 +61,7 @@ void practice_check_hotkeys(s32 pending_gfx_tasks) {
   }
 
   if (!trigger_held) {
-    if (g_IsTimePaused)
+    if (g_IsTimePaused && !practice_freecam_is_active())
       unpause();
     return;
   }
@@ -68,9 +71,21 @@ void practice_check_hotkeys(s32 pending_gfx_tasks) {
 
     if (g_ReplayIsPlaying)
       joySetContDataIndex(0);
-    pressed = joyGetButtonsPressedThisFrame(action_controller, ANY_BUTTON);
+    pressed =
+        joyGetButtonsPressedThisFrameRaw(action_controller, ANY_BUTTON);
     if (g_ReplayIsPlaying)
       joySetContDataIndex(1);
+
+    if (pressed & A_BUTTON) {
+      if (practice_freecam_is_active()) {
+        practice_freecam_disable();
+        unpause();
+        practiceLogInfo("Freecam disabled");
+      } else if (practice_freecam_enable(action_controller)) {
+        practiceLogInfo("Freecam enabled");
+      }
+      return;
+    }
 
     if (pressed & D_JPAD) {
       save_game_state();

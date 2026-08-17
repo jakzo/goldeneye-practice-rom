@@ -52,6 +52,12 @@ extern s8 g_SimulatedStickX;
 extern s8 g_SimulatedStickY;
 extern s32 g_SimulatedStickEnabled;
 void joyUpdateSimulatedButtons(void);
+void joySetInputSuppressed(s32 suppressed);
+s32 joyIsInputSuppressed(void);
+s8 joyGetStickXRaw(s8 contpadnum);
+s8 joyGetStickYRaw(s8 contpadnum);
+u16 joyGetButtonsRaw(s8 contpadnum, u16 mask);
+u16 joyGetButtonsPressedThisFrameRaw(s8 contpadnum, u16 mask);
 #endif
 
 #endif
