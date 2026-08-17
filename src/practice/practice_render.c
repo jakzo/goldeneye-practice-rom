@@ -16,6 +16,8 @@
 #include "emu_log.h"
 #endif
 #include "fr.h"
+#include "practice_external_camera.h"
+#include "practice_freecam.h"
 #include "practice_render.h"
 
 extern s32 object_interaction(PropRecord *prop);
@@ -73,11 +75,23 @@ static Mtx g_LoadedRoomProjectionMatrix;
 static bool g_HasLoadedProjectionMatrix;
 static bool g_HasLoadedRoomProjectionMatrix;
 static PracticeRenderWatchState g_PausedWatchState;
-static u8 g_PausedPropOnscreen[(POS_DATA_ENTRY_LEN + 7) / 8];
 static u8 g_ConvertedPropMatrices[(POS_DATA_ENTRY_LEN + 7) / 8];
 static u8 g_ConvertedHandMatrices;
 static u8 g_LoadedFloatHandMatrices;
 static bool g_HasPausedFramebuffer;
+
+#define PRACTICE_PROP_STATE_BITMAP_SIZE ((POS_DATA_ENTRY_LEN + 7) / 8)
+
+typedef struct PracticePausedPropState {
+  u8 onscreen[PRACTICE_PROP_STATE_BITMAP_SIZE];
+  u8 offscreen_patrol[PRACTICE_PROP_STATE_BITMAP_SIZE];
+  u8 has_been_seen[PRACTICE_PROP_STATE_BITMAP_SIZE];
+} PracticePausedPropState;
+
+typedef struct PracticePausedMonitorState {
+  MonitorRecord *monitor;
+  MonitorRecord state;
+} PracticePausedMonitorState;
 
 static void clear_converted_render_matrices(void);
 static void refresh_object_render_state(PropRecord *prop);
@@ -424,26 +438,191 @@ static void restore_watch_state(PracticeRenderContext *context) {
   D_800409D8 = saved->unknown_409D8;
 }
 
-static void save_prop_onscreen_state(void) {
+static void save_prop_visibility_state(PracticeRenderContext *context) {
+  PracticePausedPropState *state = dynAllocate(sizeof(*state));
   s32 i;
 
-  bzero(g_PausedPropOnscreen, sizeof(g_PausedPropOnscreen));
+  bzero(state, sizeof(*state));
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
-    if (pos_data_entry[i].flags & PROPFLAG_ONSCREEN)
-      g_PausedPropOnscreen[i >> 3] |= 1 << (i & 7);
+    PropRecord *prop = &pos_data_entry[i];
+    u8 bit = 1 << (i & 7);
+
+    if (prop->flags & PROPFLAG_ONSCREEN)
+      state->onscreen[i >> 3] |= bit;
+    if (prop->type == PROP_TYPE_CHR && prop->chr != NULL) {
+      if (prop->chr->hidden & CHRHIDDEN_OFFSCREEN_PATROL)
+        state->offscreen_patrol[i >> 3] |= bit;
+      if (prop->chr->chrflags & CHRFLAG_HAS_BEEN_ON_SCREEN)
+        state->has_been_seen[i >> 3] |= bit;
+    }
   }
+
+  context->prop_visibility_state = state;
 }
 
-static void restore_prop_onscreen_state(void) {
+static void restore_prop_visibility_state(PracticeRenderContext *context) {
+  PracticePausedPropState *state = context->prop_visibility_state;
   s32 i;
 
+  if (state == NULL)
+    return;
+
   for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
-    pos_data_entry[i].flags &= ~PROPFLAG_ONSCREEN;
-    if (g_PausedPropOnscreen[i >> 3] & (1 << (i & 7)))
-      pos_data_entry[i].flags |= PROPFLAG_ONSCREEN;
+    PropRecord *prop = &pos_data_entry[i];
+    u8 bit = 1 << (i & 7);
+
+    if (state->onscreen[i >> 3] & bit)
+      prop->flags |= PROPFLAG_ONSCREEN;
+    else
+      prop->flags &= ~PROPFLAG_ONSCREEN;
+
+    if (prop->type == PROP_TYPE_CHR && prop->chr != NULL) {
+      if (state->offscreen_patrol[i >> 3] & bit)
+        prop->chr->hidden |= CHRHIDDEN_OFFSCREEN_PATROL;
+      else
+        prop->chr->hidden &= ~CHRHIDDEN_OFFSCREEN_PATROL;
+      if (state->has_been_seen[i >> 3] & bit)
+        prop->chr->chrflags |= CHRFLAG_HAS_BEEN_ON_SCREEN;
+      else
+        prop->chr->chrflags &= ~CHRFLAG_HAS_BEEN_ON_SCREEN;
+    }
   }
 
   chraiUpdateOnscreenPropCount();
+}
+
+static s32 count_monitor_states_for_prop(PropRecord *prop) {
+  PropRecord *child;
+  s32 count = 0;
+
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL) {
+    if (prop->obj->type == PROPDEF_MONITOR)
+      count++;
+    else if (prop->obj->type == PROPDEF_MULTI_MONITOR)
+      count += 4;
+  }
+  for (child = prop->child; child != NULL; child = child->prev)
+    count += count_monitor_states_for_prop(child);
+  return count;
+}
+
+static void save_monitor_states_for_prop(PracticePausedMonitorState *states,
+                                         s32 *count, PropRecord *prop) {
+  PropRecord *child;
+  s32 i;
+
+  if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_WEAPON ||
+       prop->type == PROP_TYPE_DOOR) &&
+      prop->obj != NULL) {
+    if (prop->obj->type == PROPDEF_MONITOR) {
+      MonitorObjRecord *monitor = (MonitorObjRecord *)prop->obj;
+      states[*count].monitor = &monitor->Monitor;
+      states[*count].state = monitor->Monitor;
+      (*count)++;
+    } else if (prop->obj->type == PROPDEF_MULTI_MONITOR) {
+      MultiMonitorObjRecord *monitor = (MultiMonitorObjRecord *)prop->obj;
+      for (i = 0; i < 4; i++) {
+        states[*count].monitor = &monitor->Monitor[i];
+        states[*count].state = monitor->Monitor[i];
+        (*count)++;
+      }
+    }
+  }
+  for (child = prop->child; child != NULL; child = child->prev)
+    save_monitor_states_for_prop(states, count, child);
+}
+
+static void save_monitor_states(PracticeRenderContext *context) {
+  PracticePausedMonitorState *states;
+  PropRecord *prop;
+  s32 count = 0;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev)
+    count += count_monitor_states_for_prop(prop);
+
+  context->monitor_states = NULL;
+  context->monitor_state_count = 0;
+  if (count == 0)
+    return;
+
+  states = dynAllocate(count * sizeof(*states));
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev)
+    save_monitor_states_for_prop(states, &context->monitor_state_count, prop);
+  context->monitor_states = states;
+}
+
+static void restore_monitor_states(PracticeRenderContext *context) {
+  PracticePausedMonitorState *states = context->monitor_states;
+  s32 i;
+
+  for (i = 0; states != NULL && i < context->monitor_state_count; i++)
+    *states[i].monitor = states[i].state;
+}
+
+static void prepare_freecam_player_state(PracticeRenderContext *context) {
+  coord3d *position;
+  StandTile *tile;
+
+  context->freecam_render = FALSE;
+  context->monitor_states = NULL;
+  context->monitor_state_count = 0;
+
+  if (g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL ||
+      !practice_freecam_get_render_context(NULL, &position, &tile) ||
+      position == NULL || tile == NULL) {
+    return;
+  }
+
+  context->saved_player_pos = g_CurrentPlayer->pos;
+  context->saved_player_pos3 = g_CurrentPlayer->pos3;
+  context->saved_collision_pos = g_CurrentPlayer->field_488.pos;
+  context->saved_collision_pos3 = g_CurrentPlayer->field_488.pos3;
+  context->saved_room_pointer = g_CurrentPlayer->room_pointer;
+  context->saved_portal_tile =
+      g_CurrentPlayer->field_488.current_tile_ptr_for_portals;
+  context->saved_player_prop_pos = g_CurrentPlayer->prop->pos;
+  context->saved_player_prop_stan = g_CurrentPlayer->prop->stan;
+
+  g_CurrentPlayer->pos = *position;
+  g_CurrentPlayer->pos3 = *position;
+  g_CurrentPlayer->field_488.pos = *position;
+  g_CurrentPlayer->field_488.pos3 = *position;
+  g_CurrentPlayer->room_pointer = tile;
+  g_CurrentPlayer->field_488.current_tile_ptr_for_portals = tile;
+  g_CurrentPlayer->prop->pos = *position;
+  g_CurrentPlayer->prop->stan = tile;
+
+  context->freecam_render = TRUE;
+  save_monitor_states(context);
+}
+
+static void prepare_freecam_prop_visibility(PracticeRenderContext *context) {
+  if (!context->freecam_render)
+    return;
+
+  practice_external_camera_set_rendering(TRUE);
+  practice_external_camera_prepare_props(TRUE);
+  chraiUpdateOnscreenPropCount();
+}
+
+static void restore_freecam_player_state(PracticeRenderContext *context) {
+  if (!context->freecam_render)
+    return;
+
+  g_CurrentPlayer->pos = context->saved_player_pos;
+  g_CurrentPlayer->pos3 = context->saved_player_pos3;
+  g_CurrentPlayer->field_488.pos = context->saved_collision_pos;
+  g_CurrentPlayer->field_488.pos3 = context->saved_collision_pos3;
+  g_CurrentPlayer->room_pointer = context->saved_room_pointer;
+  g_CurrentPlayer->field_488.current_tile_ptr_for_portals =
+      context->saved_portal_tile;
+  g_CurrentPlayer->prop->pos = context->saved_player_prop_pos;
+  g_CurrentPlayer->prop->stan = context->saved_player_prop_stan;
+  practice_external_camera_set_rendering(FALSE);
 }
 
 void practice_prepare_paused_render_state(PracticeRenderContext *context) {
@@ -463,7 +642,8 @@ void practice_prepare_paused_render_state(PracticeRenderContext *context) {
   context->current_model_pos = g_CurrentPlayer->current_model_pos;
   context->previous_model_pos = g_CurrentPlayer->previous_model_pos;
   context->current_room_pos = g_CurrentPlayer->current_room_pos;
-  save_prop_onscreen_state();
+  save_prop_visibility_state(context);
+  prepare_freecam_player_state(context);
   save_watch_state(context);
 }
 
@@ -959,6 +1139,7 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
    * the pool when it is restored. */
   save_joint_pool(context);
   save_model_render_positions(context, FALSE);
+  prepare_freecam_prop_visibility(context);
 
   /* Attached child props are delisted, but a visible ancestor can still
    * render their models recursively. Give those models current-arena storage
@@ -1072,6 +1253,7 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
    */
   save_joint_pool(context);
   save_model_render_positions(context, FALSE);
+  prepare_freecam_prop_visibility(context);
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
@@ -1131,6 +1313,7 @@ void practice_finish_character_render(PracticeRenderContext *context) {
    * the RSP has consumed them; doing so stretches arbitrary prop triangles
    * across the frame. Restore only gameplay-owned pointers and root data here.
    * The first live tick rebuilds float matrices before its render. */
+  restore_monitor_states(context);
   restore_model_root_data(context);
   if (!context->rendered_all_characters) {
     restore_model_render_positions(context);
@@ -1144,11 +1327,12 @@ void practice_finish_character_render(PracticeRenderContext *context) {
   /* Visibility is gameplay state. A render-only paused frame may calculate a
    * different visible set while rebuilding matrices, but it must not expose
    * that transient set to the next live tick. */
-  restore_prop_onscreen_state();
+  restore_prop_visibility_state(context);
   g_CurrentPlayer->current_model_pos = context->current_model_pos;
   g_CurrentPlayer->previous_model_pos = context->previous_model_pos;
   g_CurrentPlayer->current_room_pos = context->current_room_pos;
   restore_watch_state(context);
+  restore_freecam_player_state(context);
   g_IsRenderOnly = FALSE;
 }
 

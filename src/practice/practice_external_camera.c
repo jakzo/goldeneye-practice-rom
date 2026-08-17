@@ -59,6 +59,8 @@ static struct PracticeExternalCameraView
 static s32 g_ExternalCameraViewCount;
 static bool g_IsRenderingExternalCamera;
 
+static void prepare_pip_props(void);
+
 extern s32 z_buffer;
 extern s32 z_buffer_width;
 extern s32 g_ClockTimer;
@@ -90,6 +92,20 @@ extern f32 flt_CODE_bss_80079980;
 
 s32 practice_external_camera_is_rendering(void) {
   return g_IsRenderingExternalCamera;
+}
+
+void practice_external_camera_set_rendering(s32 rendering) {
+  g_IsRenderingExternalCamera = rendering != FALSE;
+}
+
+void practice_external_camera_prepare_props(s32 force_visible_frame) {
+  extern s32 speedgraphframes;
+  s32 saved_speedgraphframes = speedgraphframes;
+
+  if (force_visible_frame && speedgraphframes == 0)
+    speedgraphframes = 1;
+  prepare_pip_props();
+  speedgraphframes = saved_speedgraphframes;
 }
 
 void practice_external_camera_begin_frame(void) {

@@ -16,6 +16,7 @@
 #include "player.h"
 #include "explosions.h"
 #include "unk_0BC530.h"
+#include "practice/practice_freecam.h"
 #include "practice/practice_timescale.h"
 
 
@@ -6615,9 +6616,13 @@ void sub_GAME_7F0B66E8(void)
 
 #ifdef PRACTICE_ROM
     /* Practice pause frames continue rendering without advancing gameplay.
-     * Ordinary base-game zero-delta frames must retain their original room
-     * aging behavior for deterministic replay playback. */
-    if (g_IsTimePaused) return;
+     * Age only geometry loaded while freecam is active, preserving the room
+     * residency set that gameplay had when freecam started. Ordinary base-game
+     * zero-delta frames retain their original behavior for replay playback. */
+    if (g_IsTimePaused) {
+        practice_freecam_age_rooms();
+        return;
+    }
 #endif
 
     for(i = 1; i < g_MaxNumRooms; i++)

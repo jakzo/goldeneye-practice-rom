@@ -16,6 +16,7 @@
 #define FREECAM_CPU_COUNTS_PER_SECOND 46875000.0f
 #define FREECAM_TURN_SPEED 0.0021816616f
 #define FREECAM_MAX_PITCH 1.55334306f
+#define FREECAM_ROOM_BITMAP_SIZE ((MAXROOMCOUNT + 7) / 8)
 
 static s32 g_FreecamActive;
 static s32 g_FreecamSwallowInput;
@@ -30,9 +31,28 @@ static coord3d g_FreecamUp;
 static f32 g_FreecamYaw;
 static f32 g_FreecamPitch;
 static u32 g_FreecamLastCount;
+static u8 g_FreecamInitialRoomResidency[FREECAM_ROOM_BITMAP_SIZE];
 
 extern void sub_GAME_7F0876C4(coord3d *cam_pos, coord3d *cam_look,
                               coord3d *cam_up);
+
+static s32 was_room_resident_on_enable(s32 room) {
+  return g_FreecamInitialRoomResidency[room >> 3] & (1 << (room & 7));
+}
+
+static void capture_initial_room_residency(void) {
+  s32 room;
+
+  bzero(g_FreecamInitialRoomResidency, sizeof(g_FreecamInitialRoomResidency));
+  for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
+    s_room_info *info = &g_BgRoomInfo[room];
+
+    if (info->model_bin_loaded != 0 || info->ptr_point_index != NULL ||
+        info->ptr_expanded_mapping_info != NULL) {
+      g_FreecamInitialRoomResidency[room >> 3] |= 1 << (room & 7);
+    }
+  }
+}
 
 static void update_room(void) {
   StandTile *tile;
@@ -127,6 +147,7 @@ s32 practice_freecam_enable(s32 controller) {
     g_FreecamPitch -= M_TAU_F;
   update_orientation();
 
+  capture_initial_room_residency();
   g_FreecamController = controller;
   g_FreecamActive = TRUE;
   g_FreecamSwallowInput = FALSE;
@@ -157,6 +178,30 @@ void practice_freecam_reset(void) {
 
 s32 practice_freecam_is_active(void) {
   return g_FreecamActive;
+}
+
+void practice_freecam_age_rooms(void) {
+  s32 room;
+
+  if (!g_FreecamActive)
+    return;
+
+  for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
+    s_room_info *info = &g_BgRoomInfo[room];
+
+    if (was_room_resident_on_enable(room) || info->field_35 != 0)
+      continue;
+
+    if (info->model_bin_loaded == 0 &&
+        (info->ptr_point_index != NULL ||
+         info->ptr_expanded_mapping_info != NULL)) {
+      delete_room_data(room);
+    } else if (info->model_bin_loaded == 4) {
+      delete_room_data(room);
+    } else if (info->model_bin_loaded != 0) {
+      info->model_bin_loaded++;
+    }
+  }
 }
 
 void practice_freecam_tick(u16 hotkey_trigger) {
@@ -259,7 +304,8 @@ s32 practice_freecam_apply_camera(void) {
   return TRUE;
 }
 
-s32 practice_freecam_get_render_context(u8 *room, coord3d **position) {
+s32 practice_freecam_get_render_context(u8 *room, coord3d **position,
+                                        StandTile **tile) {
   if (!g_FreecamActive || get_cur_playernum() != g_FreecamPlayer)
     return FALSE;
 
@@ -267,5 +313,7 @@ s32 practice_freecam_get_render_context(u8 *room, coord3d **position) {
     *room = g_FreecamRoom;
   if (position != NULL)
     *position = &g_FreecamPosition;
+  if (tile != NULL)
+    *tile = g_FreecamTile;
   return TRUE;
 }

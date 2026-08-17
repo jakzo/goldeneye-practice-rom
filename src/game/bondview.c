@@ -16825,7 +16825,7 @@ u8 bondviewGetCurrentPlayersRoom(void)
 #ifdef PRACTICE_ROM
     u8 freecam_room;
 
-    if (practice_freecam_get_render_context(&freecam_room, NULL))
+    if (practice_freecam_get_render_context(&freecam_room, NULL, NULL))
     {
         return freecam_room;
     }
@@ -16850,7 +16850,7 @@ coord3d *bondviewGetCurrentPlayersPosition(void)
 #ifdef PRACTICE_ROM
     coord3d *freecam_position;
 
-    if (practice_freecam_get_render_context(NULL, &freecam_position))
+    if (practice_freecam_get_render_context(NULL, &freecam_position, NULL))
     {
         return freecam_position;
     }
@@ -16871,7 +16871,7 @@ coord3d * bondviewGetCurrentPlayersPosition3(void)
 #ifdef PRACTICE_ROM
     coord3d *freecam_position;
 
-    if (practice_freecam_get_render_context(NULL, &freecam_position))
+    if (practice_freecam_get_render_context(NULL, &freecam_position, NULL))
     {
         return freecam_position;
     }

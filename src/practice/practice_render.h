@@ -37,6 +37,18 @@ typedef struct PracticeRenderContext {
   coord3d current_model_pos;
   coord3d previous_model_pos;
   coord3d current_room_pos;
+  void *prop_visibility_state;
+  void *monitor_states;
+  s32 monitor_state_count;
+  bool freecam_render;
+  coord3d saved_player_pos;
+  coord3d saved_player_pos3;
+  coord3d saved_collision_pos;
+  coord3d saved_collision_pos3;
+  coord3d saved_player_prop_pos;
+  StandTile *saved_room_pointer;
+  StandTile *saved_portal_tile;
+  StandTile *saved_player_prop_stan;
 } PracticeRenderContext;
 
 extern bool g_IsRenderOnly;

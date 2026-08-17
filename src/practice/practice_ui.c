@@ -416,7 +416,7 @@ static Gfx *render_freecam_room_pill(Gfx *gdl) {
   char text[20];
   u8 room;
 
-  if (!practice_freecam_get_render_context(&room, NULL)) {
+  if (!practice_freecam_get_render_context(&room, NULL, NULL)) {
     return gdl;
   }
 

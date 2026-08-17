@@ -53,5 +53,7 @@ s32 practice_external_camera_add_npc_follow_view(
     const coord3d *tracked_position, u32 flags, u32 border_color);
 Gfx *practice_external_camera_render(Gfx *gdl);
 s32 practice_external_camera_is_rendering(void);
+void practice_external_camera_set_rendering(s32 rendering);
+void practice_external_camera_prepare_props(s32 force_visible_frame);
 
 #endif /* PRACTICE_EXTERNAL_CAMERA_H */
