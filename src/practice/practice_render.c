@@ -95,6 +95,7 @@ typedef struct PracticePausedMonitorState {
 
 static void clear_converted_render_matrices(void);
 static void refresh_object_render_state(PropRecord *prop);
+static void persist_clipped_door_vertices(PropRecord *prop);
 #ifdef PRACTICE_TEST_ROM
 static void assert_visible_clipped_door_vertices_persistent(void);
 #endif
@@ -114,6 +115,40 @@ static void restore_matrices(RenderPosView *render_pos, s32 count);
 static void restore_model_matrices(Model *model);
 
 #define PAUSED_FRAMEBUFFER_TILE_HEIGHT 6
+
+static Gfx *copy_paused_framebuffer(Gfx *gdl, u8 *source, u8 *destination) {
+  s32 y;
+
+  gDPPipeSync(gdl++);
+  gDPSetCycleType(gdl++, G_CYC_COPY);
+  gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
+  gDPSetTexturePersp(gdl++, G_TP_NONE);
+  gDPSetTextureFilter(gdl++, G_TF_POINT);
+  gDPSetAlphaCompare(gdl++, G_AC_NONE);
+  gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH,
+                SCREEN_HEIGHT);
+  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
+                   OS_K0_TO_PHYSICAL(destination));
+
+  for (y = 0; y < SCREEN_HEIGHT; y += PAUSED_FRAMEBUFFER_TILE_HEIGHT) {
+    s32 bottom = y + PAUSED_FRAMEBUFFER_TILE_HEIGHT - 1;
+
+    if (bottom >= SCREEN_HEIGHT)
+      bottom = SCREEN_HEIGHT - 1;
+
+    gDPLoadTextureTile(
+        gdl++, OS_K0_TO_PHYSICAL(source), G_IM_FMT_RGBA, G_IM_SIZ_16b,
+        SCREEN_WIDTH, SCREEN_HEIGHT, 0, y, SCREEN_WIDTH - 1, bottom, 0,
+        G_TX_CLAMP, G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
+        G_TX_NOLOD);
+    gSPTextureRectangle(gdl++, 0, y << 2, (SCREEN_WIDTH - 1) << 2,
+                        bottom << 2, G_TX_RENDERTILE, 0, y << 5, 4 << 10,
+                        1 << 10);
+    gDPPipeSync(gdl++);
+  }
+
+  return gdl;
+}
 
 bool practice_has_paused_framebuffer(void) {
   return g_HasPausedFramebuffer;
@@ -218,7 +253,6 @@ void practice_capture_paused_framebuffer(void) {
 
 Gfx *practice_cache_paused_framebuffer(Gfx *gdl) {
   u8 *source = viGetFrameBuf2();
-  s32 y;
 
   if (z_buffer == 0 || g_viColorOutputMode == COLORMODE_32BIT ||
       z_buffer_width * z_buffer_height < SCREEN_WIDTH * SCREEN_HEIGHT) {
@@ -229,33 +263,7 @@ Gfx *practice_cache_paused_framebuffer(Gfx *gdl) {
   /* Preserve the completed paused scene before practice UI is composited. The
    * RDP copies six scanlines at a time so each RGBA16 tile fits in its 4 KiB
    * TMEM. */
-  gDPPipeSync(gdl++);
-  gDPSetCycleType(gdl++, G_CYC_COPY);
-  gDPSetRenderMode(gdl++, G_RM_NOOP, G_RM_NOOP2);
-  gDPSetTexturePersp(gdl++, G_TP_NONE);
-  gDPSetTextureFilter(gdl++, G_TF_POINT);
-  gDPSetAlphaCompare(gdl++, G_AC_NONE);
-  gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, SCREEN_WIDTH,
-                SCREEN_HEIGHT);
-  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
-                   OS_K0_TO_PHYSICAL(z_buffer));
-
-  for (y = 0; y < SCREEN_HEIGHT; y += PAUSED_FRAMEBUFFER_TILE_HEIGHT) {
-    s32 bottom = y + PAUSED_FRAMEBUFFER_TILE_HEIGHT - 1;
-
-    if (bottom >= SCREEN_HEIGHT)
-      bottom = SCREEN_HEIGHT - 1;
-
-    gDPLoadTextureTile(
-        gdl++, OS_K0_TO_PHYSICAL(source), G_IM_FMT_RGBA, G_IM_SIZ_16b,
-        SCREEN_WIDTH, SCREEN_HEIGHT, 0, y, SCREEN_WIDTH - 1, bottom, 0,
-        G_TX_CLAMP, G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD,
-        G_TX_NOLOD);
-    gSPTextureRectangle(gdl++, 0, y << 2, (SCREEN_WIDTH - 1) << 2,
-                        bottom << 2, G_TX_RENDERTILE, 0, y << 5, 4 << 10,
-                        1 << 10);
-    gDPPipeSync(gdl++);
-  }
+  gdl = copy_paused_framebuffer(gdl, source, (u8 *)z_buffer);
 
   gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
                    OS_K0_TO_PHYSICAL(source));
@@ -266,25 +274,18 @@ Gfx *practice_cache_paused_framebuffer(Gfx *gdl) {
 Gfx *practice_restore_paused_framebuffer(Gfx *gdl) {
   u8 *source = viGetFrameBuf1();
   u8 *destination = viGetFrameBuf2();
-  u32 size = SCREEN_WIDTH * SCREEN_HEIGHT * 2;
 
   if (g_HasPausedFramebuffer && z_buffer != 0 &&
       z_buffer_width * z_buffer_height >= SCREEN_WIDTH * SCREEN_HEIGHT) {
     source = (u8 *)z_buffer;
   }
 
-  if (source != destination) {
-    osInvalDCache(source, size);
-    bcopy(source, destination, size);
-    osWritebackDCache(destination, size);
-  }
-
-  /* UI-only display lists do not call video_related_F, so explicitly retarget
-   * the RDP when VI advances to the other framebuffer while paused. */
-  gDPPipeSync(gdl++);
-  gDPSetColorImage(gdl++, G_IM_FMT_RGBA, G_IM_SIZ_16b, SCREEN_WIDTH,
-                   OS_K0_TO_PHYSICAL(destination));
-  return gdl;
+  /* CPU copies cannot reproduce the N64 framebuffer's hidden coverage bits.
+   * Let the RDP write both alternating buffers so stationary paused frames
+   * receive identical anti-alias coverage instead of alternating soft/sharp. */
+  return source != destination
+             ? copy_paused_framebuffer(gdl, source, destination)
+             : gdl;
 }
 
 void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
@@ -607,6 +608,24 @@ static void prepare_freecam_prop_visibility(PracticeRenderContext *context) {
   practice_external_camera_set_rendering(TRUE);
   practice_external_camera_prepare_props(TRUE);
   chraiUpdateOnscreenPropCount();
+}
+
+static void prepare_refreshed_prop_visibility(
+    PracticeRenderContext *context) {
+  bool restore_external_camera = !context->freecam_render;
+
+  /* PROPFLAG_ONSCREEN is derived each rendered frame and may describe the
+   * pre-load state. Re-run the zero-time dispatcher so the first paused frame
+   * after a load uses the restored camera and room visibility. The external
+   * camera guards suppress gameplay mutations in object/character ticks. */
+  if (restore_external_camera) {
+    save_monitor_states(context);
+    practice_external_camera_set_rendering(TRUE);
+  }
+  practice_external_camera_prepare_props(TRUE);
+  chraiUpdateOnscreenPropCount();
+  if (restore_external_camera)
+    practice_external_camera_set_rendering(FALSE);
 }
 
 static void restore_freecam_player_state(PracticeRenderContext *context) {
@@ -1096,9 +1115,7 @@ static void initialize_visible_object_tree(PropRecord *prop, s32 depth) {
   }
 }
 
-static void refresh_object_render_state(PropRecord *prop) {
-  object_interaction(prop);
-
+static void persist_clipped_door_vertices(PropRecord *prop) {
   if (prop->type == PROP_TYPE_DOOR &&
       (prop->door->doorFlags & DOORFLAG_0004)) {
     DoorRecord *door = prop->door;
@@ -1118,12 +1135,20 @@ static void refresh_object_render_state(PropRecord *prop) {
      * the next live stationary-door tick can read the retained arena pointer
      * after the arena has been reused, then preserve that corruption in
      * unkcc. */
-    sub_GAME_7F052D8C(door);
-
     for (vertex = 0; vertex < rodata->numVertices; vertex++) {
       door->unkcc[vertex] = rwdata->Vertices[vertex];
     }
     rwdata->Vertices = door->unkcc;
+  }
+}
+
+static void refresh_object_render_state(PropRecord *prop) {
+  object_interaction(prop);
+
+  if (prop->type == PROP_TYPE_DOOR &&
+      (prop->door->doorFlags & DOORFLAG_0004)) {
+    sub_GAME_7F052D8C(prop->door);
+    persist_clipped_door_vertices(prop);
   }
 }
 
@@ -1253,32 +1278,18 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
    */
   save_joint_pool(context);
   save_model_render_positions(context, FALSE);
-  prepare_freecam_prop_visibility(context);
+  prepare_refreshed_prop_visibility(context);
 
+  /* The zero-time dispatcher above has already ticked every active prop once,
+   * establishing visibility and current-arena matrices just as the ordinary
+   * live render path does. Rebuilding visible models again here doubles the
+   * post-load arena allocation and can overwrite the display list. */
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
-    initialize_visible_object_tree(prop, 0);
-  }
-
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    if ((prop->type == PROP_TYPE_OBJ ||
-         prop->type == PROP_TYPE_WEAPON ||
-         prop->type == PROP_TYPE_DOOR) &&
-        prop->obj != NULL && prop->obj->model != NULL) {
-      if (prop->flags & PROPFLAG_ONSCREEN) {
-        refresh_object_render_state(prop);
-      }
-      continue;
-    }
-
-    if (!(prop->flags & PROPFLAG_ONSCREEN))
-      continue;
-
-    if ((prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
-        prop->chr != NULL && prop->chr->model != NULL) {
-      initialize_character_matrices(prop->chr);
-      chrTickBeams(prop);
+    if ((prop->flags & PROPFLAG_ONSCREEN) &&
+        prop->type == PROP_TYPE_DOOR && prop->door != NULL &&
+        (prop->door->doorFlags & DOORFLAG_0004)) {
+      persist_clipped_door_vertices(prop);
     }
   }
 
