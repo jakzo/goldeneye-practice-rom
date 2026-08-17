@@ -1696,133 +1696,245 @@ f32 sub_GAME_7F0AFB1C(coord3d *p,coord3d *q)
 }
 
 
+/* Named stanFindNearestValidTilePoint in goldeneye_optimized. */
+StandTile *sub_GAME_7F0AFB78(f32 *x, f32 *y, f32 *z, f32 radius)
+{
+    StandTile *tile;
+    s32 tile_tail;
+    StandTile *stack[1];
+    StandTile *best_tile;
+    s32 i;
+    coord3d original;
+    coord3d candidate;
+    f32 delta_x;
+    f32 delta_y;
+    f32 delta_z;
+    f32 distance_squared;
+    f32 best_distance_squared;
 
+    best_tile = NULL;
+    original.x = *x;
+    original.y = *y;
+    original.z = *z;
+    best_distance_squared = 4294967296.0f;
+    /* stan_prefix stores the loaded STAN file pointer in its first word. */
+    tile = ((struct StanPrefixRecord *)stan_prefix.stanfile)->ptr_firstroom;
 
+    while (*(u32 *)tile != 0)
+    {
+        if (((*(u16 *)tile >> 15) & 1) != 1 &&
+            sub_GAME_7F0AF760(tile) == FALSE)
+        {
+            for (i = 0; i < 4; i++)
+            {
+                if (i == 3)
+                {
+                    getTileMidPoint(tile, &candidate);
+                }
+                else
+                {
+                    getPointJustInsideOfTileTriple(tile, i, &candidate);
+                }
 
+                stack[0] = tile;
 
-#ifdef NONMATCHING
-void sub_GAME_7F0AFB78(void) {
+                if (sub_GAME_7F0B20D0(stack, candidate.x, candidate.z,
+                                      radius) < 0)
+                {
+                    delta_x = candidate.x - original.x;
+                    delta_y = candidate.y - original.y;
+                    delta_z = candidate.z - original.z;
+                    distance_squared = delta_x * delta_x + delta_y * delta_y +
+                                       delta_z * delta_z;
 
+                    if (distance_squared < best_distance_squared)
+                    {
+                        best_tile = tile;
+                        best_distance_squared = distance_squared;
+                        *x = candidate.x;
+                        *y = candidate.y;
+                        *z = candidate.z;
+                    }
+                }
+            }
+        }
+
+        tile_tail = tile->tail.half;
+        tile = (StandTile *)((u8 *)tile +
+                             list_of_tilesizes[(tile_tail >> 12) & 0xf]);
+    }
+
+    return best_tile;
 }
-#else
-GLOBAL_ASM(
-.text
-glabel sub_GAME_7F0AFB78
-/* 0E46A8 7F0AFB78 27BDFF78 */  addiu $sp, $sp, -0x88
-/* 0E46AC 7F0AFB7C AFBF004C */  sw    $ra, 0x4c($sp)
-/* 0E46B0 7F0AFB80 AFBE0048 */  sw    $fp, 0x48($sp)
-/* 0E46B4 7F0AFB84 AFB70044 */  sw    $s7, 0x44($sp)
-/* 0E46B8 7F0AFB88 AFB60040 */  sw    $s6, 0x40($sp)
-/* 0E46BC 7F0AFB8C AFB5003C */  sw    $s5, 0x3c($sp)
-/* 0E46C0 7F0AFB90 AFB40038 */  sw    $s4, 0x38($sp)
-/* 0E46C4 7F0AFB94 AFB30034 */  sw    $s3, 0x34($sp)
-/* 0E46C8 7F0AFB98 AFB20030 */  sw    $s2, 0x30($sp)
-/* 0E46CC 7F0AFB9C AFB1002C */  sw    $s1, 0x2c($sp)
-/* 0E46D0 7F0AFBA0 AFB00028 */  sw    $s0, 0x28($sp)
-/* 0E46D4 7F0AFBA4 F7B60020 */  sdc1  $f22, 0x20($sp)
-/* 0E46D8 7F0AFBA8 F7B40018 */  sdc1  $f20, 0x18($sp)
-/* 0E46DC 7F0AFBAC AFA00078 */  sw    $zero, 0x78($sp)
-/* 0E46E0 7F0AFBB0 C4840000 */  lwc1  $f4, ($a0)
-/* 0E46E4 7F0AFBB4 3C0E8008 */  lui   $t6, %hi(stan_prefix)
-/* 0E46E8 7F0AFBB8 8DCEB120 */  lw    $t6, %lo(stan_prefix)($t6)
-/* 0E46EC 7F0AFBBC E7A40064 */  swc1  $f4, 0x64($sp)
-/* 0E46F0 7F0AFBC0 C4A60000 */  lwc1  $f6, ($a1)
-/* 0E46F4 7F0AFBC4 3C014F80 */  li    $at, 0x4F800000 # 4294967296.000000
-/* 0E46F8 7F0AFBC8 4487B000 */  mtc1  $a3, $f22
-/* 0E46FC 7F0AFBCC E7A60068 */  swc1  $f6, 0x68($sp)
-/* 0E4700 7F0AFBD0 C4C80000 */  lwc1  $f8, ($a2)
-/* 0E4704 7F0AFBD4 4481A000 */  mtc1  $at, $f20
-/* 0E4708 7F0AFBD8 00809825 */  move  $s3, $a0
-/* 0E470C 7F0AFBDC E7A8006C */  swc1  $f8, 0x6c($sp)
-/* 0E4710 7F0AFBE0 8DD10004 */  lw    $s1, 4($t6)
-/* 0E4714 7F0AFBE4 00A0A025 */  move  $s4, $a1
-/* 0E4718 7F0AFBE8 00C0A825 */  move  $s5, $a2
-/* 0E471C 7F0AFBEC 8E2F0000 */  lw    $t7, ($s1)
-/* 0E4720 7F0AFBF0 24160003 */  li    $s6, 3
-/* 0E4724 7F0AFBF4 27B7007C */  addiu $s7, $sp, 0x7c
-/* 0E4728 7F0AFBF8 11E00039 */  beqz  $t7, .L7F0AFCE0
-/* 0E472C 7F0AFBFC 241E0004 */   li    $fp, 4
-/* 0E4730 7F0AFC00 27B20058 */  addiu $s2, $sp, 0x58
-/* 0E4734 7F0AFC04 96380000 */  lhu   $t8, ($s1)
-.L7F0AFC08:
-/* 0E4738 7F0AFC08 24010001 */  li    $at, 1
-/* 0E473C 7F0AFC0C 0018CBC3 */  sra   $t9, $t8, 0xf
-/* 0E4740 7F0AFC10 33280001 */  andi  $t0, $t9, 1
-/* 0E4744 7F0AFC14 51010029 */  beql  $t0, $at, .L7F0AFCBC
-/* 0E4748 7F0AFC18 86220006 */   lh    $v0, 6($s1)
-/* 0E474C 7F0AFC1C 0FC2BDD8 */  jal   sub_GAME_7F0AF760
-/* 0E4750 7F0AFC20 02202025 */   move  $a0, $s1
-/* 0E4754 7F0AFC24 14400024 */  bnez  $v0, .L7F0AFCB8
-/* 0E4758 7F0AFC28 00008025 */   move  $s0, $zero
-.L7F0AFC2C:
-/* 0E475C 7F0AFC2C 16160006 */  bne   $s0, $s6, .L7F0AFC48
-/* 0E4760 7F0AFC30 02202025 */   move  $a0, $s1
-/* 0E4764 7F0AFC34 02202025 */  move  $a0, $s1
-/* 0E4768 7F0AFC38 0FC2BE49 */  jal   getTileMidPoint
-/* 0E476C 7F0AFC3C 02402825 */   move  $a1, $s2
-/* 0E4770 7F0AFC40 10000005 */  b     .L7F0AFC58
-/* 0E4774 7F0AFC44 4407B000 */   mfc1  $a3, $f22
-.L7F0AFC48:
-/* 0E4778 7F0AFC48 02002825 */  move  $a1, $s0
-/* 0E477C 7F0AFC4C 0FC2BE87 */  jal   getPointJustInsideOfTileTriple
-/* 0E4780 7F0AFC50 02403025 */   move  $a2, $s2
-/* 0E4784 7F0AFC54 4407B000 */  mfc1  $a3, $f22
-.L7F0AFC58:
-/* 0E4788 7F0AFC58 AFB1007C */  sw    $s1, 0x7c($sp)
-/* 0E478C 7F0AFC5C 02E02025 */  move  $a0, $s7
-/* 0E4790 7F0AFC60 8FA50058 */  lw    $a1, 0x58($sp)
-/* 0E4794 7F0AFC64 0FC2C834 */  jal   sub_GAME_7F0B20D0
-/* 0E4798 7F0AFC68 8FA60060 */   lw    $a2, 0x60($sp)
-/* 0E479C 7F0AFC6C 0441000F */  bgez  $v0, .L7F0AFCAC
-/* 0E47A0 7F0AFC70 02402025 */   move  $a0, $s2
-/* 0E47A4 7F0AFC74 0FC2BEC7 */  jal   sub_GAME_7F0AFB1C
-/* 0E47A8 7F0AFC78 27A50064 */   addiu $a1, $sp, 0x64
-/* 0E47AC 7F0AFC7C 4614003C */  c.lt.s $f0, $f20
-/* 0E47B0 7F0AFC80 00000000 */  nop
-/* 0E47B4 7F0AFC84 4502000A */  bc1fl .L7F0AFCB0
-/* 0E47B8 7F0AFC88 26100001 */   addiu $s0, $s0, 1
-/* 0E47BC 7F0AFC8C C7AA0058 */  lwc1  $f10, 0x58($sp)
-/* 0E47C0 7F0AFC90 AFB10078 */  sw    $s1, 0x78($sp)
-/* 0E47C4 7F0AFC94 46000506 */  mov.s $f20, $f0
-/* 0E47C8 7F0AFC98 E66A0000 */  swc1  $f10, ($s3)
-/* 0E47CC 7F0AFC9C C7B0005C */  lwc1  $f16, 0x5c($sp)
-/* 0E47D0 7F0AFCA0 E6900000 */  swc1  $f16, ($s4)
-/* 0E47D4 7F0AFCA4 C7B20060 */  lwc1  $f18, 0x60($sp)
-/* 0E47D8 7F0AFCA8 E6B20000 */  swc1  $f18, ($s5)
-.L7F0AFCAC:
-/* 0E47DC 7F0AFCAC 26100001 */  addiu $s0, $s0, 1
-.L7F0AFCB0:
-/* 0E47E0 7F0AFCB0 161EFFDE */  bne   $s0, $fp, .L7F0AFC2C
-/* 0E47E4 7F0AFCB4 00000000 */   nop
-.L7F0AFCB8:
-/* 0E47E8 7F0AFCB8 86220006 */  lh    $v0, 6($s1)
-.L7F0AFCBC:
-/* 0E47EC 7F0AFCBC 3C0B8004 */  lui   $t3, %hi(list_of_tilesizes)
-/* 0E47F0 7F0AFCC0 00024B03 */  sra   $t1, $v0, 0xc
-/* 0E47F4 7F0AFCC4 312A000F */  andi  $t2, $t1, 0xf
-/* 0E47F8 7F0AFCC8 016A5821 */  addu  $t3, $t3, $t2
-/* 0E47FC 7F0AFCCC 916B0F4C */  lbu   $t3, %lo(list_of_tilesizes)($t3)
-/* 0E4800 7F0AFCD0 01718821 */  addu  $s1, $t3, $s1
-/* 0E4804 7F0AFCD4 8E2C0000 */  lw    $t4, ($s1)
-/* 0E4808 7F0AFCD8 5580FFCB */  bnezl $t4, .L7F0AFC08
-/* 0E480C 7F0AFCDC 96380000 */   lhu   $t8, ($s1)
-.L7F0AFCE0:
-/* 0E4810 7F0AFCE0 8FBF004C */  lw    $ra, 0x4c($sp)
-/* 0E4814 7F0AFCE4 8FA20078 */  lw    $v0, 0x78($sp)
-/* 0E4818 7F0AFCE8 D7B40018 */  ldc1  $f20, 0x18($sp)
-/* 0E481C 7F0AFCEC D7B60020 */  ldc1  $f22, 0x20($sp)
-/* 0E4820 7F0AFCF0 8FB00028 */  lw    $s0, 0x28($sp)
-/* 0E4824 7F0AFCF4 8FB1002C */  lw    $s1, 0x2c($sp)
-/* 0E4828 7F0AFCF8 8FB20030 */  lw    $s2, 0x30($sp)
-/* 0E482C 7F0AFCFC 8FB30034 */  lw    $s3, 0x34($sp)
-/* 0E4830 7F0AFD00 8FB40038 */  lw    $s4, 0x38($sp)
-/* 0E4834 7F0AFD04 8FB5003C */  lw    $s5, 0x3c($sp)
-/* 0E4838 7F0AFD08 8FB60040 */  lw    $s6, 0x40($sp)
-/* 0E483C 7F0AFD0C 8FB70044 */  lw    $s7, 0x44($sp)
-/* 0E4840 7F0AFD10 8FBE0048 */  lw    $fp, 0x48($sp)
-/* 0E4844 7F0AFD14 03E00008 */  jr    $ra
-/* 0E4848 7F0AFD18 27BD0088 */   addiu $sp, $sp, 0x88
-)
+
+#ifdef PRACTICE_ROM
+#define STAN_NEAREST_TILES_PER_FRAME 256
+
+static StandTile *g_StanNearestCursor;
+static StandTile *g_StanNearestBestTile;
+static coord3d g_StanNearestOriginal;
+static coord3d g_StanNearestBestPoint;
+static f32 g_StanNearestBestDistanceSquared;
+static s32 g_StanNearestSearchActive;
+
+static void stanConsiderTileAbovePosition(StandTile *tile, f32 x, f32 y,
+                                          f32 z, StandTile **best_tile,
+                                          f32 *best_height)
+{
+    f32 height;
+
+    if (tile == NULL || *(u32 *)tile == 0 ||
+        ((*(u16 *)tile >> 15) & 1) == 1 ||
+        sub_GAME_7F0AF760(tile) != FALSE ||
+        isPointInsideTriStandTileUnscaled_Maybe(tile, x, z) == FALSE)
+    {
+        return;
+    }
+
+    height = stanGetPositionYValue(tile, x, z);
+
+    if (height <= y && (*best_tile == NULL || height > *best_height))
+    {
+        *best_tile = tile;
+        *best_height = height;
+    }
+}
+
+static StandTile *stanFindTileAboveAlongSegment(StandTile *previous,
+                                                 f32 previous_x,
+                                                 f32 previous_z, f32 x,
+                                                 f32 y, f32 z)
+{
+    StandTile *best_tile = NULL;
+    StandTile *tile;
+    f32 best_height = 0.0f;
+
+    if (previous == NULL)
+    {
+        return NULL;
+    }
+
+    tile = previous;
+    if (!walkTilesBetweenPoints_NoCallback(&tile, previous_x, previous_z,
+                                            x, z))
+    {
+        return NULL;
+    }
+
+    stanConsiderTileAbovePosition(tile, x, y, z, &best_tile, &best_height);
+    return best_tile;
+}
+
+void stanFindNearestValidTilePointIncrementalReset(void)
+{
+    g_StanNearestCursor = NULL;
+    g_StanNearestBestTile = NULL;
+    g_StanNearestSearchActive = FALSE;
+}
+
+s32 stanFindNearestValidTilePointIncremental(f32 *x, f32 *y, f32 *z,
+                                             f32 radius, StandTile *previous,
+                                             f32 previous_x, f32 previous_z,
+                                             StandTile **result)
+{
+    StandTile *tile;
+    StandTile *stack[1];
+    coord3d candidate;
+    f32 delta_x;
+    f32 delta_y;
+    f32 delta_z;
+    f32 distance_squared;
+    s32 tile_tail;
+    s32 tile_count;
+    s32 i;
+
+    tile = stanFindTileAboveAlongSegment(previous, previous_x, previous_z,
+                                         *x, *y, *z);
+    if (tile != NULL)
+    {
+        stanFindNearestValidTilePointIncrementalReset();
+        *result = tile;
+        return TRUE;
+    }
+
+    if (!g_StanNearestSearchActive)
+    {
+        g_StanNearestOriginal.x = *x;
+        g_StanNearestOriginal.y = *y;
+        g_StanNearestOriginal.z = *z;
+        g_StanNearestCursor =
+            ((struct StanPrefixRecord *)stan_prefix.stanfile)->ptr_firstroom;
+        g_StanNearestBestTile = NULL;
+        g_StanNearestBestDistanceSquared = 4294967296.0f;
+        g_StanNearestSearchActive = TRUE;
+    }
+
+    for (tile_count = 0;
+         tile_count < STAN_NEAREST_TILES_PER_FRAME &&
+         *(u32 *)g_StanNearestCursor != 0;
+         tile_count++)
+    {
+        tile = g_StanNearestCursor;
+
+        if (((*(u16 *)tile >> 15) & 1) != 1 &&
+            sub_GAME_7F0AF760(tile) == FALSE)
+        {
+            for (i = 0; i < 4; i++)
+            {
+                if (i == 3)
+                {
+                    getTileMidPoint(tile, &candidate);
+                }
+                else
+                {
+                    getPointJustInsideOfTileTriple(tile, i, &candidate);
+                }
+
+                stack[0] = tile;
+
+                if (sub_GAME_7F0B20D0(stack, candidate.x, candidate.z,
+                                      radius) < 0)
+                {
+                    delta_x = candidate.x - g_StanNearestOriginal.x;
+                    delta_y = candidate.y - g_StanNearestOriginal.y;
+                    delta_z = candidate.z - g_StanNearestOriginal.z;
+                    distance_squared = delta_x * delta_x + delta_y * delta_y +
+                                       delta_z * delta_z;
+
+                    if (distance_squared <
+                        g_StanNearestBestDistanceSquared)
+                    {
+                        g_StanNearestBestTile = tile;
+                        g_StanNearestBestPoint = candidate;
+                        g_StanNearestBestDistanceSquared = distance_squared;
+                    }
+                }
+            }
+        }
+
+        tile_tail = tile->tail.half;
+        g_StanNearestCursor =
+            (StandTile *)((u8 *)tile +
+                          list_of_tilesizes[(tile_tail >> 12) & 0xf]);
+    }
+
+    if (*(u32 *)g_StanNearestCursor != 0)
+    {
+        return FALSE;
+    }
+
+    *result = g_StanNearestBestTile;
+    if (g_StanNearestBestTile != NULL)
+    {
+        *x = g_StanNearestBestPoint.x;
+        *y = g_StanNearestBestPoint.y;
+        *z = g_StanNearestBestPoint.z;
+    }
+
+    g_StanNearestSearchActive = FALSE;
+    g_StanNearestCursor = NULL;
+    return TRUE;
+}
 #endif
 
 

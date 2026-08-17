@@ -1,4 +1,5 @@
 #include "practice_freecam.h"
+#include "bg.h"
 #include "bondconstants.h"
 #include "bondview.h"
 #include "joy.h"
@@ -6,11 +7,13 @@
 #include "player.h"
 #include "player_2.h"
 #include "practice_render.h"
+#include "stan.h"
 #include <math.h>
 #include <os_extension.h>
 
 #define FREECAM_STICK_DEADZONE 3
-#define FREECAM_MOVE_SPEED 20.0f
+#define FREECAM_MOVE_SPEED 1000.0f
+#define FREECAM_CPU_COUNTS_PER_SECOND 46875000.0f
 #define FREECAM_TURN_SPEED 0.0021816616f
 #define FREECAM_MAX_PITCH 1.55334306f
 
@@ -18,14 +21,44 @@ static s32 g_FreecamActive;
 static s32 g_FreecamSwallowInput;
 static s32 g_FreecamController;
 static s32 g_FreecamPlayer;
+static u8 g_FreecamRoom;
+static StandTile *g_FreecamTile;
+static coord3d g_FreecamTilePosition;
 static coord3d g_FreecamPosition;
 static coord3d g_FreecamForward;
 static coord3d g_FreecamUp;
 static f32 g_FreecamYaw;
 static f32 g_FreecamPitch;
+static u32 g_FreecamLastCount;
 
 extern void sub_GAME_7F0876C4(coord3d *cam_pos, coord3d *cam_look,
                               coord3d *cam_up);
+
+static void update_room(void) {
+  StandTile *tile;
+  f32 x = g_FreecamPosition.x;
+  f32 y = g_FreecamPosition.y;
+  f32 z = g_FreecamPosition.z;
+
+  if (!stanFindNearestValidTilePointIncremental(&x, &y, &z, 0.0f,
+                                                g_FreecamTile,
+                                                g_FreecamTilePosition.x,
+                                                g_FreecamTilePosition.z,
+                                                &tile))
+    return;
+
+  if (tile != NULL) {
+    g_FreecamTile = tile;
+    g_FreecamTilePosition.x = x;
+    g_FreecamTilePosition.y = y;
+    g_FreecamTilePosition.z = z;
+    if (tile->room > 0 && tile->room < g_MaxNumRooms &&
+        tile->room < MAXROOMCOUNT && tile->room != g_FreecamRoom) {
+      g_FreecamRoom = tile->room;
+      practice_invalidate_render_state();
+    }
+  }
+}
 
 static s32 apply_deadzone(s32 value) {
   if (value < -FREECAM_STICK_DEADZONE)
@@ -71,6 +104,10 @@ s32 practice_freecam_enable(s32 controller) {
     g_FreecamPosition = g_CurrentPlayer->field_488.pos;
     g_FreecamForward = g_CurrentPlayer->field_488.applied_view;
   }
+  g_FreecamRoom = bondviewGetCurrentPlayersRoom();
+  g_FreecamTile = g_CurrentPlayer->field_488.current_tile_ptr;
+  g_FreecamTilePosition = g_FreecamPosition;
+  stanFindNearestValidTilePointIncrementalReset();
 
   forward_length_squared =
       g_FreecamForward.x * g_FreecamForward.x +
@@ -93,6 +130,7 @@ s32 practice_freecam_enable(s32 controller) {
   g_FreecamController = controller;
   g_FreecamActive = TRUE;
   g_FreecamSwallowInput = FALSE;
+  g_FreecamLastCount = osGetCount();
   joySetInputSuppressed(TRUE);
   practice_invalidate_render_state();
   set_cur_player(previous_player);
@@ -102,6 +140,7 @@ s32 practice_freecam_enable(s32 controller) {
 void practice_freecam_disable(void) {
   g_FreecamActive = FALSE;
   g_FreecamSwallowInput = TRUE;
+  stanFindNearestValidTilePointIncrementalReset();
 }
 
 void practice_freecam_reset(void) {
@@ -109,6 +148,10 @@ void practice_freecam_reset(void) {
   g_FreecamSwallowInput = FALSE;
   g_FreecamController = 0;
   g_FreecamPlayer = 0;
+  g_FreecamRoom = 0;
+  g_FreecamTile = NULL;
+  g_FreecamLastCount = 0;
+  stanFindNearestValidTilePointIncrementalReset();
   joySetInputSuppressed(FALSE);
 }
 
@@ -123,8 +166,12 @@ void practice_freecam_tick(u16 hotkey_trigger) {
   f32 move;
   f32 strafe;
   f32 vertical;
+  f32 direction_length;
+  f32 distance;
   f32 cos_yaw;
   f32 sin_yaw;
+  u32 current_count;
+  u32 elapsed_counts;
 
   if (!g_FreecamActive) {
     if (g_FreecamSwallowInput &&
@@ -136,6 +183,10 @@ void practice_freecam_tick(u16 hotkey_trigger) {
     }
     return;
   }
+
+  current_count = osGetCount();
+  elapsed_counts = current_count - g_FreecamLastCount;
+  g_FreecamLastCount = current_count;
 
   buttons = joyGetButtonsRaw(g_FreecamController, ANY_BUTTON);
   if ((buttons & hotkey_trigger) &&
@@ -155,17 +206,17 @@ void practice_freecam_tick(u16 hotkey_trigger) {
   vertical = 0.0f;
 
   if (buttons & (U_CBUTTONS | U_JPAD))
-    move += FREECAM_MOVE_SPEED;
+    move += 1.0f;
   if (buttons & (D_CBUTTONS | D_JPAD))
-    move -= FREECAM_MOVE_SPEED;
+    move -= 1.0f;
   if (buttons & (L_CBUTTONS | L_JPAD))
-    strafe -= FREECAM_MOVE_SPEED;
+    strafe -= 1.0f;
   if (buttons & (R_CBUTTONS | R_JPAD))
-    strafe += FREECAM_MOVE_SPEED;
+    strafe += 1.0f;
   if (buttons & ((L_TRIG | R_TRIG) & ~hotkey_trigger))
-    vertical += FREECAM_MOVE_SPEED;
+    vertical += 1.0f;
   if (buttons & Z_TRIG)
-    vertical -= FREECAM_MOVE_SPEED;
+    vertical -= 1.0f;
 
   g_FreecamYaw += stick_x * FREECAM_TURN_SPEED;
   g_FreecamPitch += stick_y * FREECAM_TURN_SPEED;
@@ -175,16 +226,27 @@ void practice_freecam_tick(u16 hotkey_trigger) {
   if (g_FreecamPitch < -FREECAM_MAX_PITCH)
     g_FreecamPitch = -FREECAM_MAX_PITCH;
 
-  if (move == 0.0f && strafe == 0.0f && vertical == 0.0f && stick_x == 0 &&
-      stick_y == 0) {
+  if (move == 0.0f && strafe == 0.0f && vertical == 0.0f) {
+    update_room();
+    if (stick_x != 0 || stick_y != 0) {
+      update_orientation();
+      practice_invalidate_render_state();
+    }
     return;
   }
 
   cos_yaw = cosf(g_FreecamYaw);
   sin_yaw = sinf(g_FreecamYaw);
-  g_FreecamPosition.x += move * sin_yaw + strafe * cos_yaw;
-  g_FreecamPosition.y += vertical;
-  g_FreecamPosition.z += -move * cos_yaw + strafe * sin_yaw;
+  direction_length = sqrtf(move * move + strafe * strafe +
+                           vertical * vertical);
+  distance = FREECAM_MOVE_SPEED * (f32)elapsed_counts /
+             FREECAM_CPU_COUNTS_PER_SECOND / direction_length;
+  g_FreecamPosition.x +=
+      (move * sin_yaw + strafe * cos_yaw) * distance;
+  g_FreecamPosition.y += vertical * distance;
+  g_FreecamPosition.z +=
+      (-move * cos_yaw + strafe * sin_yaw) * distance;
+  update_room();
   update_orientation();
   practice_invalidate_render_state();
 }
@@ -194,5 +256,16 @@ s32 practice_freecam_apply_camera(void) {
     return FALSE;
 
   sub_GAME_7F0876C4(&g_FreecamPosition, &g_FreecamForward, &g_FreecamUp);
+  return TRUE;
+}
+
+s32 practice_freecam_get_render_context(u8 *room, coord3d **position) {
+  if (!g_FreecamActive || get_cur_playernum() != g_FreecamPlayer)
+    return FALSE;
+
+  if (room != NULL)
+    *room = g_FreecamRoom;
+  if (position != NULL)
+    *position = &g_FreecamPosition;
   return TRUE;
 }

@@ -9,6 +9,7 @@
 #include "player.h"
 #include "practice_config.h"
 #include "practice_dam_guard_cam.h"
+#include "practice_freecam.h"
 #include "practice_frigate_hostage_cam.h"
 #include "practice_lag.h"
 #include "practice_replay.h"
@@ -411,6 +412,18 @@ static Gfx *render_gate_guard_pill(Gfx *gdl) {
   }
 }
 
+static Gfx *render_freecam_room_pill(Gfx *gdl) {
+  char text[20];
+  u8 room;
+
+  if (!practice_freecam_get_render_context(&room, NULL)) {
+    return gdl;
+  }
+
+  sprintf(text, "Freecam room %d", room);
+  return practice_ui_render_pill(gdl, text, 0xFFFFFFFF, 0x00000099);
+}
+
 static f32 player_speed_metres_per_second(void) {
   f32 delta_x;
   f32 delta_z;
@@ -536,6 +549,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
   // Reset the pill stack so this frame's pills start from the top-right.
   g_PillStackY = PILL_MARGIN_TOP;
 
+  gdl = render_freecam_room_pill(gdl);
   gdl = render_gate_guard_pill(gdl);
   gdl = practice_frigate_hostage_progress_render(gdl);
 

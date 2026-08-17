@@ -46,6 +46,7 @@
 #include "unk_0B3200.h"
 #include "practice/practice_timescale.h"
 #include "practice/practice_dialog.h"
+#include "practice/practice_freecam.h"
 #include "practice/practice_splits.h"
 #include "practice/practice_ui.h"
 #include "practice/practice_lag.h"
@@ -16821,6 +16822,15 @@ s32 get_obj_collision_flag(void) {
  */
 u8 bondviewGetCurrentPlayersRoom(void)
 {
+#ifdef PRACTICE_ROM
+    u8 freecam_room;
+
+    if (practice_freecam_get_render_context(&freecam_room, NULL))
+    {
+        return freecam_room;
+    }
+#endif
+
     if ((g_CurrentPlayer->unknown == 1) && (g_CurrentPlayer->room_pointer != 0))
     {
         return g_CurrentPlayer->room_pointer->room;
@@ -16837,6 +16847,15 @@ u8 bondviewGetCurrentPlayersRoom(void)
  */
 coord3d *bondviewGetCurrentPlayersPosition(void)
 {
+#ifdef PRACTICE_ROM
+    coord3d *freecam_position;
+
+    if (practice_freecam_get_render_context(NULL, &freecam_position))
+    {
+        return freecam_position;
+    }
+#endif
+
     if (g_CurrentPlayer->unknown == 1)
     {
         return &g_CurrentPlayer->pos;
@@ -16849,6 +16868,14 @@ coord3d *bondviewGetCurrentPlayersPosition(void)
 
 coord3d * bondviewGetCurrentPlayersPosition3(void)
 {
+#ifdef PRACTICE_ROM
+    coord3d *freecam_position;
+
+    if (practice_freecam_get_render_context(NULL, &freecam_position))
+    {
+        return freecam_position;
+    }
+#endif
 
     if (g_CurrentPlayer->unknown == 1)
     {
