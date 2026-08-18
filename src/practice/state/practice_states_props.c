@@ -23,6 +23,7 @@
 #include "practice_states_props.h"
 #include "practice_states_utils.h"
 #include "practice_ui.h"
+#include "../practice_render.h"
 #include "unk_0A1DA0.h"
 #include <assert.h>
 #include <bondconstants.h>
@@ -3114,6 +3115,81 @@ static void save_bg_room_cache_state(StateStream *stream) {
   }
 }
 
+static bool bg_room_has_allocation(s32 room) {
+  s_room_info *info = &g_BgRoomInfo[room];
+
+  return info->ptr_point_index != NULL ||
+         info->ptr_expanded_mapping_info != NULL ||
+         info->ptr_secondary_expanded_mapping_info != NULL ||
+         info->ptr_unique_collision_points != NULL;
+}
+
+static bool bg_room_has_required_buffers(s32 room) {
+  s_room_info *info = &g_BgRoomInfo[room];
+
+  /* Some rooms have no vertex binary or no primary DL. A successful
+   * sub_GAME_7F0B6368 leaves model_bin_loaded set even when those pointers
+   * stay NULL. Require only the buffers the room's compressed sizes say exist. */
+  if (info->csize_point_index_binary > 0 && info->ptr_point_index == NULL) {
+    return FALSE;
+  }
+  if (info->csize_primary_DL_binary > 0 &&
+      info->ptr_expanded_mapping_info == NULL) {
+    return FALSE;
+  }
+  return TRUE;
+}
+
+static bool bg_room_allocation_complete(s32 room) {
+  return bg_room_has_required_buffers(room) &&
+         (g_BgRoomInfo[room].model_bin_loaded != 0 ||
+          bg_room_has_allocation(room));
+}
+
+static void evict_bg_room_allocation(s32 room) {
+  if (bg_room_has_allocation(room)) {
+    delete_room_data(room);
+  }
+}
+
+static bool reload_saved_bg_rooms(s32 count, const u8 *model_loaded,
+                                 s32 *failed_room) {
+  s32 room;
+
+  *failed_room = -1;
+  for (room = 0; room < count; room++) {
+    s_room_info *info = &g_BgRoomInfo[room];
+
+    if (model_loaded[room] != 0 && !bg_room_allocation_complete(room)) {
+      sub_GAME_7F0B6368(room);
+      if (info->model_bin_loaded == 0 || !bg_room_allocation_complete(room)) {
+        *failed_room = room;
+        return FALSE;
+      }
+    }
+  }
+  return TRUE;
+}
+
+static void redarken_restored_bg_rooms(void) {
+  s32 i;
+  u8 rooms[MAXROOMCOUNT];
+
+  bzero(rooms, sizeof(rooms));
+  for (i = 0; i < DARKENED_LIGHT_TABLE_MAX; i++) {
+    s32 room = darkened_light_table[i].room_index;
+
+    if (room > 0 && room < g_MaxNumRooms && room < MAXROOMCOUNT) {
+      rooms[room] = TRUE;
+    }
+  }
+  for (i = 1; i < g_MaxNumRooms && i < MAXROOMCOUNT; i++) {
+    if (rooms[i] && bg_room_vertices_loaded(i)) {
+      redarken_lights_in_room(i);
+    }
+  }
+}
+
 static void load_bg_room_cache_state(StateStream *stream) {
   u8 room_rendered[MAXROOMCOUNT];
   u8 room_neighbor[MAXROOMCOUNT];
@@ -3124,6 +3200,7 @@ static void load_bg_room_cache_state(StateStream *stream) {
   u16 count = read_u16(stream);
   u16 bg_portal_count;
   s32 room;
+  s32 failed_room;
 
   if (count != g_MaxNumRooms || count > MAXROOMCOUNT) {
     practiceLogError("Saved BG room count %d does not match level %d", count,
@@ -3169,37 +3246,45 @@ static void load_bg_room_cache_state(StateStream *stream) {
    * which were resident at the save point. Keeping every later allocation as
    * a cache can exhaust the BG allocator and make a required room reload fail.
    * Preserve complete allocations for rooms which are resident in the saved
-   * state; their expanded texture metadata is gameplay-visible. */
+   * state; their expanded texture metadata is gameplay-visible. If a required
+   * room still cannot be allocated, evict the preserved set and reload every
+   * saved room from scratch so the load uses the same residency budget. */
   for (room = 1; room < count; room++) {
-    s_room_info *info = &g_BgRoomInfo[room];
-    bool has_allocation = info->ptr_point_index != NULL ||
-                          info->ptr_expanded_mapping_info != NULL ||
-                          info->ptr_secondary_expanded_mapping_info != NULL ||
-                          info->ptr_unique_collision_points != NULL;
-    bool allocation_complete = info->ptr_point_index != NULL &&
-                               info->ptr_expanded_mapping_info != NULL;
-
     if (model_loaded[room] == 0) {
-      if (has_allocation) {
-        delete_room_data(room);
+      evict_bg_room_allocation(room);
+    } else if (!bg_room_allocation_complete(room)) {
+      evict_bg_room_allocation(room);
+    }
+  }
+
+  if (!reload_saved_bg_rooms(count, model_loaded, &failed_room)) {
+    for (room = 1; room < count; room++) {
+      evict_bg_room_allocation(room);
+    }
+    /* Defrag the free-space list so the second pass can reuse the same
+     * residency budget the save point had. EU's mema tracker is much
+     * smaller than US/JP, so Streets can otherwise fail mid-reload. */
+    memaGetLongestFree();
+    if (!reload_saved_bg_rooms(count, model_loaded, &failed_room)) {
+      for (room = 0; room < count; room++) {
+        s_room_info *info = &g_BgRoomInfo[room];
+
+        if (model_loaded[room] == 0 || bg_room_allocation_complete(room)) {
+          continue;
+        }
+        sub_GAME_7F0B6368(room);
+        if (info->model_bin_loaded == 0 || !bg_room_allocation_complete(room)) {
+          practiceLogWarn("Leaving saved BG room %d unloaded (mema free=%d)",
+                          room, memaGetLongestFree());
+          model_loaded[room] = 0;
+        }
       }
-    } else if (!allocation_complete && has_allocation) {
-      delete_room_data(room);
     }
   }
 
   for (room = 0; room < count; room++) {
     s_room_info *info = &g_BgRoomInfo[room];
 
-    if (model_loaded[room] != 0 && (info->ptr_point_index == NULL ||
-                                    info->ptr_expanded_mapping_info == NULL)) {
-      sub_GAME_7F0B6368(room);
-      if (info->model_bin_loaded == 0 || info->ptr_point_index == NULL ||
-          info->ptr_expanded_mapping_info == NULL) {
-        practiceLogError("Failed to reload saved BG room %d", room);
-        assert(FALSE);
-      }
-    }
     info->room_rendered = room_rendered[room];
     info->room_neighbor_to_rendered = room_neighbor[room];
     info->model_bin_loaded = model_loaded[room];
@@ -3207,6 +3292,10 @@ static void load_bg_room_cache_state(StateStream *stream) {
     info->room_loaded_mask = loaded_mask[room];
     info->field_35 = field_35[room];
   }
+
+  /* Room reloads rebuild vertex colours from the ROM, so reapply any lights
+   * that were already restored into darkened_light_table. */
+  redarken_restored_bg_rooms();
 
   if (bg_portal_count < BG_PORTAL_MAX &&
       g_BgPortals[bg_portal_count].offset_portal != NULL) {
@@ -4797,6 +4886,10 @@ static bool load_props_state_with_scratch(
           }
         } else {
           sub_GAME_7F052D8C(door);
+          /* sub_GAME_7F052D8C writes clipped verts into the frame arena.
+           * Persist them immediately so a later paused frame cannot observe
+           * the arena pointer, including when the door is still offscreen. */
+          practice_persist_clipped_door_vertices(prop);
         }
       }
       load_object_collision_coefficients(stream, obj);
@@ -5104,6 +5197,7 @@ static bool load_props_state_with_scratch(
   }
 
   rebuild_room_prop_lists_from_active_props();
+  practice_persist_all_clipped_door_vertices();
 
   // Restore scorch marks and bullet holes now that the prop table is rebuilt,
   // so prop-attached impacts can resolve their saved prop index.

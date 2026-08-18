@@ -1255,29 +1255,58 @@ void practice_initialize_external_camera_model(Model *model) {
 }
 
 static void persist_clipped_door_vertices(PropRecord *prop) {
-  if (prop->type == PROP_TYPE_DOOR &&
-      (prop->door->doorFlags & DOORFLAG_0004)) {
-    DoorRecord *door = prop->door;
-    Model *model = door->model;
-    ModelNode *node = model->obj->RootNode->Child->Child;
-    struct ModelRoData_DisplayList_CollisionRecord *rodata =
-        (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
-    struct ModelRwData_DisplayList_CollisionRecord *rwdata =
-        (struct ModelRwData_DisplayList_CollisionRecord *)
-            modelGetNodeRwData(model, node);
-    s32 vertex;
+  DoorRecord *door;
+  Model *model;
+  ModelNode *node;
+  struct ModelRoData_DisplayList_CollisionRecord *rodata;
+  struct ModelRwData_DisplayList_CollisionRecord *rwdata;
+  s32 vertex;
 
-    /* object_interaction's render-only path rebuilds door matrices but skips
-     * the clipped vertex buffer normally produced by the gameplay tick. The
-     * paused arena is rewound, so that buffer must be current-frame data too.
-     * Copy the result into the door's stage-pool cache immediately: otherwise
-     * the next live stationary-door tick can read the retained arena pointer
-     * after the arena has been reused, then preserve that corruption in
-     * unkcc. */
-    for (vertex = 0; vertex < rodata->numVertices; vertex++) {
-      door->unkcc[vertex] = rwdata->Vertices[vertex];
-    }
-    rwdata->Vertices = door->unkcc;
+  if (prop == NULL || prop->type != PROP_TYPE_DOOR || prop->door == NULL ||
+      !(prop->door->doorFlags & DOORFLAG_0004)) {
+    return;
+  }
+
+  door = prop->door;
+  model = door->model;
+  if (door->unkcc == NULL || model == NULL || model->obj == NULL ||
+      model->obj->RootNode == NULL || model->obj->RootNode->Child == NULL ||
+      model->obj->RootNode->Child->Child == NULL) {
+    return;
+  }
+
+  node = model->obj->RootNode->Child->Child;
+  rodata = (struct ModelRoData_DisplayList_CollisionRecord *)node->Data;
+  rwdata = (struct ModelRwData_DisplayList_CollisionRecord *)
+      modelGetNodeRwData(model, node);
+  if (rodata == NULL || rwdata == NULL || rwdata->Vertices == NULL) {
+    return;
+  }
+
+  /* object_interaction's render-only path rebuilds door matrices but skips
+   * the clipped vertex buffer normally produced by the gameplay tick. The
+   * paused arena is rewound, so that buffer must be current-frame data too.
+   * Copy the result into the door's stage-pool cache immediately: otherwise
+   * the next live stationary-door tick can read the retained arena pointer
+   * after the arena has been reused, then preserve that corruption in
+   * unkcc. Linked-door ticks can also rebuild a sibling's frame buffer after
+   * that sibling was already persisted, so callers must run a final pass. */
+  for (vertex = 0; vertex < rodata->numVertices; vertex++) {
+    door->unkcc[vertex] = rwdata->Vertices[vertex];
+  }
+  rwdata->Vertices = door->unkcc;
+}
+
+void practice_persist_clipped_door_vertices(PropRecord *prop) {
+  persist_clipped_door_vertices(prop);
+}
+
+void practice_persist_all_clipped_door_vertices(void) {
+  PropRecord *prop;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    persist_clipped_door_vertices(prop);
   }
 }
 
@@ -1365,6 +1394,10 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
       prop->zDepth = z_depth;
     }
   }
+
+  /* A later linked door's object_interaction can rebuild this door's clipped
+   * vertices after persist_clipped_door_vertices already ran for it. */
+  practice_persist_all_clipped_door_vertices();
 
 #ifdef PRACTICE_TEST_ROM
   assert_visible_clipped_door_vertices_persistent();
@@ -1464,15 +1497,10 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
   /* The zero-time dispatcher above has already ticked every active prop once,
    * establishing visibility and current-arena matrices just as the ordinary
    * live render path does. Rebuilding visible models again here doubles the
-   * post-load arena allocation and can overwrite the display list. */
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    if ((prop->flags & PROPFLAG_ONSCREEN) &&
-        prop->type == PROP_TYPE_DOOR && prop->door != NULL &&
-        (prop->door->doorFlags & DOORFLAG_0004)) {
-      persist_clipped_door_vertices(prop);
-    }
-  }
+   * post-load arena allocation and can overwrite the display list. Persist
+   * every clipped door, not just the currently visible set: a door can become
+   * onscreen on the next paused frame before this pass runs again. */
+  practice_persist_all_clipped_door_vertices();
 
 #ifdef PRACTICE_TEST_ROM
   assert_visible_clipped_door_vertices_persistent();

@@ -83,5 +83,7 @@ void practice_invalidate_render_state(void);
 bool practice_is_render_state_invalidated(void);
 bool practice_needs_refreshed_render(void);
 void practice_validate_render_state(void);
+void practice_persist_clipped_door_vertices(PropRecord *prop);
+void practice_persist_all_clipped_door_vertices(void);
 
 #endif /* PRACTICE_RENDER_H */
