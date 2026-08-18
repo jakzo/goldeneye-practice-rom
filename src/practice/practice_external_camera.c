@@ -14,6 +14,7 @@
 #include "player.h"
 #include "player_2.h"
 #include "practice_config.h"
+#include "practice_freecam.h"
 #include "practice_render.h"
 #include "stan.h"
 #include <fr.h>
@@ -636,8 +637,13 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
 
   if (g_ExternalCameraViewCount == 0 || g_CurrentPlayer == NULL ||
       g_CurrentPlayer->prop == NULL) {
+    practice_freecam_sync_bond_for_external_cameras(FALSE);
     return gdl;
   }
+
+  /* Place Bond from the live player before this pass moves the player prop
+   * to the PIP camera. The body is not on the gameplay prop list. */
+  practice_freecam_sync_bond_for_external_cameras(TRUE);
 
   saved_random_seed = g_randomSeed;
   saved_chr_obj_random_seed = g_chrObjRandomSeed;
@@ -927,6 +933,7 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     // object and door collisions, so restore the real-view flags below. This
     // preserves tricks which intentionally unload a door by looking away.
     gdl = bgLevelRender_practice(gdl);
+    gdl = practice_freecam_render_bond_in_external_camera(gdl);
     /* Beam/tracer caches are authored for the gameplay camera. Projecting a
      * long restored tracer through a synthetic view can exceed the N64's
      * signed 16.16 matrix range; the main view already renders this transient
