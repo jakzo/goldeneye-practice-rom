@@ -48,8 +48,9 @@
 - **Freecam**
     - During gameplay press `L + A` to enable or disable freecam
     - Gameplay remains paused and ignores controller input while freecam is active, then resumes with the normal camera when freecam is disabled
-    - Use the stick to look around; use either the C-buttons or D-pad to move forward/back and strafe
-    - Hold the shoulder trigger to move up, and Z to move down
+    - Movement and look follow the current control style
+        - 1.x: hold the shoulder trigger to move up, and Z to move down
+        - 2.x: left Z moves down, right Z moves up
     - Press `L + B` while freecam is active to pin the current view as a picture-in-picture camera and exit freecam
     - Exiting with `L + A` clears any pinned camera
     - Shows a model of Bond at the player position in freecam and picture-in-picture views (visual reference only; animation/pose like crouching are not accurate)

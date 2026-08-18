@@ -1,5 +1,6 @@
 #include "practice_freecam.h"
 #include "bg.h"
+#include "bondconstants.h"
 #include "bondview.h"
 #include "joy.h"
 #include "math_atan2f.h"
@@ -9,10 +10,13 @@
 #include "practice_external_camera.h"
 #include "practice_render.h"
 #include "stan.h"
+#include "watch.h"
 #include <math.h>
 #include <os_extension.h>
 
 #define FREECAM_STICK_DEADZONE 3
+/* Same divisor bondview uses when converting a safe stick value to a speed. */
+#define FREECAM_STICK_SCALE 70.0f
 #define FREECAM_MOVE_SPEED 1000.0f
 #define FREECAM_CPU_COUNTS_PER_SECOND ((f32)(OS_CLOCK_RATE * 3 / 4))
 #define FREECAM_TURN_SPEED DegToRad(0.125f)
@@ -351,14 +355,29 @@ void practice_freecam_age_rooms(void) {
   }
 }
 
+static s32 freecam_control_style(void);
+static s32 style_is_dual_stick(s32 style);
+
 static void swallow_exit_input(void) {
-  if (g_Freecam.swallow_input &&
-      joyGetButtonsRaw(g_Freecam.controller, ANY_BUTTON) == 0 &&
-      apply_deadzone(joyGetStickXRaw(g_Freecam.controller)) == 0 &&
-      apply_deadzone(joyGetStickYRaw(g_Freecam.controller)) == 0) {
-    g_Freecam.swallow_input = FALSE;
-    joySetInputSuppressed(FALSE);
+  s32 pad2;
+
+  if (!g_Freecam.swallow_input)
+    return;
+  if (joyGetButtonsRaw(g_Freecam.controller, ANY_BUTTON) != 0 ||
+      apply_deadzone(joyGetStickXRaw(g_Freecam.controller)) != 0 ||
+      apply_deadzone(joyGetStickYRaw(g_Freecam.controller)) != 0)
+    return;
+
+  if (style_is_dual_stick(freecam_control_style())) {
+    pad2 = g_Freecam.player + getPlayerCount();
+    if (joyGetButtonsRaw(pad2, ANY_BUTTON) != 0 ||
+        apply_deadzone(joyGetStickXRaw(pad2)) != 0 ||
+        apply_deadzone(joyGetStickYRaw(pad2)) != 0)
+      return;
   }
+
+  g_Freecam.swallow_input = FALSE;
+  joySetInputSuppressed(FALSE);
 }
 
 static u16 hotkey_chord_buttons(void) {
@@ -370,9 +389,130 @@ static u16 hotkey_chord_buttons(void) {
   return buttons;
 }
 
-static void apply_look(s32 stick_x, s32 stick_y) {
-  g_Freecam.yaw += stick_x * FREECAM_TURN_SPEED;
-  g_Freecam.pitch += stick_y * FREECAM_TURN_SPEED;
+typedef struct FreecamAxes {
+  s32 look_x;
+  s32 look_y;
+  f32 move;
+  f32 strafe;
+  f32 vertical;
+} FreecamAxes;
+
+static s32 freecam_control_style(void) {
+  s32 previous_player;
+  s32 style;
+
+  previous_player = get_cur_playernum();
+  set_cur_player(g_Freecam.player);
+  style = cur_player_get_control_type();
+  set_cur_player(previous_player);
+  return style;
+}
+
+static s32 style_is_dual_stick(s32 style) {
+  return style >= CONTROLLER_CONFIG_PLENTY && style <= CONTROLLER_CONFIG_GOODHEAD;
+}
+
+static s32 style_uses_stick_look(s32 style) {
+  return style == CONTROLLER_CONFIG_SOLITARE ||
+         style == CONTROLLER_CONFIG_GOODNIGHT;
+}
+
+static f32 analog_from_stick(s32 value) {
+  f32 analog = (f32)value / FREECAM_STICK_SCALE;
+
+  if (analog > 1.0f)
+    return 1.0f;
+  if (analog < -1.0f)
+    return -1.0f;
+  return analog;
+}
+
+static void apply_look_invert(FreecamAxes *axes) {
+  /* Option 0 is Reverse, 1 is Upright. Upright keeps stick/C-up looking up. */
+  if (!get_cur_player_look_vertical_inverted())
+    axes->look_y = -axes->look_y;
+}
+
+static void read_freecam_axes(FreecamAxes *axes, u16 buttons,
+                              u16 hotkey_trigger) {
+  s32 style = freecam_control_style();
+  s32 pad = g_Freecam.controller;
+  s32 stick_x = apply_deadzone(joyGetStickXRaw(pad));
+  s32 stick_y = apply_deadzone(joyGetStickYRaw(pad));
+
+  axes->look_x = 0;
+  axes->look_y = 0;
+  axes->move = 0.0f;
+  axes->strafe = 0.0f;
+  axes->vertical = 0.0f;
+
+  if (style_is_dual_stick(style)) {
+    s32 pad2 = g_Freecam.player + getPlayerCount();
+    s32 stick2_x;
+    s32 stick2_y;
+
+    stick_x = apply_deadzone(joyGetStickXRaw(g_Freecam.player));
+    stick_y = apply_deadzone(joyGetStickYRaw(g_Freecam.player));
+    stick2_x = apply_deadzone(joyGetStickXRaw(pad2));
+    stick2_y = apply_deadzone(joyGetStickYRaw(pad2));
+    if (joyGetButtonsRaw(g_Freecam.player, Z_TRIG))
+      axes->vertical -= 1.0f;
+    if (joyGetButtonsRaw(pad2, Z_TRIG))
+      axes->vertical += 1.0f;
+
+    /* First stick X always turns. Second stick X always strafes. */
+    axes->look_x = stick_x;
+    axes->strafe = analog_from_stick(stick2_x);
+
+    if (style == CONTROLLER_CONFIG_PLENTY ||
+        style == CONTROLLER_CONFIG_DOMINO) {
+      /* 2.1 / 2.3: first Y walks, second Y looks. */
+      axes->move = analog_from_stick(stick_y);
+      axes->look_y = stick2_y;
+    } else {
+      /* 2.2 / 2.4: first Y looks, second Y walks. */
+      axes->look_y = stick_y;
+      axes->move = analog_from_stick(stick2_y);
+    }
+  } else {
+    if (buttons & ((L_TRIG | R_TRIG) & ~hotkey_trigger))
+      axes->vertical += 1.0f;
+    if (buttons & Z_TRIG)
+      axes->vertical -= 1.0f;
+
+    if (style_uses_stick_look(style)) {
+      /* 1.2 / 1.4: stick looks, C/D-pad walks and strafes. */
+      axes->look_x = stick_x;
+      axes->look_y = stick_y;
+      if (buttons & (U_CBUTTONS | U_JPAD))
+        axes->move += 1.0f;
+      if (buttons & (D_CBUTTONS | D_JPAD))
+        axes->move -= 1.0f;
+      if (buttons & (L_CBUTTONS | L_JPAD))
+        axes->strafe -= 1.0f;
+      if (buttons & (R_CBUTTONS | R_JPAD))
+        axes->strafe += 1.0f;
+    } else {
+      /* 1.1 / 1.3: stick walks and turns, C/D-pad looks and strafes. */
+      axes->look_x = stick_x;
+      axes->move = analog_from_stick(stick_y);
+      if (buttons & (U_CBUTTONS | U_JPAD))
+        axes->look_y += (s32)FREECAM_STICK_SCALE;
+      if (buttons & (D_CBUTTONS | D_JPAD))
+        axes->look_y -= (s32)FREECAM_STICK_SCALE;
+      if (buttons & (L_CBUTTONS | L_JPAD))
+        axes->strafe -= 1.0f;
+      if (buttons & (R_CBUTTONS | R_JPAD))
+        axes->strafe += 1.0f;
+    }
+  }
+
+  apply_look_invert(axes);
+}
+
+static void apply_look(s32 look_x, s32 look_y) {
+  g_Freecam.yaw += look_x * FREECAM_TURN_SPEED;
+  g_Freecam.pitch += look_y * FREECAM_TURN_SPEED;
 
   if (g_Freecam.pitch > FREECAM_MAX_PITCH)
     g_Freecam.pitch = FREECAM_MAX_PITCH;
@@ -380,36 +520,24 @@ static void apply_look(s32 stick_x, s32 stick_y) {
     g_Freecam.pitch = -FREECAM_MAX_PITCH;
 }
 
-static s32 apply_move(u16 buttons, u16 hotkey_trigger, u32 elapsed_counts) {
-  f32 move = 0.0f;
-  f32 strafe = 0.0f;
-  f32 vertical = 0.0f;
+static s32 apply_move(f32 move, f32 strafe, f32 vertical, u32 elapsed_counts) {
   f32 direction_length;
+  f32 scale;
   f32 distance;
   f32 cos_yaw;
   f32 sin_yaw;
 
-  if (buttons & (U_CBUTTONS | U_JPAD))
-    move += 1.0f;
-  if (buttons & (D_CBUTTONS | D_JPAD))
-    move -= 1.0f;
-  if (buttons & (L_CBUTTONS | L_JPAD))
-    strafe -= 1.0f;
-  if (buttons & (R_CBUTTONS | R_JPAD))
-    strafe += 1.0f;
-  if (buttons & ((L_TRIG | R_TRIG) & ~hotkey_trigger))
-    vertical += 1.0f;
-  if (buttons & Z_TRIG)
-    vertical -= 1.0f;
-
   if (move == 0.0f && strafe == 0.0f && vertical == 0.0f)
     return FALSE;
 
+  direction_length = sqrtf(move * move + strafe * strafe + vertical * vertical);
+  /* Analog walk should scale with stick magnitude. Only clamp diagonals that
+   * would otherwise exceed full speed. */
+  scale = direction_length > 1.0f ? direction_length : 1.0f;
   cos_yaw = cosf(g_Freecam.yaw);
   sin_yaw = sinf(g_Freecam.yaw);
-  direction_length = sqrtf(move * move + strafe * strafe + vertical * vertical);
   distance = FREECAM_MOVE_SPEED * (f32)elapsed_counts /
-             FREECAM_CPU_COUNTS_PER_SECOND / direction_length;
+             FREECAM_CPU_COUNTS_PER_SECOND / scale;
   g_Freecam.position.x += (move * sin_yaw + strafe * cos_yaw) * distance;
   g_Freecam.position.y += vertical * distance;
   g_Freecam.position.z += (-move * cos_yaw + strafe * sin_yaw) * distance;
@@ -418,8 +546,7 @@ static s32 apply_move(u16 buttons, u16 hotkey_trigger, u32 elapsed_counts) {
 
 void practice_freecam_tick(u16 hotkey_trigger) {
   u16 buttons;
-  s32 stick_x;
-  s32 stick_y;
+  FreecamAxes axes;
   u32 current_count;
   u32 elapsed_counts;
 
@@ -436,13 +563,12 @@ void practice_freecam_tick(u16 hotkey_trigger) {
   if ((buttons & hotkey_trigger) && (buttons & hotkey_chord_buttons()))
     return;
 
-  stick_x = apply_deadzone(joyGetStickXRaw(g_Freecam.controller));
-  stick_y = apply_deadzone(joyGetStickYRaw(g_Freecam.controller));
-  apply_look(stick_x, stick_y);
+  read_freecam_axes(&axes, buttons, hotkey_trigger);
+  apply_look(axes.look_x, axes.look_y);
 
-  if (!apply_move(buttons, hotkey_trigger, elapsed_counts)) {
+  if (!apply_move(axes.move, axes.strafe, axes.vertical, elapsed_counts)) {
     update_room();
-    if (stick_x != 0 || stick_y != 0) {
+    if (axes.look_x != 0 || axes.look_y != 0) {
       update_orientation();
       practice_invalidate_render_state();
     }
