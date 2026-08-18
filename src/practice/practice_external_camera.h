@@ -13,11 +13,10 @@ enum PracticeExternalCameraFlags {
   PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY = 1 << 1
 };
 
-enum PracticeExternalCameraBorderColor {
-  PRACTICE_EXTERNAL_CAMERA_BORDER_WHITE,
-  PRACTICE_EXTERNAL_CAMERA_BORDER_RED,
-  PRACTICE_EXTERNAL_CAMERA_BORDER_GREEN
-};
+/* Packed gDPSetFillColor value: two identical RGBA5551 pixels. */
+#define PRACTICE_FILL_COLOR(r, g, b)                                           \
+  (((u32)GPACK_RGBA5551((r), (g), (b), 1) << 16) |                             \
+   (u32)GPACK_RGBA5551((r), (g), (b), 1))
 
 struct PracticeExternalCameraView {
   coord3d position;
@@ -28,7 +27,7 @@ struct PracticeExternalCameraView {
   struct PropRecord *tracked_prop;
   struct ObjectRecord *forced_object;
   u32 flags;
-  u32 border_color;
+  u32 border_color; /* PRACTICE_FILL_COLOR(r, g, b) */
 };
 
 struct PracticeNpcFollowCameraParams {

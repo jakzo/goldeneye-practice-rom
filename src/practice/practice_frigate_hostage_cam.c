@@ -431,7 +431,8 @@ void practice_frigate_hostage_cam_tick(void) {
       adjust_virtual_position_y(hostage, &virtual_position);
       practice_external_camera_add_npc_follow_view(
           hostage, &s_FrigateHostageCamera, &virtual_position,
-          PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY, 0);
+          PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY,
+          PRACTICE_FILL_COLOR(255, 255, 255));
     }
   }
 }

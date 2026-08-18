@@ -97,7 +97,7 @@ static void submit_active_views(void) {
     view.forced_object = slot->item_obj;
     view.flags = PRACTICE_EXTERNAL_CAMERA_DRAW_CROSSHAIR |
                  PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY;
-    view.border_color = PRACTICE_EXTERNAL_CAMERA_BORDER_WHITE;
+    view.border_color = PRACTICE_FILL_COLOR(255, 255, 255);
     practice_external_camera_add_view(&view);
   }
 }

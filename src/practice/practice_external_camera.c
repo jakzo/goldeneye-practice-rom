@@ -13,8 +13,8 @@
 #include "objecthandler.h"
 #include "player.h"
 #include "player_2.h"
+#include "practice_bond_model.h"
 #include "practice_config.h"
-#include "practice_freecam.h"
 #include "practice_render.h"
 #include "stan.h"
 #include <fr.h>
@@ -24,7 +24,6 @@
 
 #define PIP_SIZE 75
 #define PIP_SPACING 4
-#define PIP_DYN_VTX_RESERVE 0x1000
 #define PIP_CROSSHAIR_RADIUS 3
 #define PROP_STATE_BITMAP_SIZE ((POS_DATA_ENTRY_LEN + 7) / 8)
 
@@ -131,9 +130,6 @@ s32 practice_external_camera_add_view(
     return FALSE;
   }
 
-  /* Bond is optional. Headers are loaded after swirl when leftover is large
-   * enough; if they are still missing here the PIP draws without him. */
-  practice_freecam_ensure_bond_for_external_cameras();
   g_ExternalCameraViews[g_ExternalCameraViewCount++] = *view;
   return TRUE;
 }
@@ -207,17 +203,6 @@ s32 practice_external_camera_add_npc_follow_view(
   }
 
   return practice_external_camera_add_view(&view);
-}
-
-// TODO: Get rid of this, let consumers choose the color directly
-static u32 get_border_fill_color(u32 border_color) {
-  if (border_color == PRACTICE_EXTERNAL_CAMERA_BORDER_RED) {
-    return 0xF801F801;
-  }
-  if (border_color == PRACTICE_EXTERNAL_CAMERA_BORDER_GREEN) {
-    return 0x07C107C1;
-  }
-  return 0xFFFFFFFF;
 }
 
 static void
@@ -595,12 +580,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   s32 saved_field_64;
   s32 saved_field_68;
 
-  coord3d saved_pos;
-  coord3d saved_pos3;
   struct collision434 saved_field_488;
-  StandTile *saved_room_pointer;
-  coord3d saved_player_prop_pos;
-  StandTile *saved_player_prop_stan;
+  PracticeSavedPlayerPose saved_pose;
 
   coord3d saved_current_model_pos;
   coord3d saved_previous_model_pos;
@@ -640,13 +621,12 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
 
   if (g_ExternalCameraViewCount == 0 || g_CurrentPlayer == NULL ||
       g_CurrentPlayer->prop == NULL) {
-    practice_freecam_sync_bond_for_external_cameras(FALSE);
     return gdl;
   }
 
   /* Place Bond from the live player before this pass moves the player prop
    * to the PIP camera. The body is not on the gameplay prop list. */
-  practice_freecam_sync_bond_for_external_cameras(TRUE);
+  practice_bond_model_ensure();
 
   saved_random_seed = g_randomSeed;
   saved_chr_obj_random_seed = g_chrObjRandomSeed;
@@ -704,12 +684,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   saved_field_64 = g_CurrentPlayer->field_64;
   saved_field_68 = g_CurrentPlayer->field_68;
 
-  saved_pos = g_CurrentPlayer->pos;
-  saved_pos3 = g_CurrentPlayer->pos3;
   saved_field_488 = g_CurrentPlayer->field_488;
-  saved_room_pointer = g_CurrentPlayer->room_pointer;
-  saved_player_prop_pos = g_CurrentPlayer->prop->pos;
-  saved_player_prop_stan = g_CurrentPlayer->prop->stan;
+  practice_save_player_pose(&saved_pose);
 
   saved_current_model_pos = g_CurrentPlayer->current_model_pos;
   saved_previous_model_pos = g_CurrentPlayer->previous_model_pos;
@@ -770,7 +746,7 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     monitor_count = count_pip_monitor_states();
     monitor_size =
         (monitor_count * sizeof(*saved_monitor_states) + 15) & ~15;
-    if (dynGetFreeVtx() < monitor_size + PIP_DYN_VTX_RESERVE) {
+    if (dynGetFreeVtx() < monitor_size + PRACTICE_DYN_VTX_RESERVE) {
       g_GfxMemPos = saved_dyn_pos;
       return gdl;
     }
@@ -785,7 +761,7 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     // Re-rendering the scene consumes the same finite per-frame vertex pool as
     // the main view. Never start another pass if it would use the engine's
     // safety margin; effect renderers also stop allocating at this boundary.
-    if (dynGetFreeVtx() < PIP_DYN_VTX_RESERVE)
+    if (dynGetFreeVtx() < PRACTICE_DYN_VTX_RESERVE)
       break;
 
     left = spacing + s * (PIP_SIZE + spacing);
@@ -872,19 +848,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
 
     stan = view->stan;
     if (stan == NULL)
-      stan = saved_room_pointer;
-    g_CurrentPlayer->room_pointer = stan;
-    g_CurrentPlayer->field_488.current_tile_ptr_for_portals = stan;
-    g_CurrentPlayer->pos = cam_pos;
-    g_CurrentPlayer->pos3 = cam_pos;
-    g_CurrentPlayer->field_488.pos = cam_pos;
-    g_CurrentPlayer->field_488.pos3 = cam_pos;
-
-    // A few prop render paths read the player prop directly instead of using
-    // bondviewGetCurrentPlayersPosition. Make those paths observe this PIP's
-    // camera, then restore the real player prop after all PIPs are rendered.
-    g_CurrentPlayer->prop->pos = cam_pos;
-    g_CurrentPlayer->prop->stan = stan;
+      stan = saved_pose.room_pointer;
+    practice_apply_camera_pose(&cam_pos, stan);
 
     sub_GAME_7F0876C4(&cam_pos, &cam_look, &cam_up);
 
@@ -936,7 +901,7 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     // object and door collisions, so restore the real-view flags below. This
     // preserves tricks which intentionally unload a door by looking away.
     gdl = bgLevelRender_practice(gdl);
-    gdl = practice_freecam_render_bond_in_external_camera(gdl);
+    gdl = practice_bond_model_render_in_view(gdl);
     /* Beam/tracer caches are authored for the gameplay camera. Projecting a
      * long restored tracer through a synthetic view can exceed the N64's
      * signed 16.16 matrix range; the main view already renders this transient
@@ -974,7 +939,7 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     gDPSetCycleType(gdl++, G_CYC_FILL);
 
     if (view->flags & PRACTICE_EXTERNAL_CAMERA_DRAW_CROSSHAIR) {
-      gDPSetFillColor(gdl++, 0xF801F801);
+      gDPSetFillColor(gdl++, PRACTICE_FILL_COLOR(255, 0, 0));
       gDPSetScissor(gdl++, G_SC_NON_INTERLACE, left, top, left + PIP_SIZE,
                     top + PIP_SIZE);
 
@@ -986,7 +951,7 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
                        marker_x, marker_y + PIP_CROSSHAIR_RADIUS);
     }
 
-    gDPSetFillColor(gdl++, get_border_fill_color(view->border_color));
+    gDPSetFillColor(gdl++, view->border_color);
     gDPSetScissor(gdl++, G_SC_NON_INTERLACE, 0, 0, screen_w, viGetY());
 
     gDPFillRectangle(gdl++, left, top, left + PIP_SIZE - 1, top); // Top
@@ -1024,12 +989,8 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
   g_CurrentPlayer->field_64 = saved_field_64;
   g_CurrentPlayer->field_68 = saved_field_68;
 
-  g_CurrentPlayer->pos = saved_pos;
-  g_CurrentPlayer->pos3 = saved_pos3;
   g_CurrentPlayer->field_488 = saved_field_488;
-  g_CurrentPlayer->room_pointer = saved_room_pointer;
-  g_CurrentPlayer->prop->pos = saved_player_prop_pos;
-  g_CurrentPlayer->prop->stan = saved_player_prop_stan;
+  practice_restore_player_pose(&saved_pose);
 
   g_CurrentPlayer->current_model_pos = saved_current_model_pos;
   g_CurrentPlayer->previous_model_pos = saved_previous_model_pos;

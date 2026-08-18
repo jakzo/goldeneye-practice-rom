@@ -4,6 +4,20 @@
 #include <bondtypes.h>
 #include <ultra64.h>
 
+/* Leave this many free dyn bytes after a synthetic camera or Bond draw. */
+#define PRACTICE_DYN_VTX_RESERVE 0x1000
+
+typedef struct PracticeSavedPlayerPose {
+  coord3d pos;
+  coord3d pos3;
+  coord3d collision_pos;
+  coord3d collision_pos3;
+  coord3d prop_pos;
+  StandTile *room_pointer;
+  StandTile *portal_tile;
+  StandTile *prop_stan;
+} PracticeSavedPlayerPose;
+
 typedef struct PracticeRenderWatchState {
   u32 unknown_40990;
   u32 screen_index;
@@ -42,14 +56,7 @@ typedef struct PracticeRenderContext {
   void *monitor_states;
   s32 monitor_state_count;
   bool freecam_render;
-  coord3d saved_player_pos;
-  coord3d saved_player_pos3;
-  coord3d saved_collision_pos;
-  coord3d saved_collision_pos3;
-  coord3d saved_player_prop_pos;
-  StandTile *saved_room_pointer;
-  StandTile *saved_portal_tile;
-  StandTile *saved_player_prop_stan;
+  PracticeSavedPlayerPose saved_player_pose;
 } PracticeRenderContext;
 
 extern bool g_IsRenderOnly;
@@ -61,6 +68,9 @@ Gfx *practice_cache_ui_background(Gfx *gdl, s32 left, s32 top, s32 right,
 Gfx *practice_cache_paused_framebuffer(Gfx *gdl);
 Gfx *practice_restore_paused_framebuffer(Gfx *gdl);
 void practice_cache_equipped_weapon_matrix(PropRecord *weapon_prop);
+void practice_save_player_pose(PracticeSavedPlayerPose *saved);
+void practice_apply_camera_pose(const coord3d *position, StandTile *tile);
+void practice_restore_player_pose(const PracticeSavedPlayerPose *saved);
 void practice_prepare_paused_render_state(PracticeRenderContext *context);
 void practice_prepare_character_render(PracticeRenderContext *context);
 void practice_prepare_refreshed_render(PracticeRenderContext *context);

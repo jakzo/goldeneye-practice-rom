@@ -3724,7 +3724,7 @@ glabel sub_GAME_7F0B4AB4
 /**
  * Address 0x7F0B4E40.
 */
-Gfx *bgLevelRender(Gfx *arg0)
+static Gfx *bgLevelRenderCommon(Gfx *arg0, s32 use_practice_rooms)
 {
     gSPSetLights1(arg0++, GlobalLight);
     gSPLookAt(arg0++, sub_GAME_7F078474());
@@ -3737,17 +3737,18 @@ Gfx *bgLevelRender(Gfx *arg0)
     else
     {
 #ifdef PRACTICE_ROM
-        if (practice_freecam_is_active())
+        if (use_practice_rooms)
         {
             arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78_practice(fogSetRenderFogColor(arg0, 0))));
         }
         else
+#endif
         {
+#ifndef PRACTICE_ROM
+            (void)use_practice_rooms;
+#endif
             arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78(fogSetRenderFogColor(arg0, 0))));
         }
-#else
-        arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78(fogSetRenderFogColor(arg0, 0))));
-#endif
     }
 
     gSPMatrix(arg0++, g_viProjectionMatrix, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
@@ -3755,25 +3756,19 @@ Gfx *bgLevelRender(Gfx *arg0)
     return bondviewGfxPlayerField5cMatrix(arg0++);
 }
 
+Gfx *bgLevelRender(Gfx *arg0)
+{
+#ifdef PRACTICE_ROM
+    return bgLevelRenderCommon(arg0, practice_freecam_is_active());
+#else
+    return bgLevelRenderCommon(arg0, FALSE);
+#endif
+}
+
 #ifdef PRACTICE_ROM
 Gfx *bgLevelRender_practice(Gfx *arg0)
 {
-    gSPSetLights1(arg0++, GlobalLight);
-    gSPLookAt(arg0++, sub_GAME_7F078474());
-    gSPSegment(arg0++, SPSEGMENT_BG_DL, ptr_bg_data);
-
-    if (dword_CODE_bss_8007FF88 == 1)
-    {
-        gSPDisplayList(arg0++, dword_CODE_bss_8007BF98);
-    }
-    else
-    {
-        arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78_practice(fogSetRenderFogColor(arg0, 0))));
-    }
-
-    gSPMatrix(arg0++, g_viProjectionMatrix, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);
-
-    return bondviewGfxPlayerField5cMatrix(arg0++);
+    return bgLevelRenderCommon(arg0, TRUE);
 }
 #endif
 

@@ -1,19 +1,11 @@
 #include "practice_freecam.h"
 #include "bg.h"
-#include "bondconstants.h"
 #include "bondview.h"
-#include "chr.h"
-#include "chr_b.h"
-#include "chrlv.h"
-#include "chrobjdata.h"
-#include "chrobjhandler.h"
-#include "dyn.h"
 #include "joy.h"
 #include "math_atan2f.h"
-#include "memp.h"
-#include "objecthandler.h"
 #include "player.h"
 #include "player_2.h"
+#include "practice_bond_model.h"
 #include "practice_external_camera.h"
 #include "practice_render.h"
 #include "stan.h"
@@ -22,245 +14,59 @@
 
 #define FREECAM_STICK_DEADZONE 3
 #define FREECAM_MOVE_SPEED 1000.0f
-#define FREECAM_CPU_COUNTS_PER_SECOND 46875000.0f
-#define FREECAM_TURN_SPEED 0.0021816616f
-#define FREECAM_MAX_PITCH 1.55334306f
+#define FREECAM_CPU_COUNTS_PER_SECOND ((f32)(OS_CLOCK_RATE * 3 / 4))
+#define FREECAM_TURN_SPEED DegToRad(0.125f)
+/* Just short of vertical so the look vector keeps a horizontal component. */
+#define FREECAM_MAX_PITCH DegToRad(89.0f)
 #define FREECAM_BOND_REVEAL_DISTANCE 50.0f
+#define FREECAM_FORWARD_EPSILON 0.000001f
+/* Vanilla bg.c unloads a room once model_bin_loaded has aged to 4. */
+#define FREECAM_ROOM_AGE_UNLOAD 4
 #define FREECAM_ROOM_BITMAP_SIZE ((MAXROOMCOUNT + 7) / 8)
-/* Match practice_external_camera.c PIP_DYN_VTX_RESERVE: leave the same safety
- * margin after drawing Bond that the PIP pass itself requires. */
-#define EXTERNAL_CAMERA_BOND_DYN_RESERVE 0x1000
-/* Uncompressed sizes of CdjbondZ / CheadbrosnanZ (the .bin assets, before
- * 1172 compression). fileLoad decompresses into leftover and then shrinks
- * the stage-pool entry to this size. */
-#define FREECAM_BOND_BODY_UNCOMPRESSED 28704
-#define FREECAM_BOND_HEAD_UNCOMPRESSED 9024
-/* sub_GAME_7F0762E0 rewrites display lists after decompress and grows the
- * allocation with fileSetSize. */
-#define FREECAM_BOND_GDL_PAD 0x4000
-/* Leave leftover for room streaming and other first-time fileLoad. */
-#define FREECAM_BOND_LEFTOVER_RESERVE 0x20000
-
-extern MemoryPool g_mempPools[];
-
-static s32 g_FreecamActive;
-static s32 g_FreecamSwallowInput;
-static s32 g_FreecamController;
-static s32 g_FreecamPlayer;
-static s32 g_FreecamRestorePlayerCamera;
-static u8 g_FreecamRoom;
-static StandTile *g_FreecamTile;
-static coord3d g_FreecamTilePosition;
-static coord3d g_FreecamPosition;
-static coord3d g_FreecamStartPosition;
-static coord3d g_FreecamForward;
-static coord3d g_FreecamUp;
-static f32 g_FreecamYaw;
-static f32 g_FreecamPitch;
-static u32 g_FreecamLastCount;
-static u8 g_FreecamInitialRoomResidency[FREECAM_ROOM_BITMAP_SIZE];
-static s32 g_FreecamPinnedCameraActive;
-static struct PracticeExternalCameraView g_FreecamPinnedCamera;
-static PropRecord g_FreecamBondProp;
-static ChrRecord g_FreecamBondChr;
-static coord3d g_FreecamBondModelPosition;
-static f32 g_FreecamBondHeading;
-static Model *g_FreecamBondDeferredModel;
 
 extern void sub_GAME_7F0876C4(coord3d *cam_pos, coord3d *cam_look,
                               coord3d *cam_up);
 extern void sub_GAME_7F0B6368(s32 room);
-extern void sub_GAME_7F06B248(void *arg0);
-extern void clear_aircraft_model_obj(Model *model);
 
-static void destroy_freecam_bond(void) {
-  Model *model = g_FreecamBondChr.model;
+static struct {
+  s32 active;
+  s32 swallow_input;
+  /* Physical pad used for look/move. May be outside getPlayerCount(). */
+  s32 controller;
+  /* Clamped player index for camera and render. */
+  s32 player;
+  s32 restore_player_camera;
+  u8 room;
+  StandTile *tile;
+  coord3d tile_position;
+  coord3d position;
+  coord3d start_position;
+  coord3d forward;
+  coord3d up;
+  f32 yaw;
+  f32 pitch;
+  u32 last_count;
+} g_Freecam;
 
-  if (g_FreecamBondProp.chr == &g_FreecamBondChr &&
-      g_FreecamBondChr.prop == &g_FreecamBondProp) {
-    /* The display list may still reference this model's matrices when the
-     * hotkey exits freecam. Forget the render wrapper now, but keep the model
-     * instance reserved until the graphics task has completed. */
-    g_FreecamBondChr.field_20 = NULL;
-    if (model != NULL)
-      g_FreecamBondDeferredModel = model;
-  }
+static u8 g_FreecamInitialRoomResidency[FREECAM_ROOM_BITMAP_SIZE];
 
-  bzero(&g_FreecamBondChr, sizeof(g_FreecamBondChr));
-  bzero(&g_FreecamBondProp, sizeof(g_FreecamBondProp));
+static struct {
+  s32 active;
+  struct PracticeExternalCameraView view;
+} g_FreecamPin;
+
+static s32 room_is_valid(s32 room) {
+  return room > 0 && room < g_MaxNumRooms && room < MAXROOMCOUNT;
 }
 
-static s32 player_has_third_person_bond(void) {
-  return g_CurrentPlayer != NULL && g_CurrentPlayer->prop != NULL &&
-         g_CurrentPlayer->prop->chr != NULL &&
-         g_CurrentPlayer->prop->chr->model != NULL &&
-         g_CurrentPlayer->prop->chr != &g_FreecamBondChr;
+static s32 room_has_geometry(const s_room_info *info) {
+  return info->model_bin_loaded != 0 || info->ptr_point_index != NULL ||
+         info->ptr_expanded_mapping_info != NULL;
 }
 
-static void apply_freecam_bond_animation(Model *model) {
-  Model *player_model;
-  ModelRwData_HeaderRecord *root_data;
-
-  player_model = (Model *)&g_CurrentPlayer->model;
-  if (objecthandlerGetModelAnim(player_model) == NULL)
-    return;
-
-  /* The first modelSetAnimation stores hip height in unk34.y. Later calls
-   * rewrite that as pos.y - ground and will lift the model if they run
-   * every live frame. */
-  modelSetAnimation(model, objecthandlerGetModelAnim(player_model),
-                    objecthandlerGetModelGunhand(player_model),
-                    objecthandlerGetModelField28(player_model), 0.5f, 0.0f);
-
-  root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
-      model, model->obj->RootNode);
-  root_data->ground = g_CurrentPlayer->field_70;
-}
-
-static void sync_freecam_bond(void) {
-  Model *model;
-  ModelRwData_HeaderRecord *root_data;
-
-  if (g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL ||
-      g_FreecamBondProp.chr != &g_FreecamBondChr)
-    return;
-
-  g_FreecamBondProp.pos = g_CurrentPlayer->prop->pos;
-  g_FreecamBondProp.pos.y = g_CurrentPlayer->field_70;
-  g_FreecamBondProp.stan = g_CurrentPlayer->prop->stan;
-  g_FreecamBondModelPosition = g_FreecamBondProp.pos;
-  g_FreecamBondProp.rooms[0] = g_CurrentPlayer->prop->stan != NULL
-                                   ? g_CurrentPlayer->prop->stan->room
-                                   : 0xff;
-  g_FreecamBondProp.rooms[1] = 0xff;
-  g_FreecamBondHeading = get_curplay_horizontal_rotation_in_degrees();
-  g_FreecamBondChr.ground = g_CurrentPlayer->field_70;
-  g_FreecamBondChr.prevpos = g_FreecamBondModelPosition;
-  set_color_shading_from_tile(&g_FreecamBondProp, &g_FreecamBondChr.nextcol);
-  g_FreecamBondChr.shadecol = g_FreecamBondChr.nextcol;
-
-  model = g_FreecamBondChr.model;
-  if (model == NULL)
-    return;
-
-  setsuboffset(model, &g_FreecamBondModelPosition);
-  setsubroty(model, g_FreecamBondHeading);
-  root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
-      model, model->obj->RootNode);
-  root_data->ground = g_CurrentPlayer->field_70;
-}
-
-static s32 bond_body_headers_resident(void) {
-  return c_item_entries[BODY_Brosnan_Tuxedo].header != NULL &&
-         c_item_entries[BODY_Brosnan_Tuxedo].header->RootNode != NULL &&
-         c_item_entries[HEAD_Male_Brosnan_Tuxedo].header != NULL &&
-         c_item_entries[HEAD_Male_Brosnan_Tuxedo].header->RootNode != NULL;
-}
-
-static s32 stage_pool_ready(void) {
-  return g_mempPools[MEMPOOL_STAGE].start != g_mempPools[MEMPOOL_STAGE].end &&
-         g_mempPools[MEMPOOL_STAGE].pos != 0;
-}
-
-static s32 bond_load_bytes_needed(void) {
-  return ((FREECAM_BOND_BODY_UNCOMPRESSED + FREECAM_BOND_GDL_PAD + 0xf) &
-          ~0xf) +
-         ((FREECAM_BOND_HEAD_UNCOMPRESSED + FREECAM_BOND_GDL_PAD + 0xf) &
-          ~0xf) +
-         FREECAM_BOND_LEFTOVER_RESERVE;
-}
-
-/* Vanilla fileLoad takes leftover as decompress workspace, then
- * mempAddEntryOfSizeToBank / fileSetSize shrink it back to the uncompressed
- * model plus rewritten display lists. Only call this when leftover can hold
- * both files and still leave a reserve; a mid-mission load with ~16KB left
- * overlaps the compressed source and dest and hangs in decompressdata. */
-static s32 try_load_bond_headers(void) {
-  s32 leftover;
-
-  if (bond_body_headers_resident())
-    return TRUE;
-
-  if (!stage_pool_ready() || g_CameraMode == CAMERAMODE_SWIRL)
-    return FALSE;
-
-  leftover = mempGetBankSizeLeft(MEMPOOL_STAGE);
-  if (leftover < bond_load_bytes_needed())
-    return FALSE;
-
-  load_body_head_if_not_loaded(BODY_Brosnan_Tuxedo);
-  leftover = mempGetBankSizeLeft(MEMPOOL_STAGE);
-  if (leftover < ((FREECAM_BOND_HEAD_UNCOMPRESSED + FREECAM_BOND_GDL_PAD + 0xf) &
-                  ~0xf) +
-                     FREECAM_BOND_LEFTOVER_RESERVE)
-    return FALSE;
-
-  load_body_head_if_not_loaded(HEAD_Male_Brosnan_Tuxedo);
-  return bond_body_headers_resident();
-}
-
-static void create_freecam_bond(void) {
-  Model *model;
-
-  if (g_CurrentPlayer == NULL || g_CurrentPlayer->prop == NULL)
-    return;
-
-  if (g_FreecamBondProp.chr == &g_FreecamBondChr &&
-      g_FreecamBondChr.model != NULL) {
-    sync_freecam_bond();
-    return;
-  }
-
-  /* Intros, outros, death animations and other third-person cameras attach the
-   * real Bond model to the player prop. A second body would overlap it. */
-  if (player_has_third_person_bond())
-    return;
-
-  /* A previous PIP/freecam exit may still be holding the instance until the
-   * last display list completes. Reuse it instead of failing the next create. */
-  if (g_FreecamBondDeferredModel != NULL) {
-    model = g_FreecamBondDeferredModel;
-    g_FreecamBondDeferredModel = NULL;
-  } else if (bond_body_headers_resident()) {
-    model = retrieve_header_for_body_and_head(BODY_Brosnan_Tuxedo,
-                                              HEAD_Male_Brosnan_Tuxedo, 0);
-    if (model == NULL)
-      return;
-  } else {
-    return;
-  }
-
-  bzero(&g_FreecamBondProp, sizeof(g_FreecamBondProp));
-  bzero(&g_FreecamBondChr, sizeof(g_FreecamBondChr));
-  g_FreecamBondProp.type = PROP_TYPE_CHR;
-  g_FreecamBondProp.chr = &g_FreecamBondChr;
-
-  /* This is only the subset of character state consumed by rendering. It is
-   * intentionally not created with init_GUARDdata_with_set_values: that
-   * initializer performs collision placement and allocates a gameplay CHR. */
-  g_FreecamBondChr.chrnum = -1;
-  g_FreecamBondChr.headnum = HEAD_Male_Brosnan_Tuxedo;
-  g_FreecamBondChr.bodynum = BODY_Brosnan_Tuxedo;
-  g_FreecamBondChr.actiontype = ACT_STAND;
-  g_FreecamBondChr.fadealpha = 0xff;
-  g_FreecamBondChr.flinchcnt = -1;
-  g_FreecamBondChr.chrflags = CHRFLAG_04000000;
-  g_FreecamBondChr.prop = &g_FreecamBondProp;
-  g_FreecamBondChr.model = model;
-  g_FreecamBondChr.chrwidth = 20.0f;
-  g_FreecamBondChr.chrheight = 185.0f;
-  g_FreecamBondChr.unk180[0].unk00 = -1;
-  g_FreecamBondChr.unk180[1].unk00 = -1;
-
-  /* The normal CHR callback derives root translation from gameplay movement
-   * state and rewrites this model back to the player's eye-height position.
-   * The synthetic body already has an explicit floor-level origin. */
-  sub_GAME_7F06FF5C(model, 0);
-  model->unk00 = 0x0a;
-  model->chr = &g_FreecamBondChr;
-  modelSetAnimPlaySpeed(model, animation_rate, 0.0f);
-  sync_freecam_bond();
-  apply_freecam_bond_animation(model);
+static s32 is_pinned_room(s32 room) {
+  return g_FreecamPin.active && g_FreecamPin.view.stan != NULL &&
+         g_FreecamPin.view.stan->room == room;
 }
 
 static s32 was_room_resident_on_enable(s32 room) {
@@ -272,12 +78,8 @@ static void capture_initial_room_residency(void) {
 
   bzero(g_FreecamInitialRoomResidency, sizeof(g_FreecamInitialRoomResidency));
   for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
-    s_room_info *info = &g_BgRoomInfo[room];
-
-    if (info->model_bin_loaded != 0 || info->ptr_point_index != NULL ||
-        info->ptr_expanded_mapping_info != NULL) {
+    if (room_has_geometry(&g_BgRoomInfo[room]))
       g_FreecamInitialRoomResidency[room >> 3] |= 1 << (room & 7);
-    }
   }
 }
 
@@ -288,13 +90,9 @@ static void restore_initial_room_residency(void) {
    * amount of room-heap space available that it had when freecam started. */
   for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
     s_room_info *info = &g_BgRoomInfo[room];
-    s32 pinned_room =
-        g_FreecamPinnedCameraActive && g_FreecamPinnedCamera.stan != NULL &&
-        g_FreecamPinnedCamera.stan->room == room;
 
-    if (!was_room_resident_on_enable(room) && !pinned_room &&
-        (info->model_bin_loaded != 0 || info->ptr_point_index != NULL ||
-         info->ptr_expanded_mapping_info != NULL)) {
+    if (!was_room_resident_on_enable(room) && !is_pinned_room(room) &&
+        room_has_geometry(info)) {
       delete_room_data(room);
     }
   }
@@ -316,23 +114,22 @@ static void restore_initial_room_residency(void) {
 
 static void update_room(void) {
   StandTile *tile;
-  f32 x = g_FreecamPosition.x;
-  f32 y = g_FreecamPosition.y;
-  f32 z = g_FreecamPosition.z;
+  f32 x = g_Freecam.position.x;
+  f32 y = g_Freecam.position.y;
+  f32 z = g_Freecam.position.z;
 
-  if (!stanFindNearestValidTilePointIncremental(&x, &y, &z, 0.0f, g_FreecamTile,
-                                                g_FreecamTilePosition.x,
-                                                g_FreecamTilePosition.z, &tile))
+  if (!stanFindNearestValidTilePointIncremental(
+          &x, &y, &z, 0.0f, g_Freecam.tile, g_Freecam.tile_position.x,
+          g_Freecam.tile_position.z, &tile))
     return;
 
   if (tile != NULL) {
-    g_FreecamTile = tile;
-    g_FreecamTilePosition.x = x;
-    g_FreecamTilePosition.y = y;
-    g_FreecamTilePosition.z = z;
-    if (tile->room > 0 && tile->room < g_MaxNumRooms &&
-        tile->room < MAXROOMCOUNT && tile->room != g_FreecamRoom) {
-      g_FreecamRoom = tile->room;
+    g_Freecam.tile = tile;
+    g_Freecam.tile_position.x = x;
+    g_Freecam.tile_position.y = y;
+    g_Freecam.tile_position.z = z;
+    if (room_is_valid(tile->room) && tile->room != g_Freecam.room) {
+      g_Freecam.room = tile->room;
       practice_invalidate_render_state();
     }
   }
@@ -347,87 +144,102 @@ static s32 apply_deadzone(s32 value) {
 }
 
 static void update_orientation(void) {
-  f32 cos_pitch = cosf(g_FreecamPitch);
-  f32 sin_pitch = sinf(g_FreecamPitch);
-  f32 cos_yaw = cosf(g_FreecamYaw);
-  f32 sin_yaw = sinf(g_FreecamYaw);
+  f32 cos_pitch = cosf(g_Freecam.pitch);
+  f32 sin_pitch = sinf(g_Freecam.pitch);
+  f32 cos_yaw = cosf(g_Freecam.yaw);
+  f32 sin_yaw = sinf(g_Freecam.yaw);
 
-  g_FreecamForward.x = cos_pitch * sin_yaw;
-  g_FreecamForward.y = sin_pitch;
-  g_FreecamForward.z = -cos_pitch * cos_yaw;
+  g_Freecam.forward.x = cos_pitch * sin_yaw;
+  g_Freecam.forward.y = sin_pitch;
+  g_Freecam.forward.z = -cos_pitch * cos_yaw;
 
-  g_FreecamUp.x = -sin_pitch * sin_yaw;
-  g_FreecamUp.y = cos_pitch;
-  g_FreecamUp.z = sin_pitch * cos_yaw;
+  g_Freecam.up.x = -sin_pitch * sin_yaw;
+  g_Freecam.up.y = cos_pitch;
+  g_Freecam.up.z = sin_pitch * cos_yaw;
+}
+
+static void init_orientation_from_forward(void) {
+  f32 forward_length_squared;
+  f32 horizontal_length;
+
+  forward_length_squared = g_Freecam.forward.x * g_Freecam.forward.x +
+                           g_Freecam.forward.y * g_Freecam.forward.y +
+                           g_Freecam.forward.z * g_Freecam.forward.z;
+  if (forward_length_squared < FREECAM_FORWARD_EPSILON) {
+    g_Freecam.forward.x = 0.0f;
+    g_Freecam.forward.y = 0.0f;
+    g_Freecam.forward.z = -1.0f;
+  }
+
+  horizontal_length = sqrtf(g_Freecam.forward.x * g_Freecam.forward.x +
+                            g_Freecam.forward.z * g_Freecam.forward.z);
+  g_Freecam.yaw = atan2f(g_Freecam.forward.x, -g_Freecam.forward.z);
+  g_Freecam.pitch = atan2f(g_Freecam.forward.y, horizontal_length);
+  if (g_Freecam.pitch > M_PI_F)
+    g_Freecam.pitch -= M_TAU_F;
+  update_orientation();
+}
+
+static void copy_player_start_position(void) {
+  if (g_CurrentPlayer->unknown == 1)
+    g_Freecam.start_position = g_CurrentPlayer->pos;
+  else
+    g_Freecam.start_position = g_CurrentPlayer->field_488.pos;
+}
+
+static void init_camera_from_pin(void) {
+  /* Resume from the pinned PIP instead of Bond's current camera. Bond
+   * reveal still uses his live position so a distant pin shows him
+   * immediately. */
+  g_Freecam.position = g_FreecamPin.view.position;
+  g_Freecam.forward = g_FreecamPin.view.look;
+  g_Freecam.tile = g_FreecamPin.view.stan;
+  g_Freecam.room = g_Freecam.tile != NULL ? g_Freecam.tile->room
+                                          : bondviewGetCurrentPlayersRoom();
+  copy_player_start_position();
+}
+
+static void init_camera_from_player(void) {
+  if (g_CurrentPlayer->unknown == 1) {
+    g_Freecam.position = g_CurrentPlayer->pos;
+    g_Freecam.forward.x = g_CurrentPlayer->pos2.x - g_CurrentPlayer->pos.x;
+    g_Freecam.forward.y = g_CurrentPlayer->pos2.y - g_CurrentPlayer->pos.y;
+    g_Freecam.forward.z = g_CurrentPlayer->pos2.z - g_CurrentPlayer->pos.z;
+  } else {
+    g_Freecam.position = g_CurrentPlayer->field_488.pos;
+    g_Freecam.forward = g_CurrentPlayer->field_488.applied_view;
+  }
+  g_Freecam.room = bondviewGetCurrentPlayersRoom();
+  g_Freecam.tile = g_CurrentPlayer->field_488.current_tile_ptr;
+  g_Freecam.start_position = g_Freecam.position;
 }
 
 s32 practice_freecam_enable(s32 controller) {
   s32 previous_player;
-  f32 forward_length_squared;
-  f32 horizontal_length;
 
   if (g_CurrentPlayer == NULL || controller < 0)
     return FALSE;
 
   previous_player = get_cur_playernum();
-  g_FreecamPlayer = controller < getPlayerCount() ? controller : 0;
-  set_cur_player(g_FreecamPlayer);
+  g_Freecam.player = controller < getPlayerCount() ? controller : 0;
+  set_cur_player(g_Freecam.player);
 
-  if (g_FreecamPinnedCameraActive) {
-    /* Resume from the pinned PIP instead of Bond's current camera. Bond
-     * reveal still uses his live position so a distant pin shows him
-     * immediately. */
-    g_FreecamPosition = g_FreecamPinnedCamera.position;
-    g_FreecamForward = g_FreecamPinnedCamera.look;
-    g_FreecamTile = g_FreecamPinnedCamera.stan;
-    g_FreecamRoom = g_FreecamTile != NULL ? g_FreecamTile->room
-                                          : bondviewGetCurrentPlayersRoom();
-    if (g_CurrentPlayer->unknown == 1)
-      g_FreecamStartPosition = g_CurrentPlayer->pos;
-    else
-      g_FreecamStartPosition = g_CurrentPlayer->field_488.pos;
-  } else {
-    if (g_CurrentPlayer->unknown == 1) {
-      g_FreecamPosition = g_CurrentPlayer->pos;
-      g_FreecamForward.x = g_CurrentPlayer->pos2.x - g_CurrentPlayer->pos.x;
-      g_FreecamForward.y = g_CurrentPlayer->pos2.y - g_CurrentPlayer->pos.y;
-      g_FreecamForward.z = g_CurrentPlayer->pos2.z - g_CurrentPlayer->pos.z;
-    } else {
-      g_FreecamPosition = g_CurrentPlayer->field_488.pos;
-      g_FreecamForward = g_CurrentPlayer->field_488.applied_view;
-    }
-    g_FreecamRoom = bondviewGetCurrentPlayersRoom();
-    g_FreecamTile = g_CurrentPlayer->field_488.current_tile_ptr;
-    g_FreecamStartPosition = g_FreecamPosition;
-  }
-  g_FreecamTilePosition = g_FreecamPosition;
+  if (g_FreecamPin.active)
+    init_camera_from_pin();
+  else
+    init_camera_from_player();
+
+  g_Freecam.tile_position = g_Freecam.position;
   stanFindNearestValidTilePointIncrementalReset();
-
-  forward_length_squared = g_FreecamForward.x * g_FreecamForward.x +
-                           g_FreecamForward.y * g_FreecamForward.y +
-                           g_FreecamForward.z * g_FreecamForward.z;
-  if (forward_length_squared < 0.000001f) {
-    g_FreecamForward.x = 0.0f;
-    g_FreecamForward.y = 0.0f;
-    g_FreecamForward.z = -1.0f;
-  }
-
-  horizontal_length = sqrtf(g_FreecamForward.x * g_FreecamForward.x +
-                            g_FreecamForward.z * g_FreecamForward.z);
-  g_FreecamYaw = atan2f(g_FreecamForward.x, -g_FreecamForward.z);
-  g_FreecamPitch = atan2f(g_FreecamForward.y, horizontal_length);
-  if (g_FreecamPitch > M_PI_F)
-    g_FreecamPitch -= M_TAU_F;
-  update_orientation();
+  init_orientation_from_forward();
 
   capture_initial_room_residency();
-  try_load_bond_headers();
-  create_freecam_bond();
-  g_FreecamController = controller;
-  g_FreecamActive = TRUE;
-  g_FreecamRestorePlayerCamera = FALSE;
-  g_FreecamSwallowInput = FALSE;
-  g_FreecamLastCount = osGetCount();
+  practice_bond_model_load_and_ensure();
+  g_Freecam.controller = controller;
+  g_Freecam.active = TRUE;
+  g_Freecam.restore_player_camera = FALSE;
+  g_Freecam.swallow_input = FALSE;
+  g_Freecam.last_count = osGetCount();
   joySetInputSuppressed(TRUE);
   practice_invalidate_render_state();
   set_cur_player(previous_player);
@@ -436,134 +248,53 @@ s32 practice_freecam_enable(s32 controller) {
 
 void practice_freecam_disable(void) {
   restore_initial_room_residency();
-  g_FreecamActive = FALSE;
-  g_FreecamRestorePlayerCamera = TRUE;
-  g_FreecamSwallowInput = TRUE;
+  g_Freecam.active = FALSE;
+  g_Freecam.restore_player_camera = TRUE;
+  g_Freecam.swallow_input = TRUE;
   stanFindNearestValidTilePointIncrementalReset();
   practice_invalidate_render_state();
 }
 
 void practice_freecam_reset(void) {
-  /* Level setup has already rebuilt the character/model pools, so old-stage
-   * pointers must only be forgotten here. Normal freecam exit performs the
-   * explicit release above. */
-  bzero(&g_FreecamBondProp, sizeof(g_FreecamBondProp));
-  bzero(&g_FreecamBondChr, sizeof(g_FreecamBondChr));
-  g_FreecamBondDeferredModel = NULL;
-  g_FreecamActive = FALSE;
-  g_FreecamSwallowInput = FALSE;
-  g_FreecamController = 0;
-  g_FreecamPlayer = 0;
-  g_FreecamRestorePlayerCamera = FALSE;
-  g_FreecamRoom = 0;
-  g_FreecamTile = NULL;
-  g_FreecamPinnedCameraActive = FALSE;
-  g_FreecamLastCount = 0;
+  g_Freecam.active = FALSE;
+  g_Freecam.swallow_input = FALSE;
+  g_Freecam.controller = 0;
+  g_Freecam.player = 0;
+  g_Freecam.restore_player_camera = FALSE;
+  g_Freecam.room = 0;
+  g_Freecam.tile = NULL;
+  g_FreecamPin.active = FALSE;
+  g_Freecam.last_count = 0;
   stanFindNearestValidTilePointIncrementalReset();
   joySetInputSuppressed(FALSE);
 }
 
-s32 practice_freecam_is_active(void) { return g_FreecamActive; }
+s32 practice_freecam_is_active(void) { return g_Freecam.active; }
 
 void practice_freecam_pin_camera(void) {
-  if (!g_FreecamActive || g_FreecamTile == NULL)
+  if (!g_Freecam.active || g_Freecam.tile == NULL)
     return;
 
-  g_FreecamPinnedCamera.position = g_FreecamPosition;
-  g_FreecamPinnedCamera.look = g_FreecamForward;
-  g_FreecamPinnedCamera.up = g_FreecamUp;
-  g_FreecamPinnedCamera.stan = g_FreecamTile;
-  g_FreecamPinnedCamera.tracked_prop = NULL;
-  g_FreecamPinnedCamera.forced_object = NULL;
-  g_FreecamPinnedCamera.flags =
+  g_FreecamPin.view.position = g_Freecam.position;
+  g_FreecamPin.view.look = g_Freecam.forward;
+  g_FreecamPin.view.up = g_Freecam.up;
+  g_FreecamPin.view.stan = g_Freecam.tile;
+  g_FreecamPin.view.tracked_prop = NULL;
+  g_FreecamPin.view.forced_object = NULL;
+  g_FreecamPin.view.flags =
       PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY;
-  g_FreecamPinnedCamera.border_color = 0xff33ffff;
-  g_FreecamPinnedCameraActive = TRUE;
+  g_FreecamPin.view.border_color = PRACTICE_FILL_COLOR(255, 51, 255);
+  g_FreecamPin.active = TRUE;
   practice_invalidate_render_state();
 }
 
-void practice_freecam_clear_pinned_camera(void) {
-  g_FreecamPinnedCameraActive = FALSE;
-}
+void practice_freecam_clear_pinned_camera(void) { g_FreecamPin.active = FALSE; }
 
 s32 practice_freecam_add_pinned_camera_view(void) {
-  if (g_FreecamActive || !g_FreecamPinnedCameraActive)
+  if (g_Freecam.active || !g_FreecamPin.active)
     return FALSE;
 
-  return practice_external_camera_add_view(&g_FreecamPinnedCamera);
-}
-
-static s32 bond_room_id(void) {
-  if (g_FreecamBondProp.rooms[0] != 0xff)
-    return g_FreecamBondProp.rooms[0];
-  if (g_FreecamBondProp.stan != NULL)
-    return g_FreecamBondProp.stan->room;
-  return -1;
-}
-
-static u8 force_bond_room_visible(void) {
-  s32 room = bond_room_id();
-  u8 saved;
-
-  if (room <= 0 || room >= g_MaxNumRooms || room >= MAXROOMCOUNT)
-    return 0xff;
-
-  saved = g_BgRoomInfo[room].room_rendered;
-  g_BgRoomInfo[room].room_rendered = 1;
-  return saved;
-}
-
-static void restore_bond_room_visible(u8 saved) {
-  s32 room = bond_room_id();
-
-  if (saved == 0xff || room <= 0 || room >= g_MaxNumRooms ||
-      room >= MAXROOMCOUNT)
-    return;
-
-  g_BgRoomInfo[room].room_rendered = saved;
-}
-
-static Gfx *render_freecam_bond(Gfx *gdl, s32 force_room_visible) {
-  ChrRecord *chr;
-  Model *model;
-  ModelRwData_HeaderRecord *root_data;
-  u8 saved_room_rendered = 0xff;
-
-  if (player_has_third_person_bond() || g_FreecamBondProp.chr == NULL)
-    return gdl;
-
-  chr = g_FreecamBondProp.chr;
-  model = chr->model;
-  if (model == NULL || chr->prop != &g_FreecamBondProp)
-    return gdl;
-
-  setsuboffset(model, &g_FreecamBondModelPosition);
-  setsubroty(model, g_FreecamBondHeading);
-  root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
-      model, model->obj->RootNode);
-  root_data->ground = g_FreecamBondChr.ground;
-  subcalcpos(model);
-
-  /* Grenade cam sits well above the floor, so Bond's room is often not in
-   * the PIP's rendered set. Mark it visible so the frustum test can run. */
-  if (force_room_visible)
-    saved_room_rendered = force_bond_room_visible();
-
-  chrTickBeams(&g_FreecamBondProp);
-
-  if (force_room_visible)
-    restore_bond_room_visible(saved_room_rendered);
-
-  if (chr->field_20 != NULL &&
-      dynGetFreeVtx() >= EXTERNAL_CAMERA_BOND_DYN_RESERVE) {
-    gdl = chrRenderProp(&g_FreecamBondProp, gdl, FALSE);
-    gdl = chrRenderProp(&g_FreecamBondProp, gdl, TRUE);
-  } else if (chr->field_20 != NULL) {
-    sub_GAME_7F06B248(chr->field_20);
-    chr->field_20 = NULL;
-  }
-
-  return gdl;
+  return practice_external_camera_add_view(&g_FreecamPin.view);
 }
 
 Gfx *practice_freecam_render_bond(Gfx *gdl) {
@@ -571,128 +302,48 @@ Gfx *practice_freecam_render_bond(Gfx *gdl) {
   f32 dy;
   f32 dz;
 
-  if (!g_FreecamActive || get_cur_playernum() != g_FreecamPlayer)
+  if (!g_Freecam.active || get_cur_playernum() != g_Freecam.player)
     return gdl;
 
-  dx = g_FreecamPosition.x - g_FreecamStartPosition.x;
-  dy = g_FreecamPosition.y - g_FreecamStartPosition.y;
-  dz = g_FreecamPosition.z - g_FreecamStartPosition.z;
+  dx = g_Freecam.position.x - g_Freecam.start_position.x;
+  dy = g_Freecam.position.y - g_Freecam.start_position.y;
+  dz = g_Freecam.position.z - g_Freecam.start_position.z;
   if (dx * dx + dy * dy + dz * dz <
       FREECAM_BOND_REVEAL_DISTANCE * FREECAM_BOND_REVEAL_DISTANCE)
     return gdl;
 
-  return render_freecam_bond(gdl, FALSE);
-}
-
-void practice_freecam_ensure_bond_for_external_cameras(void) {
-  if (g_FreecamBondProp.chr == &g_FreecamBondChr &&
-      g_FreecamBondChr.model != NULL) {
-    sync_freecam_bond();
-    return;
-  }
-
-  /* Instantiates only when headers are already resident. fileLoad belongs in
-   * try_load_bond_headers (after swirl / idle tick), never on the PIP render
-   * path that calls this. */
-  create_freecam_bond();
-}
-
-void practice_freecam_sync_bond_for_external_cameras(s32 needed) {
-  if (!needed)
-    return;
-
-  /* Position-only update for the render path. */
-  if (g_FreecamBondProp.chr == &g_FreecamBondChr &&
-      g_FreecamBondChr.model != NULL)
-    sync_freecam_bond();
-}
-
-void practice_freecam_process_pending_bond_ensure(s32 pending_gfx_tasks) {
-  /* This runs from the main tick, not display-list setup. pending_gfx may
-   * still be 1 from the previous frame; leftover is unused by that task. */
-  (void)pending_gfx_tasks;
-  try_load_bond_headers();
-}
-
-Gfx *practice_freecam_render_bond_in_external_camera(Gfx *gdl) {
-  s32 room;
-  s32 room_already_visible;
-
-  if (g_CurrentPlayer == NULL || g_FreecamBondProp.chr == NULL)
-    return gdl;
-
-  if (dynGetFreeVtx() < EXTERNAL_CAMERA_BOND_DYN_RESERVE)
-    return gdl;
-
-  room = bond_room_id();
-  room_already_visible = room > 0 && room < g_MaxNumRooms &&
-                         room < MAXROOMCOUNT &&
-                         g_BgRoomInfo[room].room_rendered != 0;
-  /* Force Bond's room into the PIP visibility set when it is not already
-   * portal-visible (grenade cam looking down, or a distant follow cam). */
-  return render_freecam_bond(gdl, !room_already_visible);
-}
-
-void practice_freecam_release_deferred_model(s32 pending_gfx_tasks) {
-  s32 previous_player;
-
-  if (pending_gfx_tasks != 0 || g_FreecamBondDeferredModel == NULL)
-    return;
-
-  clear_aircraft_model_obj(g_FreecamBondDeferredModel);
-  g_FreecamBondDeferredModel = NULL;
-
-  /* A rapid re-entry can occur before the previous model was safe to release.
-   * Create the replacement as soon as the pool instance becomes available. */
-  if (g_CurrentPlayer != NULL && g_FreecamBondProp.chr == NULL) {
-    previous_player = get_cur_playernum();
-    set_cur_player(g_FreecamPlayer);
-    try_load_bond_headers();
-    create_freecam_bond();
-    set_cur_player(previous_player);
-  }
-}
-
-void practice_freecam_prepare_state_load(void) {
-  if (g_FreecamActive || g_FreecamBondProp.chr != NULL) {
-    destroy_freecam_bond();
-    practice_freecam_release_deferred_model(0);
-  }
+  return practice_bond_model_render(gdl, FALSE);
 }
 
 void practice_freecam_finish_state_load(void) {
   s32 previous_player;
 
-  if ((!g_FreecamActive && !g_FreecamPinnedCameraActive) ||
-      g_CurrentPlayer == NULL)
+  if ((!g_Freecam.active && !g_FreecamPin.active) || g_CurrentPlayer == NULL)
     return;
 
   previous_player = get_cur_playernum();
-  set_cur_player(g_FreecamPlayer);
-  try_load_bond_headers();
-  create_freecam_bond();
+  set_cur_player(g_Freecam.player);
+  practice_bond_model_load_and_ensure();
   set_cur_player(previous_player);
 }
 
 void practice_freecam_age_rooms(void) {
   s32 room;
 
-  if (!g_FreecamActive)
+  if (!g_Freecam.active)
     return;
 
   for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
     s_room_info *info = &g_BgRoomInfo[room];
 
-    if (info->field_35 != 0 ||
-        (g_FreecamPinnedCameraActive && g_FreecamPinnedCamera.stan != NULL &&
-         g_FreecamPinnedCamera.stan->room == room))
+    if (info->field_35 != 0 || is_pinned_room(room))
       continue;
 
     if (info->model_bin_loaded == 0 &&
         (info->ptr_point_index != NULL ||
          info->ptr_expanded_mapping_info != NULL)) {
       delete_room_data(room);
-    } else if (info->model_bin_loaded == 4) {
+    } else if (info->model_bin_loaded == FREECAM_ROOM_AGE_UNLOAD) {
       delete_room_data(room);
     } else if (info->model_bin_loaded != 0) {
       info->model_bin_loaded++;
@@ -700,51 +351,43 @@ void practice_freecam_age_rooms(void) {
   }
 }
 
-void practice_freecam_tick(u16 hotkey_trigger) {
-  u16 buttons;
-  s32 stick_x;
-  s32 stick_y;
-  f32 move;
-  f32 strafe;
-  f32 vertical;
+static void swallow_exit_input(void) {
+  if (g_Freecam.swallow_input &&
+      joyGetButtonsRaw(g_Freecam.controller, ANY_BUTTON) == 0 &&
+      apply_deadzone(joyGetStickXRaw(g_Freecam.controller)) == 0 &&
+      apply_deadzone(joyGetStickYRaw(g_Freecam.controller)) == 0) {
+    g_Freecam.swallow_input = FALSE;
+    joySetInputSuppressed(FALSE);
+  }
+}
+
+static u16 hotkey_chord_buttons(void) {
+  u16 buttons = A_BUTTON | B_BUTTON | START_BUTTON | U_JPAD | D_JPAD | L_JPAD |
+                R_JPAD | D_CBUTTONS;
+#if DEV
+  buttons |= U_CBUTTONS;
+#endif
+  return buttons;
+}
+
+static void apply_look(s32 stick_x, s32 stick_y) {
+  g_Freecam.yaw += stick_x * FREECAM_TURN_SPEED;
+  g_Freecam.pitch += stick_y * FREECAM_TURN_SPEED;
+
+  if (g_Freecam.pitch > FREECAM_MAX_PITCH)
+    g_Freecam.pitch = FREECAM_MAX_PITCH;
+  if (g_Freecam.pitch < -FREECAM_MAX_PITCH)
+    g_Freecam.pitch = -FREECAM_MAX_PITCH;
+}
+
+static s32 apply_move(u16 buttons, u16 hotkey_trigger, u32 elapsed_counts) {
+  f32 move = 0.0f;
+  f32 strafe = 0.0f;
+  f32 vertical = 0.0f;
   f32 direction_length;
   f32 distance;
   f32 cos_yaw;
   f32 sin_yaw;
-  u32 current_count;
-  u32 elapsed_counts;
-
-  if (!g_FreecamActive) {
-    if (g_FreecamSwallowInput &&
-        joyGetButtonsRaw(g_FreecamController, ANY_BUTTON) == 0 &&
-        apply_deadzone(joyGetStickXRaw(g_FreecamController)) == 0 &&
-        apply_deadzone(joyGetStickYRaw(g_FreecamController)) == 0) {
-      g_FreecamSwallowInput = FALSE;
-      joySetInputSuppressed(FALSE);
-    }
-    return;
-  }
-
-  current_count = osGetCount();
-  elapsed_counts = current_count - g_FreecamLastCount;
-  g_FreecamLastCount = current_count;
-
-  buttons = joyGetButtonsRaw(g_FreecamController, ANY_BUTTON);
-  if ((buttons & hotkey_trigger) &&
-      (buttons & (A_BUTTON | B_BUTTON | START_BUTTON | U_JPAD | D_JPAD |
-                  L_JPAD | R_JPAD | D_CBUTTONS
-#if DEV
-                  | U_CBUTTONS
-#endif
-                  ))) {
-    return;
-  }
-
-  stick_x = apply_deadzone(joyGetStickXRaw(g_FreecamController));
-  stick_y = apply_deadzone(joyGetStickYRaw(g_FreecamController));
-  move = 0.0f;
-  strafe = 0.0f;
-  vertical = 0.0f;
 
   if (buttons & (U_CBUTTONS | U_JPAD))
     move += 1.0f;
@@ -759,15 +402,45 @@ void practice_freecam_tick(u16 hotkey_trigger) {
   if (buttons & Z_TRIG)
     vertical -= 1.0f;
 
-  g_FreecamYaw += stick_x * FREECAM_TURN_SPEED;
-  g_FreecamPitch += stick_y * FREECAM_TURN_SPEED;
+  if (move == 0.0f && strafe == 0.0f && vertical == 0.0f)
+    return FALSE;
 
-  if (g_FreecamPitch > FREECAM_MAX_PITCH)
-    g_FreecamPitch = FREECAM_MAX_PITCH;
-  if (g_FreecamPitch < -FREECAM_MAX_PITCH)
-    g_FreecamPitch = -FREECAM_MAX_PITCH;
+  cos_yaw = cosf(g_Freecam.yaw);
+  sin_yaw = sinf(g_Freecam.yaw);
+  direction_length = sqrtf(move * move + strafe * strafe + vertical * vertical);
+  distance = FREECAM_MOVE_SPEED * (f32)elapsed_counts /
+             FREECAM_CPU_COUNTS_PER_SECOND / direction_length;
+  g_Freecam.position.x += (move * sin_yaw + strafe * cos_yaw) * distance;
+  g_Freecam.position.y += vertical * distance;
+  g_Freecam.position.z += (-move * cos_yaw + strafe * sin_yaw) * distance;
+  return TRUE;
+}
 
-  if (move == 0.0f && strafe == 0.0f && vertical == 0.0f) {
+void practice_freecam_tick(u16 hotkey_trigger) {
+  u16 buttons;
+  s32 stick_x;
+  s32 stick_y;
+  u32 current_count;
+  u32 elapsed_counts;
+
+  if (!g_Freecam.active) {
+    swallow_exit_input();
+    return;
+  }
+
+  current_count = osGetCount();
+  elapsed_counts = current_count - g_Freecam.last_count;
+  g_Freecam.last_count = current_count;
+
+  buttons = joyGetButtonsRaw(g_Freecam.controller, ANY_BUTTON);
+  if ((buttons & hotkey_trigger) && (buttons & hotkey_chord_buttons()))
+    return;
+
+  stick_x = apply_deadzone(joyGetStickXRaw(g_Freecam.controller));
+  stick_y = apply_deadzone(joyGetStickYRaw(g_Freecam.controller));
+  apply_look(stick_x, stick_y);
+
+  if (!apply_move(buttons, hotkey_trigger, elapsed_counts)) {
     update_room();
     if (stick_x != 0 || stick_y != 0) {
       update_orientation();
@@ -776,47 +449,39 @@ void practice_freecam_tick(u16 hotkey_trigger) {
     return;
   }
 
-  cos_yaw = cosf(g_FreecamYaw);
-  sin_yaw = sinf(g_FreecamYaw);
-  direction_length = sqrtf(move * move + strafe * strafe + vertical * vertical);
-  distance = FREECAM_MOVE_SPEED * (f32)elapsed_counts /
-             FREECAM_CPU_COUNTS_PER_SECOND / direction_length;
-  g_FreecamPosition.x += (move * sin_yaw + strafe * cos_yaw) * distance;
-  g_FreecamPosition.y += vertical * distance;
-  g_FreecamPosition.z += (-move * cos_yaw + strafe * sin_yaw) * distance;
   update_room();
   update_orientation();
   practice_invalidate_render_state();
 }
 
 s32 practice_freecam_apply_camera(void) {
-  if (!g_FreecamActive || get_cur_playernum() != g_FreecamPlayer)
+  if (!g_Freecam.active || get_cur_playernum() != g_Freecam.player)
     return FALSE;
 
-  sub_GAME_7F0876C4(&g_FreecamPosition, &g_FreecamForward, &g_FreecamUp);
+  sub_GAME_7F0876C4(&g_Freecam.position, &g_Freecam.forward, &g_Freecam.up);
   return TRUE;
 }
 
 s32 practice_freecam_consume_camera_restore(void) {
-  if (g_FreecamActive || !g_FreecamRestorePlayerCamera ||
-      get_cur_playernum() != g_FreecamPlayer) {
+  if (g_Freecam.active || !g_Freecam.restore_player_camera ||
+      get_cur_playernum() != g_Freecam.player) {
     return FALSE;
   }
 
-  g_FreecamRestorePlayerCamera = FALSE;
+  g_Freecam.restore_player_camera = FALSE;
   return TRUE;
 }
 
 s32 practice_freecam_get_render_context(u8 *room, coord3d **position,
                                         StandTile **tile) {
-  if (!g_FreecamActive || get_cur_playernum() != g_FreecamPlayer)
+  if (!g_Freecam.active || get_cur_playernum() != g_Freecam.player)
     return FALSE;
 
   if (room != NULL)
-    *room = g_FreecamRoom;
+    *room = g_Freecam.room;
   if (position != NULL)
-    *position = &g_FreecamPosition;
+    *position = &g_Freecam.position;
   if (tile != NULL)
-    *tile = g_FreecamTile;
+    *tile = g_Freecam.tile;
   return TRUE;
 }

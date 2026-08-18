@@ -37,6 +37,7 @@
 #include "practice/practice_dam_guard_cam.h"
 #include "practice/practice_external_camera.h"
 #include "practice/practice_frigate_hostage_cam.h"
+#include "practice/practice_bond_model.h"
 #include "practice/practice_freecam.h"
 #include "practice/practice_dialog.h"
 #include "practice/practice_ui.h"
@@ -521,6 +522,7 @@ void lvlStageLoad(s32 stage)
     D_80048368 = 1.0f;
     lvlSetControlsLockedFlag(0);
 #ifdef PRACTICE_ROM
+    practice_bond_model_reset();
     practice_freecam_reset();
     practice_dialog_reset();
     if (g_CurrentStageToLoad != LEVELID_TITLE) {
@@ -1036,27 +1038,26 @@ Gfx* lvlRender(Gfx* DL)
             if (get_debug_render_raster() == DEB_BOND_VIEW)
             {
 #ifdef PRACTICE_ROM
-                if (practice_freecam_apply_camera())
+                if (!practice_freecam_apply_camera())
                 {
-                    // Camera matrices were supplied by the practice freecam.
-                }
-                else if (speedgraphframes != 0)
-                {
-                    DL = sub_GAME_7F087A08(DL);
-                }
-                else if (practice_freecam_consume_camera_restore())
-                {
-                    bool saved_render_only = g_IsRenderOnly;
+                    if (speedgraphframes != 0)
+                    {
+                        DL = sub_GAME_7F087A08(DL);
+                    }
+                    else if (practice_freecam_consume_camera_restore())
+                    {
+                        bool saved_render_only = g_IsRenderOnly;
 
-                    /* Exiting freecam while remaining paused still needs one
-                     * normal camera build before culling can reuse it. */
-                    g_IsRenderOnly = TRUE;
-                    DL = sub_GAME_7F087A08(DL);
-                    g_IsRenderOnly = saved_render_only;
-                }
-                else if (camGetWorldToScreenMtxf() == NULL)
-                {
-                    continue;
+                        /* Exiting freecam while remaining paused still needs one
+                         * normal camera build before culling can reuse it. */
+                        g_IsRenderOnly = TRUE;
+                        DL = sub_GAME_7F087A08(DL);
+                        g_IsRenderOnly = saved_render_only;
+                    }
+                    else if (camGetWorldToScreenMtxf() == NULL)
+                    {
+                        continue;
+                    }
                 }
 #else
                 DL = sub_GAME_7F087A08(DL);

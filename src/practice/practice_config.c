@@ -43,6 +43,7 @@ struct PracticeConfig practice = {
     PRACTICE_STORAGE_FLASHCART_SD, // save_state_storage
     5,                             // max_save_states
     FALSE,                         // bunker1_keycard_guard_grenade
+    TRUE,                          // show_bond_in_cam
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -295,6 +296,7 @@ static const struct PracticeSetting s_global_settings[] = {
     OPTIONS_SETTING("Record replay seeds", record_replay_seeds, s_off_on, NULL),
 #endif
     OPTIONS_SETTING("Grenade cam", grenade_cam, s_off_on, NULL),
+    OPTIONS_SETTING("Show Bond in cam", show_bond_in_cam, s_on_off, NULL),
     OPTIONS_SETTING("Max cameras", max_external_cameras, s_max_external_cameras,
                     NULL),
     OPTIONS_SETTING("Log on split", log_splits, s_off_on, NULL),

@@ -40,5 +40,6 @@ void practice_dam_guard_cam_tick(void) {
   chrlvGetPatrolPercentOrPosition(guard, &virtual_position);
   practice_external_camera_add_npc_follow_view(
       guard, &s_DamGuardCamera, &virtual_position,
-      PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY, 0);
+      PRACTICE_EXTERNAL_CAMERA_PRESERVE_GAMEPLAY_VISIBILITY,
+      PRACTICE_FILL_COLOR(255, 255, 255));
 }

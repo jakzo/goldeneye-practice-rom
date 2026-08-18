@@ -2,6 +2,7 @@
 #include "os.h"
 #include "player_2.h"
 #include "practice_config.h"
+#include "practice_bond_model.h"
 #include "practice_freecam.h"
 #include "practice_replay.h"
 #include "practice_splits.h"
@@ -35,8 +36,7 @@ void practice_check_hotkeys(s32 pending_gfx_tasks) {
   if (g_ReplayIsPlaying)
     joySetContDataIndex(0);
 
-  practice_freecam_release_deferred_model(pending_gfx_tasks);
-  practice_freecam_process_pending_bond_ensure(pending_gfx_tasks);
+  practice_bond_model_tick(pending_gfx_tasks);
   practice_freecam_tick(trigger);
 
   for (controller = 0; controller < MAXCONTROLLERS; controller++) {

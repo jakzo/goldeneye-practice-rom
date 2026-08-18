@@ -565,6 +565,39 @@ static void restore_monitor_states(PracticeRenderContext *context) {
     *states[i].monitor = states[i].state;
 }
 
+void practice_save_player_pose(PracticeSavedPlayerPose *saved) {
+  saved->pos = g_CurrentPlayer->pos;
+  saved->pos3 = g_CurrentPlayer->pos3;
+  saved->collision_pos = g_CurrentPlayer->field_488.pos;
+  saved->collision_pos3 = g_CurrentPlayer->field_488.pos3;
+  saved->room_pointer = g_CurrentPlayer->room_pointer;
+  saved->portal_tile = g_CurrentPlayer->field_488.current_tile_ptr_for_portals;
+  saved->prop_pos = g_CurrentPlayer->prop->pos;
+  saved->prop_stan = g_CurrentPlayer->prop->stan;
+}
+
+void practice_apply_camera_pose(const coord3d *position, StandTile *tile) {
+  g_CurrentPlayer->pos = *position;
+  g_CurrentPlayer->pos3 = *position;
+  g_CurrentPlayer->field_488.pos = *position;
+  g_CurrentPlayer->field_488.pos3 = *position;
+  g_CurrentPlayer->room_pointer = tile;
+  g_CurrentPlayer->field_488.current_tile_ptr_for_portals = tile;
+  g_CurrentPlayer->prop->pos = *position;
+  g_CurrentPlayer->prop->stan = tile;
+}
+
+void practice_restore_player_pose(const PracticeSavedPlayerPose *saved) {
+  g_CurrentPlayer->pos = saved->pos;
+  g_CurrentPlayer->pos3 = saved->pos3;
+  g_CurrentPlayer->field_488.pos = saved->collision_pos;
+  g_CurrentPlayer->field_488.pos3 = saved->collision_pos3;
+  g_CurrentPlayer->room_pointer = saved->room_pointer;
+  g_CurrentPlayer->field_488.current_tile_ptr_for_portals = saved->portal_tile;
+  g_CurrentPlayer->prop->pos = saved->prop_pos;
+  g_CurrentPlayer->prop->stan = saved->prop_stan;
+}
+
 static void prepare_freecam_player_state(PracticeRenderContext *context) {
   coord3d *position;
   StandTile *tile;
@@ -579,33 +612,26 @@ static void prepare_freecam_player_state(PracticeRenderContext *context) {
     return;
   }
 
-  context->saved_player_pos = g_CurrentPlayer->pos;
-  context->saved_player_pos3 = g_CurrentPlayer->pos3;
-  context->saved_collision_pos = g_CurrentPlayer->field_488.pos;
-  context->saved_collision_pos3 = g_CurrentPlayer->field_488.pos3;
-  context->saved_room_pointer = g_CurrentPlayer->room_pointer;
-  context->saved_portal_tile =
-      g_CurrentPlayer->field_488.current_tile_ptr_for_portals;
-  context->saved_player_prop_pos = g_CurrentPlayer->prop->pos;
-  context->saved_player_prop_stan = g_CurrentPlayer->prop->stan;
-
-  g_CurrentPlayer->pos = *position;
-  g_CurrentPlayer->pos3 = *position;
-  g_CurrentPlayer->field_488.pos = *position;
-  g_CurrentPlayer->field_488.pos3 = *position;
-  g_CurrentPlayer->room_pointer = tile;
-  g_CurrentPlayer->field_488.current_tile_ptr_for_portals = tile;
-  g_CurrentPlayer->prop->pos = *position;
-  g_CurrentPlayer->prop->stan = tile;
-
+  practice_save_player_pose(&context->saved_player_pose);
+  practice_apply_camera_pose(position, tile);
   context->freecam_render = TRUE;
   save_monitor_states(context);
+}
+
+static void dispatch_synthetic_prop_visibility(s32 wrap_external) {
+  if (wrap_external)
+    practice_external_camera_set_rendering(TRUE);
+  practice_external_camera_prepare_props(TRUE);
+  chraiUpdateOnscreenPropCount();
+  if (wrap_external)
+    practice_external_camera_set_rendering(FALSE);
 }
 
 static void prepare_freecam_prop_visibility(PracticeRenderContext *context) {
   if (!context->freecam_render)
     return;
 
+  /* Leave the external-camera guard set until restore_freecam_player_state. */
   practice_external_camera_set_rendering(TRUE);
   practice_external_camera_prepare_props(TRUE);
   chraiUpdateOnscreenPropCount();
@@ -613,35 +639,20 @@ static void prepare_freecam_prop_visibility(PracticeRenderContext *context) {
 
 static void prepare_refreshed_prop_visibility(
     PracticeRenderContext *context) {
-  bool restore_external_camera = !context->freecam_render;
-
   /* PROPFLAG_ONSCREEN is derived each rendered frame and may describe the
    * pre-load state. Re-run the zero-time dispatcher so the first paused frame
    * after a load uses the restored camera and room visibility. The external
    * camera guards suppress gameplay mutations in object/character ticks. */
-  if (restore_external_camera) {
+  if (!context->freecam_render)
     save_monitor_states(context);
-    practice_external_camera_set_rendering(TRUE);
-  }
-  practice_external_camera_prepare_props(TRUE);
-  chraiUpdateOnscreenPropCount();
-  if (restore_external_camera)
-    practice_external_camera_set_rendering(FALSE);
+  dispatch_synthetic_prop_visibility(!context->freecam_render);
 }
 
 static void restore_freecam_player_state(PracticeRenderContext *context) {
   if (!context->freecam_render)
     return;
 
-  g_CurrentPlayer->pos = context->saved_player_pos;
-  g_CurrentPlayer->pos3 = context->saved_player_pos3;
-  g_CurrentPlayer->field_488.pos = context->saved_collision_pos;
-  g_CurrentPlayer->field_488.pos3 = context->saved_collision_pos3;
-  g_CurrentPlayer->room_pointer = context->saved_room_pointer;
-  g_CurrentPlayer->field_488.current_tile_ptr_for_portals =
-      context->saved_portal_tile;
-  g_CurrentPlayer->prop->pos = context->saved_player_prop_pos;
-  g_CurrentPlayer->prop->stan = context->saved_player_prop_stan;
+  practice_restore_player_pose(&context->saved_player_pose);
   practice_external_camera_set_rendering(FALSE);
 }
 
@@ -1220,13 +1231,13 @@ static void initialize_missing_visible_model_tree(PropRecord *prop,
   }
 }
 
-void practice_begin_external_camera_prop_preparation(void) {
+static void prepare_visible_model_storage(void) {
   PropRecord *prop;
 
   /* The gameplay render may have packed its matrices in place for the RSP.
    * A synthetic camera's zero-time prop tick expects float matrices and must
-   * never write through those gameplay-owned pointers. Give the PIP its own
-   * current-arena buffers, just like a refreshed paused render. */
+   * never write through those gameplay-owned pointers. Give the pass its own
+   * current-arena buffers. */
   clear_active_model_render_positions();
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
@@ -1235,7 +1246,7 @@ void practice_begin_external_camera_prop_preparation(void) {
   }
 }
 
-void practice_finish_external_camera_prop_preparation(void) {
+static void complete_visible_model_storage(void) {
   PropRecord *prop;
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
@@ -1247,6 +1258,14 @@ void practice_finish_external_camera_prop_preparation(void) {
       initialize_missing_character_matrices(prop->chr);
     }
   }
+}
+
+void practice_begin_external_camera_prop_preparation(void) {
+  prepare_visible_model_storage();
+}
+
+void practice_finish_external_camera_prop_preparation(void) {
+  complete_visible_model_storage();
 }
 
 void practice_initialize_external_camera_model(Model *model) {
@@ -1337,30 +1356,14 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
    * synthetic pass. Their retained render_pos points into an earlier paused
    * arena generation, which may now contain this frame's saved state. Make
    * the dispatcher either rebuild them or leave an explicit NULL for the
-   * post-dispatch completion pass below. */
-  clear_active_model_render_positions();
-
-  /* Attached child props are delisted, but a visible ancestor can still
-   * render their models recursively. Give those models current-arena storage
-   * without allocating matrices for every dormant object in the level. */
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    initialize_visible_object_tree(prop, 0);
-  }
+   * post-dispatch completion pass below. Attached child props are delisted,
+   * but a visible ancestor can still render their models recursively. */
+  prepare_visible_model_storage();
 
   /* Visibility preparation may update existing model buffers. Do it only
    * after replacing pointers into the rewound paused arena. */
   prepare_freecam_prop_visibility(context);
-
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    initialize_missing_visible_model_tree(prop, 0);
-    if ((prop->flags & PROPFLAG_ONSCREEN) &&
-        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
-        prop->chr != NULL) {
-      initialize_missing_character_matrices(prop->chr);
-    }
-  }
+  complete_visible_model_storage();
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
@@ -1405,7 +1408,6 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
 }
 
 void practice_prepare_refreshed_render(PracticeRenderContext *context) {
-  PropRecord *prop;
   s32 hand;
 
   /* Only visible models need matrix storage, but every restored character can
@@ -1471,28 +1473,13 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
   save_joint_pool(context);
   save_model_render_positions(context, FALSE);
 
-  clear_active_model_render_positions();
-
   /* The restored/freecam visibility dispatcher can write through model
    * render_pos before deciding whether to relist a prop. Ensure currently
    * visible object trees cannot alias the temporary monitor snapshot which
    * the dispatcher saves immediately below. */
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    initialize_visible_object_tree(prop, 0);
-  }
-
+  prepare_visible_model_storage();
   prepare_refreshed_prop_visibility(context);
-
-  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
-       prop = prop->prev) {
-    initialize_missing_visible_model_tree(prop, 0);
-    if ((prop->flags & PROPFLAG_ONSCREEN) &&
-        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
-        prop->chr != NULL) {
-      initialize_missing_character_matrices(prop->chr);
-    }
-  }
+  complete_visible_model_storage();
 
   /* The zero-time dispatcher above has already ticked every active prop once,
    * establishing visibility and current-arena matrices just as the ordinary
