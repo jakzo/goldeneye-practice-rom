@@ -1220,6 +1220,40 @@ static void initialize_missing_visible_model_tree(PropRecord *prop,
   }
 }
 
+void practice_begin_external_camera_prop_preparation(void) {
+  PropRecord *prop;
+
+  /* The gameplay render may have packed its matrices in place for the RSP.
+   * A synthetic camera's zero-time prop tick expects float matrices and must
+   * never write through those gameplay-owned pointers. Give the PIP its own
+   * current-arena buffers, just like a refreshed paused render. */
+  clear_active_model_render_positions();
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    initialize_visible_object_tree(prop, 0);
+  }
+}
+
+void practice_finish_external_camera_prop_preparation(void) {
+  PropRecord *prop;
+
+  for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
+       prop = prop->prev) {
+    initialize_missing_visible_model_tree(prop, 0);
+    if ((prop->flags & PROPFLAG_ONSCREEN) &&
+        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL) {
+      initialize_missing_character_matrices(prop->chr);
+    }
+  }
+}
+
+void practice_initialize_external_camera_model(Model *model) {
+  if (model != NULL && model->render_pos == NULL)
+    initialize_model_matrices(model);
+}
+
 static void persist_clipped_door_vertices(PropRecord *prop) {
   if (prop->type == PROP_TYPE_DOOR &&
       (prop->door->doorFlags & DOORFLAG_0004)) {

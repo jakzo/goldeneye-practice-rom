@@ -1,6 +1,7 @@
 #include "practice_states.h"
 #include "../practice_config.h"
 #include "../practice_grenade_cam.h"
+#include "../practice_freecam.h"
 #include "../practice_level.h"
 #include "../practice_render.h"
 #include "../practice_replay.h"
@@ -355,11 +356,14 @@ void load_game_state(void) {
   /* Stop all active sound effects before loading state. */
   sndDeactivateAllSfxByFlag_1();
 
+  practice_freecam_prepare_state_load();
+
   load_result = g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM
                     ? deserialize_game_state_from_memory(storage_offset,
                                                          get_saved_state_size())
                     : deserialize_game_state_from_storage(
                           storage_offset, get_saved_state_size());
+  practice_freecam_finish_state_load();
 
   if (load_result == LOAD_SERIALIZATION_DATA_FAILED) {
     storage_finish_load(g_SaveStateStorage);

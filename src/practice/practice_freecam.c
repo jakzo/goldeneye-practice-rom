@@ -2,8 +2,12 @@
 #include "bg.h"
 #include "bondconstants.h"
 #include "bondview.h"
+#include "chr.h"
+#include "chrlv.h"
+#include "chrobjhandler.h"
 #include "joy.h"
 #include "math_atan2f.h"
+#include "objecthandler.h"
 #include "player.h"
 #include "player_2.h"
 #include "practice_external_camera.h"
@@ -17,6 +21,7 @@
 #define FREECAM_CPU_COUNTS_PER_SECOND 46875000.0f
 #define FREECAM_TURN_SPEED 0.0021816616f
 #define FREECAM_MAX_PITCH 1.55334306f
+#define FREECAM_BOND_REVEAL_DISTANCE 50.0f
 #define FREECAM_ROOM_BITMAP_SIZE ((MAXROOMCOUNT + 7) / 8)
 
 static s32 g_FreecamActive;
@@ -28,6 +33,7 @@ static u8 g_FreecamRoom;
 static StandTile *g_FreecamTile;
 static coord3d g_FreecamTilePosition;
 static coord3d g_FreecamPosition;
+static coord3d g_FreecamStartPosition;
 static coord3d g_FreecamForward;
 static coord3d g_FreecamUp;
 static f32 g_FreecamYaw;
@@ -36,10 +42,116 @@ static u32 g_FreecamLastCount;
 static u8 g_FreecamInitialRoomResidency[FREECAM_ROOM_BITMAP_SIZE];
 static s32 g_FreecamPinnedCameraActive;
 static struct PracticeExternalCameraView g_FreecamPinnedCamera;
+static PropRecord g_FreecamBondProp;
+static ChrRecord g_FreecamBondChr;
+static coord3d g_FreecamBondModelPosition;
+static f32 g_FreecamBondHeading;
+static Model *g_FreecamBondDeferredModel;
 
 extern void sub_GAME_7F0876C4(coord3d *cam_pos, coord3d *cam_look,
                               coord3d *cam_up);
 extern void sub_GAME_7F0B6368(s32 room);
+extern void clear_aircraft_model_obj(Model *model);
+extern void modelSetAnimFrame(Model *model, f32 frame);
+
+static void destroy_freecam_bond(void) {
+  Model *model = g_FreecamBondChr.model;
+
+  if (g_FreecamBondProp.chr == &g_FreecamBondChr &&
+      g_FreecamBondChr.prop == &g_FreecamBondProp) {
+    /* The display list may still reference this model's matrices when the
+     * hotkey exits freecam. Forget the render wrapper now, but keep the model
+     * instance reserved until the graphics task has completed. */
+    g_FreecamBondChr.field_20 = NULL;
+    if (model != NULL)
+      g_FreecamBondDeferredModel = model;
+  }
+
+  bzero(&g_FreecamBondChr, sizeof(g_FreecamBondChr));
+  bzero(&g_FreecamBondProp, sizeof(g_FreecamBondProp));
+}
+
+static void create_freecam_bond(void) {
+  Model *model;
+  Model *player_model;
+  ModelRwData_HeaderRecord *root_data;
+
+  if (g_CurrentPlayer->prop == NULL || g_FreecamBondDeferredModel != NULL)
+    return;
+
+  /* Intros, outros, death animations and other third-person cameras attach the
+   * real Bond model to the player prop. A second body would overlap it. */
+  if (g_CurrentPlayer->prop->chr != NULL &&
+      g_CurrentPlayer->prop->chr->model != NULL)
+    return;
+
+  model = retrieve_header_for_body_and_head(BODY_Brosnan_Tuxedo,
+                                            HEAD_Male_Brosnan_Tuxedo, 0);
+  if (model == NULL)
+    return;
+
+  bzero(&g_FreecamBondProp, sizeof(g_FreecamBondProp));
+  bzero(&g_FreecamBondChr, sizeof(g_FreecamBondChr));
+  g_FreecamBondProp.type = PROP_TYPE_CHR;
+  g_FreecamBondProp.chr = &g_FreecamBondChr;
+  g_FreecamBondProp.pos = g_CurrentPlayer->prop->pos;
+  g_FreecamBondProp.pos.y = g_CurrentPlayer->field_70;
+  g_FreecamBondProp.stan = g_CurrentPlayer->prop->stan;
+  g_FreecamBondModelPosition = g_FreecamBondProp.pos;
+  g_FreecamBondProp.rooms[0] = g_CurrentPlayer->prop->stan != NULL
+                                   ? g_CurrentPlayer->prop->stan->room
+                                   : 0xff;
+  g_FreecamBondProp.rooms[1] = 0xff;
+  g_FreecamBondHeading = get_curplay_horizontal_rotation_in_degrees();
+
+  /* This is only the subset of character state consumed by rendering. It is
+   * intentionally not created with init_GUARDdata_with_set_values: that
+   * initializer performs collision placement and allocates a gameplay CHR. */
+  g_FreecamBondChr.chrnum = -1;
+  g_FreecamBondChr.headnum = HEAD_Male_Brosnan_Tuxedo;
+  g_FreecamBondChr.bodynum = BODY_Brosnan_Tuxedo;
+  g_FreecamBondChr.actiontype = ACT_STAND;
+  g_FreecamBondChr.fadealpha = 0xff;
+  g_FreecamBondChr.flinchcnt = -1;
+  g_FreecamBondChr.chrflags = CHRFLAG_04000000;
+  g_FreecamBondChr.prop = &g_FreecamBondProp;
+  g_FreecamBondChr.model = model;
+  g_FreecamBondChr.chrwidth = 20.0f;
+  g_FreecamBondChr.chrheight = 185.0f;
+  /* The player prop uses eye height, unlike ordinary character props. Both
+   * this prop's Y and the model root ground use the tracked floor height so
+   * placement is independent of standing/crouch camera height. */
+  g_FreecamBondChr.ground = g_CurrentPlayer->field_70;
+  g_FreecamBondChr.prevpos = g_FreecamBondModelPosition;
+  g_FreecamBondChr.unk180[0].unk00 = -1;
+  g_FreecamBondChr.unk180[1].unk00 = -1;
+  set_color_shading_from_tile(&g_FreecamBondProp, &g_FreecamBondChr.nextcol);
+  g_FreecamBondChr.shadecol = g_FreecamBondChr.nextcol;
+
+  /* The normal CHR callback derives root translation from gameplay movement
+   * state and rewrites this model back to the player's eye-height position.
+   * The synthetic body already has an explicit floor-level origin. */
+  sub_GAME_7F06FF5C(model, 0);
+  model->unk00 = 0x0a;
+  model->chr = &g_FreecamBondChr;
+  setsuboffset(model, &g_FreecamBondModelPosition);
+  setsubroty(model, g_FreecamBondHeading);
+  modelSetAnimPlaySpeed(model, animation_rate, 0.0f);
+
+  player_model = (Model *)&g_CurrentPlayer->model;
+  if (objecthandlerGetModelAnim(player_model) != NULL) {
+    f32 frame = objecthandlerGetModelField28(player_model);
+
+    modelSetAnimation(model, objecthandlerGetModelAnim(player_model),
+                      objecthandlerGetModelGunhand(player_model), frame, 0.5f,
+                      0.0f);
+    modelSetAnimFrame(model, frame);
+  }
+
+  root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
+      model, model->obj->RootNode);
+  root_data->ground = g_FreecamBondModelPosition.y;
+}
 
 static s32 was_room_resident_on_enable(s32 room) {
   return g_FreecamInitialRoomResidency[room >> 3] & (1 << (room & 7));
@@ -163,6 +275,7 @@ s32 practice_freecam_enable(s32 controller) {
   g_FreecamRoom = bondviewGetCurrentPlayersRoom();
   g_FreecamTile = g_CurrentPlayer->field_488.current_tile_ptr;
   g_FreecamTilePosition = g_FreecamPosition;
+  g_FreecamStartPosition = g_FreecamPosition;
   stanFindNearestValidTilePointIncrementalReset();
 
   forward_length_squared = g_FreecamForward.x * g_FreecamForward.x +
@@ -183,6 +296,7 @@ s32 practice_freecam_enable(s32 controller) {
   update_orientation();
 
   capture_initial_room_residency();
+  create_freecam_bond();
   g_FreecamController = controller;
   g_FreecamActive = TRUE;
   g_FreecamRestorePlayerCamera = FALSE;
@@ -195,6 +309,7 @@ s32 practice_freecam_enable(s32 controller) {
 }
 
 void practice_freecam_disable(void) {
+  destroy_freecam_bond();
   restore_initial_room_residency();
   g_FreecamActive = FALSE;
   g_FreecamRestorePlayerCamera = TRUE;
@@ -204,6 +319,12 @@ void practice_freecam_disable(void) {
 }
 
 void practice_freecam_reset(void) {
+  /* Level setup has already rebuilt the character/model pools, so old-stage
+   * pointers must only be forgotten here. Normal freecam exit performs the
+   * explicit release above. */
+  bzero(&g_FreecamBondProp, sizeof(g_FreecamBondProp));
+  bzero(&g_FreecamBondChr, sizeof(g_FreecamBondChr));
+  g_FreecamBondDeferredModel = NULL;
   g_FreecamActive = FALSE;
   g_FreecamSwallowInput = FALSE;
   g_FreecamController = 0;
@@ -245,6 +366,90 @@ s32 practice_freecam_add_pinned_camera_view(void) {
     return FALSE;
 
   return practice_external_camera_add_view(&g_FreecamPinnedCamera);
+}
+
+Gfx *practice_freecam_render_bond(Gfx *gdl) {
+  ChrRecord *chr;
+  Model *model;
+  ModelRwData_HeaderRecord *root_data;
+  f32 dx;
+  f32 dy;
+  f32 dz;
+
+  if (!g_FreecamActive || get_cur_playernum() != g_FreecamPlayer ||
+      g_FreecamBondProp.chr == NULL)
+    return gdl;
+
+  dx = g_FreecamPosition.x - g_FreecamStartPosition.x;
+  dy = g_FreecamPosition.y - g_FreecamStartPosition.y;
+  dz = g_FreecamPosition.z - g_FreecamStartPosition.z;
+  if (dx * dx + dy * dy + dz * dz <
+      FREECAM_BOND_REVEAL_DISTANCE * FREECAM_BOND_REVEAL_DISTANCE)
+    return gdl;
+
+  if (g_CurrentPlayer->prop != NULL &&
+      g_CurrentPlayer->prop->chr != NULL &&
+      g_CurrentPlayer->prop->chr != &g_FreecamBondChr)
+    return gdl;
+
+  chr = g_FreecamBondProp.chr;
+  model = chr->model;
+  if (model == NULL || chr->prop != &g_FreecamBondProp)
+    return gdl;
+
+  setsuboffset(model, &g_FreecamBondModelPosition);
+  setsubroty(model, g_FreecamBondHeading);
+  root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
+      model, model->obj->RootNode);
+  root_data->ground = g_FreecamBondModelPosition.y;
+  subcalcpos(model);
+
+  chrTickBeams(&g_FreecamBondProp);
+  if (chr->field_20 != NULL) {
+    gdl = chrRenderProp(&g_FreecamBondProp, gdl, FALSE);
+    gdl = chrRenderProp(&g_FreecamBondProp, gdl, TRUE);
+  }
+
+  return gdl;
+}
+
+void practice_freecam_release_deferred_model(s32 pending_gfx_tasks) {
+  s32 previous_player;
+
+  if (pending_gfx_tasks != 0 || g_FreecamBondDeferredModel == NULL)
+    return;
+
+  clear_aircraft_model_obj(g_FreecamBondDeferredModel);
+  g_FreecamBondDeferredModel = NULL;
+
+  /* A rapid re-entry can occur before the previous model was safe to release.
+   * Create the replacement as soon as the pool instance becomes available. */
+  if (g_FreecamActive && g_CurrentPlayer != NULL &&
+      g_FreecamBondProp.chr == NULL) {
+    previous_player = get_cur_playernum();
+    set_cur_player(g_FreecamPlayer);
+    create_freecam_bond();
+    set_cur_player(previous_player);
+  }
+}
+
+void practice_freecam_prepare_state_load(void) {
+  if (g_FreecamActive) {
+    destroy_freecam_bond();
+    practice_freecam_release_deferred_model(0);
+  }
+}
+
+void practice_freecam_finish_state_load(void) {
+  s32 previous_player;
+
+  if (!g_FreecamActive || g_CurrentPlayer == NULL)
+    return;
+
+  previous_player = get_cur_playernum();
+  set_cur_player(g_FreecamPlayer);
+  create_freecam_bond();
+  set_cur_player(previous_player);
 }
 
 void practice_freecam_age_rooms(void) {

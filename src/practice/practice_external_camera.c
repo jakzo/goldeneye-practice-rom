@@ -902,7 +902,13 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
 
     g_IsRenderingExternalCamera = TRUE;
     g_IsRenderOnly = TRUE;
+    if (render_item_valid)
+      render_item->model->render_pos = NULL;
+    practice_begin_external_camera_prop_preparation();
     prepare_pip_props();
+    practice_finish_external_camera_prop_preparation();
+    if (render_item_valid)
+      practice_initialize_external_camera_model(render_item->model);
 
     // The zero-time visibility pass still runs character action logic. An
     // onscreen tracked NPC is forced out of WAYMODE_MAGIC and has its re-entry
@@ -1060,7 +1066,9 @@ Gfx *practice_external_camera_render(Gfx *gdl) {
     bgRoomVisibilityRelated();
     g_IsRenderingExternalCamera = TRUE;
     g_IsRenderOnly = TRUE;
+    practice_begin_external_camera_prop_preparation();
     prepare_pip_props();
+    practice_finish_external_camera_prop_preparation();
     restore_pip_render_pos_states(saved_render_positions,
                                   saved_render_position_count);
     finish_pip_character_render();

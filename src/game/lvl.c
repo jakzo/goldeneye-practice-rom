@@ -1156,6 +1156,9 @@ Gfx* lvlRender(Gfx* DL)
 #endif
             setanimationdebugflag(getDebugMode() == DEB_SELANIM);
             DL = sub_GAME_7F049B58(DL);
+#ifdef PRACTICE_ROM
+            DL = practice_freecam_render_bond(DL);
+#endif
 
 #if defined(VERSION_EU)
             sub_GAME_7F0A46A0(&DL, 1);
