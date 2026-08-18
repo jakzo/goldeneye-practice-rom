@@ -3,10 +3,14 @@
 #include "bondconstants.h"
 #include "bondview.h"
 #include "chr.h"
+#include "chr_b.h"
 #include "chrlv.h"
+#include "chrobjdata.h"
 #include "chrobjhandler.h"
+#include "dyn.h"
 #include "joy.h"
 #include "math_atan2f.h"
+#include "memp.h"
 #include "objecthandler.h"
 #include "player.h"
 #include "player_2.h"
@@ -23,6 +27,21 @@
 #define FREECAM_MAX_PITCH 1.55334306f
 #define FREECAM_BOND_REVEAL_DISTANCE 50.0f
 #define FREECAM_ROOM_BITMAP_SIZE ((MAXROOMCOUNT + 7) / 8)
+/* Match practice_external_camera.c PIP_DYN_VTX_RESERVE: leave the same safety
+ * margin after drawing Bond that the PIP pass itself requires. */
+#define EXTERNAL_CAMERA_BOND_DYN_RESERVE 0x1000
+/* Uncompressed sizes of CdjbondZ / CheadbrosnanZ (the .bin assets, before
+ * 1172 compression). fileLoad decompresses into leftover and then shrinks
+ * the stage-pool entry to this size. */
+#define FREECAM_BOND_BODY_UNCOMPRESSED 28704
+#define FREECAM_BOND_HEAD_UNCOMPRESSED 9024
+/* sub_GAME_7F0762E0 rewrites display lists after decompress and grows the
+ * allocation with fileSetSize. */
+#define FREECAM_BOND_GDL_PAD 0x4000
+/* Leave leftover for room streaming and other first-time fileLoad. */
+#define FREECAM_BOND_LEFTOVER_RESERVE 0x20000
+
+extern MemoryPool g_mempPools[];
 
 static s32 g_FreecamActive;
 static s32 g_FreecamSwallowInput;
@@ -51,6 +70,7 @@ static Model *g_FreecamBondDeferredModel;
 extern void sub_GAME_7F0876C4(coord3d *cam_pos, coord3d *cam_look,
                               coord3d *cam_up);
 extern void sub_GAME_7F0B6368(s32 room);
+extern void sub_GAME_7F06B248(void *arg0);
 extern void clear_aircraft_model_obj(Model *model);
 
 static void destroy_freecam_bond(void) {
@@ -130,6 +150,55 @@ static void sync_freecam_bond(void) {
   root_data->ground = g_CurrentPlayer->field_70;
 }
 
+static s32 bond_body_headers_resident(void) {
+  return c_item_entries[BODY_Brosnan_Tuxedo].header != NULL &&
+         c_item_entries[BODY_Brosnan_Tuxedo].header->RootNode != NULL &&
+         c_item_entries[HEAD_Male_Brosnan_Tuxedo].header != NULL &&
+         c_item_entries[HEAD_Male_Brosnan_Tuxedo].header->RootNode != NULL;
+}
+
+static s32 stage_pool_ready(void) {
+  return g_mempPools[MEMPOOL_STAGE].start != g_mempPools[MEMPOOL_STAGE].end &&
+         g_mempPools[MEMPOOL_STAGE].pos != 0;
+}
+
+static s32 bond_load_bytes_needed(void) {
+  return ((FREECAM_BOND_BODY_UNCOMPRESSED + FREECAM_BOND_GDL_PAD + 0xf) &
+          ~0xf) +
+         ((FREECAM_BOND_HEAD_UNCOMPRESSED + FREECAM_BOND_GDL_PAD + 0xf) &
+          ~0xf) +
+         FREECAM_BOND_LEFTOVER_RESERVE;
+}
+
+/* Vanilla fileLoad takes leftover as decompress workspace, then
+ * mempAddEntryOfSizeToBank / fileSetSize shrink it back to the uncompressed
+ * model plus rewritten display lists. Only call this when leftover can hold
+ * both files and still leave a reserve; a mid-mission load with ~16KB left
+ * overlaps the compressed source and dest and hangs in decompressdata. */
+static s32 try_load_bond_headers(void) {
+  s32 leftover;
+
+  if (bond_body_headers_resident())
+    return TRUE;
+
+  if (!stage_pool_ready() || g_CameraMode == CAMERAMODE_SWIRL)
+    return FALSE;
+
+  leftover = mempGetBankSizeLeft(MEMPOOL_STAGE);
+  if (leftover < bond_load_bytes_needed())
+    return FALSE;
+
+  load_body_head_if_not_loaded(BODY_Brosnan_Tuxedo);
+  leftover = mempGetBankSizeLeft(MEMPOOL_STAGE);
+  if (leftover < ((FREECAM_BOND_HEAD_UNCOMPRESSED + FREECAM_BOND_GDL_PAD + 0xf) &
+                  ~0xf) +
+                     FREECAM_BOND_LEFTOVER_RESERVE)
+    return FALSE;
+
+  load_body_head_if_not_loaded(HEAD_Male_Brosnan_Tuxedo);
+  return bond_body_headers_resident();
+}
+
 static void create_freecam_bond(void) {
   Model *model;
 
@@ -152,11 +221,13 @@ static void create_freecam_bond(void) {
   if (g_FreecamBondDeferredModel != NULL) {
     model = g_FreecamBondDeferredModel;
     g_FreecamBondDeferredModel = NULL;
-  } else {
+  } else if (bond_body_headers_resident()) {
     model = retrieve_header_for_body_and_head(BODY_Brosnan_Tuxedo,
                                               HEAD_Male_Brosnan_Tuxedo, 0);
     if (model == NULL)
       return;
+  } else {
+    return;
   }
 
   bzero(&g_FreecamBondProp, sizeof(g_FreecamBondProp));
@@ -350,6 +421,7 @@ s32 practice_freecam_enable(s32 controller) {
   update_orientation();
 
   capture_initial_room_residency();
+  try_load_bond_headers();
   create_freecam_bond();
   g_FreecamController = controller;
   g_FreecamActive = TRUE;
@@ -482,9 +554,13 @@ static Gfx *render_freecam_bond(Gfx *gdl, s32 force_room_visible) {
   if (force_room_visible)
     restore_bond_room_visible(saved_room_rendered);
 
-  if (chr->field_20 != NULL) {
+  if (chr->field_20 != NULL &&
+      dynGetFreeVtx() >= EXTERNAL_CAMERA_BOND_DYN_RESERVE) {
     gdl = chrRenderProp(&g_FreecamBondProp, gdl, FALSE);
     gdl = chrRenderProp(&g_FreecamBondProp, gdl, TRUE);
+  } else if (chr->field_20 != NULL) {
+    sub_GAME_7F06B248(chr->field_20);
+    chr->field_20 = NULL;
   }
 
   return gdl;
@@ -508,13 +584,53 @@ Gfx *practice_freecam_render_bond(Gfx *gdl) {
   return render_freecam_bond(gdl, FALSE);
 }
 
+void practice_freecam_ensure_bond_for_external_cameras(void) {
+  if (g_FreecamBondProp.chr == &g_FreecamBondChr &&
+      g_FreecamBondChr.model != NULL) {
+    sync_freecam_bond();
+    return;
+  }
+
+  /* Instantiates only when headers are already resident. fileLoad belongs in
+   * try_load_bond_headers (after swirl / idle tick), never on the PIP render
+   * path that calls this. */
+  create_freecam_bond();
+}
+
 void practice_freecam_sync_bond_for_external_cameras(s32 needed) {
-  if (needed)
-    create_freecam_bond();
+  if (!needed)
+    return;
+
+  /* Position-only update for the render path. */
+  if (g_FreecamBondProp.chr == &g_FreecamBondChr &&
+      g_FreecamBondChr.model != NULL)
+    sync_freecam_bond();
+}
+
+void practice_freecam_process_pending_bond_ensure(s32 pending_gfx_tasks) {
+  /* This runs from the main tick, not display-list setup. pending_gfx may
+   * still be 1 from the previous frame; leftover is unused by that task. */
+  (void)pending_gfx_tasks;
+  try_load_bond_headers();
 }
 
 Gfx *practice_freecam_render_bond_in_external_camera(Gfx *gdl) {
-  return render_freecam_bond(gdl, TRUE);
+  s32 room;
+  s32 room_already_visible;
+
+  if (g_CurrentPlayer == NULL || g_FreecamBondProp.chr == NULL)
+    return gdl;
+
+  if (dynGetFreeVtx() < EXTERNAL_CAMERA_BOND_DYN_RESERVE)
+    return gdl;
+
+  room = bond_room_id();
+  room_already_visible = room > 0 && room < g_MaxNumRooms &&
+                         room < MAXROOMCOUNT &&
+                         g_BgRoomInfo[room].room_rendered != 0;
+  /* Force Bond's room into the PIP visibility set when it is not already
+   * portal-visible (grenade cam looking down, or a distant follow cam). */
+  return render_freecam_bond(gdl, !room_already_visible);
 }
 
 void practice_freecam_release_deferred_model(s32 pending_gfx_tasks) {
@@ -531,6 +647,7 @@ void practice_freecam_release_deferred_model(s32 pending_gfx_tasks) {
   if (g_CurrentPlayer != NULL && g_FreecamBondProp.chr == NULL) {
     previous_player = get_cur_playernum();
     set_cur_player(g_FreecamPlayer);
+    try_load_bond_headers();
     create_freecam_bond();
     set_cur_player(previous_player);
   }
@@ -552,6 +669,7 @@ void practice_freecam_finish_state_load(void) {
 
   previous_player = get_cur_playernum();
   set_cur_player(g_FreecamPlayer);
+  try_load_bond_headers();
   create_freecam_bond();
   set_cur_player(previous_player);
 }

@@ -131,6 +131,9 @@ s32 practice_external_camera_add_view(
     return FALSE;
   }
 
+  /* Bond is optional. Headers are loaded after swirl when leftover is large
+   * enough; if they are still missing here the PIP draws without him. */
+  practice_freecam_ensure_bond_for_external_cameras();
   g_ExternalCameraViews[g_ExternalCameraViewCount++] = *view;
   return TRUE;
 }

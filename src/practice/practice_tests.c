@@ -413,7 +413,6 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
        !g_ReplayRestartSaveStateMode &&
        (test_param & REPLAY_STATE_PARAM_GRENADE_CAM));
 
-  // Crashes...
   practice.frigate_hostage_cam =
       test_case == REPLAY_FRIGATE ||
       (test_case == REPLAY_RUNWAY_SAVE_STATES &&

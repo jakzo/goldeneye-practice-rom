@@ -36,6 +36,7 @@ void practice_check_hotkeys(s32 pending_gfx_tasks) {
     joySetContDataIndex(0);
 
   practice_freecam_release_deferred_model(pending_gfx_tasks);
+  practice_freecam_process_pending_bond_ensure(pending_gfx_tasks);
   practice_freecam_tick(trigger);
 
   for (controller = 0; controller < MAXCONTROLLERS; controller++) {
