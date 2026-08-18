@@ -2064,10 +2064,11 @@ static s32 bgPracticeGetMergedRoomBounds(s32 index, struct bbox2d *bounds)
 
         if (previous->roomid == entry->roomid &&
             previous->unk1 == entry->unk1 &&
-            previous->bbox.min.x < entry->bbox.max.x &&
-            previous->bbox.max.x > entry->bbox.min.x &&
-            previous->bbox.min.y < entry->bbox.max.y &&
-            previous->bbox.max.y > entry->bbox.min.y)
+            (practice_freecam_is_active() ||
+             (previous->bbox.min.x < entry->bbox.max.x &&
+              previous->bbox.max.x > entry->bbox.min.x &&
+              previous->bbox.min.y < entry->bbox.max.y &&
+              previous->bbox.max.y > entry->bbox.min.y)))
         {
             return FALSE;
         }
@@ -2103,6 +2104,21 @@ static s32 bgPracticeGetMergedRoomBounds(s32 index, struct bbox2d *bounds)
     }
 
     return TRUE;
+}
+
+static Gfx *bgPracticeScissorRoom(Gfx *gdl, struct bbox2d *bounds)
+{
+    if (practice_freecam_is_active())
+    {
+        return bgScissorCurrentPlayerViewDefault(gdl);
+    }
+
+    return bgScissorCurrentPlayerViewF(
+        gdl,
+        bounds->min.x,
+        bounds->min.y,
+        bounds->max.x,
+        bounds->max.y);
 }
 
 Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
@@ -2142,12 +2158,9 @@ Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
 
                 gSPMatrix(gdl++, osVirtualToPhysical((void*)get_BONDdata_field_10E0()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
                 gdl = fogSetRenderFogColor(
-                    bgScissorCurrentPlayerViewF(
+                    bgPracticeScissorRoom(
                         gdl++,
-                        room_bounds.min.x,
-                        room_bounds.min.y,
-                        room_bounds.max.x,
-                        room_bounds.max.y),
+                        &room_bounds),
                     0);
 
                 if (get_debug_do_draw_bg())
@@ -2189,12 +2202,9 @@ Gfx *sub_GAME_7F0B3C8C_practice(Gfx *gdl)
             {
                 gSPMatrix(gdl++, osVirtualToPhysical((void*)get_BONDdata_field_10E0()), (G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION));
                 gdl = fogSetRenderFogColor(
-                    bgScissorCurrentPlayerViewF(
+                    bgPracticeScissorRoom(
                         gdl++,
-                        room_bounds.min.x,
-                        room_bounds.min.y,
-                        room_bounds.max.x,
-                        room_bounds.max.y),
+                        &room_bounds),
                     1);
 
                 if (get_debug_do_draw_bg())
@@ -3726,7 +3736,18 @@ Gfx *bgLevelRender(Gfx *arg0)
     }
     else
     {
+#ifdef PRACTICE_ROM
+        if (practice_freecam_is_active())
+        {
+            arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78_practice(fogSetRenderFogColor(arg0, 0))));
+        }
+        else
+        {
+            arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78(fogSetRenderFogColor(arg0, 0))));
+        }
+#else
         arg0 = fogRenderClearFogMode(bgScissorCurrentPlayerViewDefault(sub_GAME_7F0B8D78(fogSetRenderFogColor(arg0, 0))));
+#endif
     }
 
     gSPMatrix(arg0++, g_viProjectionMatrix, G_MTX_NOPUSH | G_MTX_LOAD | G_MTX_PROJECTION);

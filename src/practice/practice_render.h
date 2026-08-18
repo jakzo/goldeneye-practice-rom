@@ -37,6 +37,7 @@ typedef struct PracticeRenderContext {
   coord3d current_model_pos;
   coord3d previous_model_pos;
   coord3d current_room_pos;
+  s32 cur_room_index;
   void *prop_visibility_state;
   void *monitor_states;
   s32 monitor_state_count;

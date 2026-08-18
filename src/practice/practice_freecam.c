@@ -39,6 +39,7 @@ static struct PracticeExternalCameraView g_FreecamPinnedCamera;
 
 extern void sub_GAME_7F0876C4(coord3d *cam_pos, coord3d *cam_look,
                               coord3d *cam_up);
+extern void sub_GAME_7F0B6368(s32 room);
 
 static s32 was_room_resident_on_enable(s32 room) {
   return g_FreecamInitialRoomResidency[room >> 3] & (1 << (room & 7));
@@ -54,6 +55,39 @@ static void capture_initial_room_residency(void) {
     if (info->model_bin_loaded != 0 || info->ptr_point_index != NULL ||
         info->ptr_expanded_mapping_info != NULL) {
       g_FreecamInitialRoomResidency[room >> 3] |= 1 << (room & 7);
+    }
+  }
+}
+
+static void restore_initial_room_residency(void) {
+  s32 room;
+
+  /* Free the temporary freecam set first so the original set has the same
+   * amount of room-heap space available that it had when freecam started. */
+  for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
+    s_room_info *info = &g_BgRoomInfo[room];
+    s32 pinned_room =
+        g_FreecamPinnedCameraActive && g_FreecamPinnedCamera.stan != NULL &&
+        g_FreecamPinnedCamera.stan->room == room;
+
+    if (!was_room_resident_on_enable(room) && !pinned_room &&
+        (info->model_bin_loaded != 0 || info->ptr_point_index != NULL ||
+         info->ptr_expanded_mapping_info != NULL)) {
+      delete_room_data(room);
+    }
+  }
+
+  for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
+    s_room_info *info = &g_BgRoomInfo[room];
+
+    if (!was_room_resident_on_enable(room) || info->model_bin_loaded != 0)
+      continue;
+
+    if (info->ptr_point_index != NULL ||
+        info->ptr_expanded_mapping_info != NULL) {
+      info->model_bin_loaded = 1;
+    } else {
+      sub_GAME_7F0B6368(room);
     }
   }
 }
@@ -161,6 +195,7 @@ s32 practice_freecam_enable(s32 controller) {
 }
 
 void practice_freecam_disable(void) {
+  restore_initial_room_residency();
   g_FreecamActive = FALSE;
   g_FreecamRestorePlayerCamera = TRUE;
   g_FreecamSwallowInput = TRUE;
@@ -221,7 +256,7 @@ void practice_freecam_age_rooms(void) {
   for (room = 1; room < g_MaxNumRooms && room < MAXROOMCOUNT; room++) {
     s_room_info *info = &g_BgRoomInfo[room];
 
-    if (was_room_resident_on_enable(room) || info->field_35 != 0 ||
+    if (info->field_35 != 0 ||
         (g_FreecamPinnedCameraActive && g_FreecamPinnedCamera.stan != NULL &&
          g_FreecamPinnedCamera.stan->room == room))
       continue;

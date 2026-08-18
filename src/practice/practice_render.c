@@ -10,6 +10,7 @@
 #include "game/matrixmath.h"
 #include "game/objecthandler.h"
 #include "game/player.h"
+#include "game/unk_0BC530.h"
 #include "game/viewport.h"
 #ifdef PRACTICE_TEST_ROM
 #include <assert.h>
@@ -645,6 +646,13 @@ static void restore_freecam_player_state(PracticeRenderContext *context) {
 }
 
 void practice_prepare_paused_render_state(PracticeRenderContext *context) {
+  /* Normal gameplay ages this cache from lvlTick. Freecam redraws while that
+   * tick is paused, so matrices orphaned when the camera changes rooms would
+   * otherwise retain their owner forever and eventually exhaust all 300
+   * slots. The allocator then aliases slot zero between unrelated rooms. */
+  if (practice_freecam_is_active())
+    updateRoomStatusFlags();
+
   if (g_IsRenderStateInvalidated && g_HasLoadedProjectionMatrix &&
       g_HasLoadedRoomProjectionMatrix) {
     Mtx *projection = dynAllocateMatrix();
@@ -661,6 +669,7 @@ void practice_prepare_paused_render_state(PracticeRenderContext *context) {
   context->current_model_pos = g_CurrentPlayer->current_model_pos;
   context->previous_model_pos = g_CurrentPlayer->previous_model_pos;
   context->current_room_pos = g_CurrentPlayer->current_room_pos;
+  context->cur_room_index = g_CurrentPlayer->curRoomIndex;
   save_prop_visibility_state(context);
   prepare_freecam_player_state(context);
   save_watch_state(context);
@@ -1480,6 +1489,7 @@ void practice_finish_character_render(PracticeRenderContext *context) {
   g_CurrentPlayer->current_model_pos = context->current_model_pos;
   g_CurrentPlayer->previous_model_pos = context->previous_model_pos;
   g_CurrentPlayer->current_room_pos = context->current_room_pos;
+  g_CurrentPlayer->curRoomIndex = context->cur_room_index;
   restore_watch_state(context);
   restore_freecam_player_state(context);
   g_IsRenderOnly = FALSE;
