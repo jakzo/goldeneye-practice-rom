@@ -95,25 +95,40 @@ def upload(deployer, rom, save, reboot):
     return subprocess.run(command, cwd=ROOT).returncode == 0
 
 
-def run_regular_step(args, step, replay, reboot):
-    label = f"{step}/{replay.stem}"
+def run_regular_step(args, step, replay, reboot, replays=None):
+    fixtures = list(replays) if replays is not None else [replay]
+    label = (
+        f"{step}/{replay.stem}"
+        if len(fixtures) == 1
+        else f"{step}/{len(fixtures)}-replays"
+    )
     started = time.monotonic()
     rom, save = run_sc64_tests.prepare_test_rom(
         args.rom,
         args.output_dir,
         TEST_CASE,
-        test_param=test_param(step, replay),
-        replay_fixture=replay,
+        test_param=test_param(step, fixtures[0]),
+        replay_fixture=fixtures[0] if len(fixtures) == 1 else None,
+        replay_fixtures=fixtures if len(fixtures) > 1 else None,
         output_name=label,
     )
     print(f"[{label}] === uploading and rebooting ===", flush=True)
     if not upload(args.deployer, rom, save, reboot):
-        return SuiteResult(step, replay.stem, False, "upload/reboot failed", 0)
+        return SuiteResult(
+            step,
+            fixtures[0].stem if len(fixtures) == 1 else "all",
+            False,
+            "upload/reboot failed",
+            0,
+        )
     result = run_sc64_tests.monitor_test(
         TEST_CASE, args.deployer, args.timeout, quiet_state_progress=True
     )
     return SuiteResult(
-        step, replay.stem, result.passed, result.detail,
+        step,
+        fixtures[0].stem if len(fixtures) == 1 else "all",
+        result.passed,
+        result.detail,
         time.monotonic() - started,
     )
 
@@ -228,6 +243,25 @@ def run(args):
         step_fixtures = fixtures
         if step == "near-end" and args.replay is None:
             step_fixtures = [FIXTURE_DIR / "02-facility.ram"]
+        multiplex = (
+            step in ("default", "cameras")
+            and args.replay is None
+            and len(step_fixtures) > 1
+        )
+        if multiplex:
+            reboot = not (args.initial_upload and first_upload)
+            first_upload = False
+            try:
+                result = run_regular_step(
+                    args, step, step_fixtures[0], reboot, step_fixtures
+                )
+            except (OSError, ValueError, StopIteration) as error:
+                result = SuiteResult(step, "all", False, str(error), 0)
+            results.append(result)
+            if not result.passed:
+                print_summary(results)
+                return 1
+            continue
         for replay in step_fixtures:
             reboot = not (args.initial_upload and first_upload)
             first_upload = False

@@ -35,6 +35,11 @@ SAVE_STATE_MAGIC = 0x47455353
 TEST_SAVE_STATE_SRAM_OFFSET = 0x280
 RESTART_SAVE_STATE_SRAM_OFFSET = 0x200
 TEST_REPLAY_ROM_OFFSET = 0x00FE0000
+TEST_REPLAY_PACK_MAGIC = 0x47525058
+TEST_REPLAY_PACK_VERSION = 1
+TEST_REPLAY_PACK_MAX = 16
+TEST_REPLAY_PACK_DATA_OFFSET = 0x01000000
+TEST_REPLAY_PACK_ROM_SIZE = 0x02000000
 ROM_CONFIG_OFFSET = 0x00FFFFC0
 ROM_CONFIG_FLAG_RESTART_SAVE_STATE_TEST = 0x2
 
@@ -165,9 +170,14 @@ def parse_args():
     )
     parser.add_argument(
         "--replay-fixture",
+        action="append",
+        default=[],
         type=Path,
         metavar="PATH",
-        help="use an explicit replay SRAM fixture instead of the configured one",
+        help=(
+            "use an explicit replay SRAM fixture instead of the configured one "
+            "(repeat to pack multiple fixtures into one test ROM)"
+        ),
     )
     parser.add_argument(
         "--output-state",
@@ -391,17 +401,7 @@ def replay_fixture_for(test_case, version):
     return REPLAY_FIXTURES[version].get(test_case)
 
 
-def install_replay_fixture(
-    test_case, rom, version, state_fixture=None, replay_fixture=None
-):
-    fixture = replay_fixture or replay_fixture_for(test_case, version)
-    if fixture is None:
-        if is_fixture_replay_test(test_case):
-            raise ValueError(
-                f"no {version} replay fixture is configured for {test_case}"
-            )
-        return None
-
+def replay_payload(fixture, version):
     sram = fixture.read_bytes()
     if len(sram) != SRAM_SIZE_BYTES:
         raise ValueError(f"{fixture.name} replay SRAM fixture has the wrong size")
@@ -427,15 +427,90 @@ def install_replay_fixture(
             f"{fixture.name} is region {actual_region}, expected {expected_region} "
             f"for {version}"
         )
-    boot_level = sram[replay_header_offset + 0x11]
-    if is_fixture_replay_test(test_case):
-        if TEST_REPLAY_ROM_OFFSET + replay_size > ROM_CONFIG_OFFSET:
-            raise ValueError(f"{fixture.name} is too large for the test ROM slot")
-        with rom.open("r+b") as rom_file:
-            rom_file.seek(TEST_REPLAY_ROM_OFFSET)
-            rom_file.write(
-                sram[replay_header_offset : replay_header_offset + replay_size]
+    return {
+        "sram": sram,
+        "offset": replay_header_offset,
+        "size": replay_size,
+        "payload": sram[replay_header_offset : replay_header_offset + replay_size],
+        "boot_level": sram[replay_header_offset + 0x11],
+    }
+
+
+def write_replay_pack(rom, payloads):
+    if len(payloads) > TEST_REPLAY_PACK_MAX:
+        raise ValueError(
+            f"too many replay fixtures for the test ROM pack ({len(payloads)})"
+        )
+    header = bytearray(16)
+    header[0:4] = TEST_REPLAY_PACK_MAGIC.to_bytes(4, "big")
+    header[4:6] = TEST_REPLAY_PACK_VERSION.to_bytes(2, "big")
+    header[6:8] = len(payloads).to_bytes(2, "big")
+    header[8:12] = TEST_REPLAY_PACK_DATA_OFFSET.to_bytes(4, "big")
+    entries = bytearray()
+    data = bytearray()
+    cursor = 0
+    for payload in payloads:
+        pad = (16 - (len(payload) % 16)) % 16
+        entries.extend(cursor.to_bytes(4, "big"))
+        entries.extend(len(payload).to_bytes(4, "big"))
+        data.extend(payload)
+        data.extend(b"\x00" * pad)
+        cursor += len(payload) + pad
+    table_end = TEST_REPLAY_ROM_OFFSET + 16 + len(entries)
+    if table_end > ROM_CONFIG_OFFSET:
+        raise ValueError("replay pack table overlaps the ROM config block")
+    with rom.open("r+b") as rom_file:
+        rom_file.seek(0, os.SEEK_END)
+        if rom_file.tell() < TEST_REPLAY_PACK_ROM_SIZE:
+            rom_file.truncate(TEST_REPLAY_PACK_ROM_SIZE)
+        rom_file.seek(TEST_REPLAY_ROM_OFFSET)
+        rom_file.write(header)
+        rom_file.write(entries)
+        rom_file.seek(TEST_REPLAY_PACK_DATA_OFFSET)
+        rom_file.write(data)
+
+
+def install_replay_fixture(
+    test_case,
+    rom,
+    version,
+    state_fixture=None,
+    replay_fixture=None,
+    replay_fixtures=None,
+):
+    fixtures = []
+    if replay_fixtures:
+        fixtures = list(replay_fixtures)
+    elif isinstance(replay_fixture, (list, tuple)):
+        fixtures = list(replay_fixture)
+    elif replay_fixture is not None:
+        fixtures = [replay_fixture]
+    else:
+        configured = replay_fixture_for(test_case, version)
+        if configured is not None:
+            fixtures = [configured]
+    if not fixtures:
+        if is_fixture_replay_test(test_case):
+            raise ValueError(
+                f"no {version} replay fixture is configured for {test_case}"
             )
+        return None
+
+    extracted = [replay_payload(path, version) for path in fixtures]
+    fixture = fixtures[0]
+    sram = extracted[0]["sram"]
+    replay_header_offset = extracted[0]["offset"]
+    replay_size = extracted[0]["size"]
+    boot_level = extracted[0]["boot_level"]
+    if is_fixture_replay_test(test_case):
+        if len(extracted) == 1:
+            if TEST_REPLAY_ROM_OFFSET + replay_size > ROM_CONFIG_OFFSET:
+                raise ValueError(f"{fixture.name} is too large for the test ROM slot")
+            with rom.open("r+b") as rom_file:
+                rom_file.seek(TEST_REPLAY_ROM_OFFSET)
+                rom_file.write(extracted[0]["payload"])
+        else:
+            write_replay_pack(rom, [item["payload"] for item in extracted])
 
     if replay_header_offset != REPLAY_HEADER_OFFSET:
         relocated = bytearray(sram)
@@ -951,6 +1026,7 @@ def run_test_case(
     replay_fixture=None,
     output_state_dir=None,
     restart_between_loads=False,
+    replay_fixtures=None,
 ):
     timeout = max(timeout, MINIMUM_TEST_TIMEOUT_SECONDS.get(test_case, 0))
     if restart_between_loads:
@@ -972,7 +1048,12 @@ def run_test_case(
 
     try:
         boot_level = install_replay_fixture(
-            test_case, rom, version, state_fixture, replay_fixture
+            test_case,
+            rom,
+            version,
+            state_fixture,
+            replay_fixture,
+            replay_fixtures=replay_fixtures,
         )
     except (OSError, ValueError) as error:
         return TestResult(test_case, False, f"fixture setup failed: {error}", 0.0)
@@ -1183,8 +1264,9 @@ def main():
 
     if args.state_fixture and not args.state_fixture.is_absolute():
         args.state_fixture = ROOT / args.state_fixture
-    if args.replay_fixture and not args.replay_fixture.is_absolute():
-        args.replay_fixture = ROOT / args.replay_fixture
+    args.replay_fixture = [
+        path if path.is_absolute() else ROOT / path for path in args.replay_fixture
+    ]
     if args.output_state and not args.output_state.is_absolute():
         args.output_state = ROOT / args.output_state
     if args.output_state_dir and not args.output_state_dir.is_absolute():
@@ -1199,7 +1281,7 @@ def main():
         test
         for test in test_cases
         if is_fixture_replay_test(test)
-        and args.replay_fixture is None
+        and not args.replay_fixture
         and replay_fixture_for(test, args.version) is None
     ]
     if args.test and unavailable_replays:
@@ -1268,9 +1350,10 @@ def main():
                             args.test_param,
                             args.state_fixture,
                             args.output_state,
-                            args.replay_fixture,
+                            args.replay_fixture[0] if args.replay_fixture else None,
                             args.output_state_dir,
                             args.restart_between_loads,
+                            args.replay_fixture or None,
                         ): test_case
                         for test_case in test_cases
                     }

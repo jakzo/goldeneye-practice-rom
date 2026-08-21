@@ -83,6 +83,13 @@ static s32 g_PlaybackAdvanceFrame;
 static s32 g_UseTestRomFixture;
 #ifdef PRACTICE_TEST_ROM
 static u16 g_TestRealButtons;
+static u32 g_TestRomReplayOffset = TEST_REPLAY_ROM_OFFSET;
+static u16 g_TestRomReplayCount;
+static u32 g_TestRomReplayOffsets[TEST_REPLAY_PACK_MAX];
+
+static u32 test_rom_replay_base(void) { return g_TestRomReplayOffset; }
+#else
+#define test_rom_replay_base() TEST_REPLAY_ROM_OFFSET
 #endif
 
 bool g_ReplayIsRecording = FALSE;
@@ -229,7 +236,7 @@ static void reader_init(ReplayDmaReader *reader, u32 total_size) {
   reader->total_size = total_size;
   reader->position = sizeof(ReplayHeader);
   if (g_UseTestRomFixture) {
-    romCopy(reader->buffers[0], (void *)TEST_REPLAY_ROM_OFFSET,
+    romCopy(reader->buffers[0], (void *)test_rom_replay_base(),
             REPLAY_DMA_BUFFER_SIZE);
   } else if (sram_read(reader->current_page_offset, reader->buffers[0],
                        REPLAY_DMA_BUFFER_SIZE) != 0) {
@@ -247,8 +254,8 @@ static void reader_advance_page(ReplayDmaReader *reader) {
 
   if (g_UseTestRomFixture) {
     romCopy(reader->buffers[0],
-            (void *)(TEST_REPLAY_ROM_OFFSET +
-                     next_offset - SAVE_STATE_SRAM_OFFSET),
+            (void *)(test_rom_replay_base() + next_offset -
+                     SAVE_STATE_SRAM_OFFSET),
             REPLAY_DMA_BUFFER_SIZE);
   } else if (sram_read(next_offset, reader->buffers[0],
                        REPLAY_DMA_BUFFER_SIZE) != 0) {
@@ -440,7 +447,89 @@ void practice_replay_init(void) {
     bzero(&g_SavedReplayHeader, sizeof(g_SavedReplayHeader));
 }
 
+#ifdef PRACTICE_TEST_ROM
+static s32 load_test_rom_replay_header(u32 rom_offset) {
+  romCopy(&g_SavedReplayHeader, (void *)rom_offset,
+          sizeof(g_SavedReplayHeader));
+  if (!replay_header_is_valid(&g_SavedReplayHeader)) {
+    bzero(&g_SavedReplayHeader, sizeof(g_SavedReplayHeader));
+    return FALSE;
+  }
+  g_TestRomReplayOffset = rom_offset;
+  g_UseTestRomFixture = TRUE;
+  return TRUE;
+}
+
+static s32 load_test_rom_replay_pack(void) {
+  u8 header_bytes[16] __attribute__((aligned(16)));
+  u32 magic;
+  u16 version;
+  u16 count;
+  u32 data_offset;
+  u32 entry_bytes;
+  u8 entry_buf[TEST_REPLAY_PACK_MAX * 8] __attribute__((aligned(16)));
+  u32 i;
+
+  romCopy(header_bytes, (void *)TEST_REPLAY_ROM_OFFSET, sizeof(header_bytes));
+  magic = (header_bytes[0] << 24) | (header_bytes[1] << 16) |
+          (header_bytes[2] << 8) | header_bytes[3];
+  version = (header_bytes[4] << 8) | header_bytes[5];
+  count = (header_bytes[6] << 8) | header_bytes[7];
+  data_offset = (header_bytes[8] << 24) | (header_bytes[9] << 16) |
+                (header_bytes[10] << 8) | header_bytes[11];
+  if (magic != TEST_REPLAY_PACK_MAGIC || version != TEST_REPLAY_PACK_VERSION ||
+      count == 0 || count > TEST_REPLAY_PACK_MAX) {
+    return FALSE;
+  }
+  if (data_offset == 0) {
+    data_offset = TEST_REPLAY_ROM_OFFSET;
+  }
+
+  entry_bytes = (count * 8 + 15) & ~15;
+  romCopy(entry_buf, (void *)(TEST_REPLAY_ROM_OFFSET + 16), entry_bytes);
+  for (i = 0; i < count; i++) {
+    u8 *entry = &entry_buf[i * 8];
+    g_TestRomReplayOffsets[i] =
+        data_offset + ((entry[0] << 24) | (entry[1] << 16) | (entry[2] << 8) |
+                       entry[3]);
+  }
+  g_TestRomReplayCount = count;
+  return TRUE;
+}
+
+s32 practice_replay_test_fixture_count(void) { return g_TestRomReplayCount; }
+
+s32 practice_replay_use_test_rom_fixture_index(s32 index) {
+  if (index < 0 || index >= g_TestRomReplayCount) {
+    return FALSE;
+  }
+  return load_test_rom_replay_header(g_TestRomReplayOffsets[index]);
+}
+
+s32 practice_replay_saved_stage_id(void) {
+  return replay_header_is_valid(&g_SavedReplayHeader)
+             ? g_SavedReplayHeader.stage_id
+             : LEVELID_NONE;
+}
+#endif
+
 void practice_replay_use_test_rom_fixture(void) {
+#ifdef PRACTICE_TEST_ROM
+  if (load_test_rom_replay_pack()) {
+    if (!practice_replay_use_test_rom_fixture_index(0)) {
+      g_UseTestRomFixture = FALSE;
+    }
+    return;
+  }
+  g_TestRomReplayCount = 0;
+  g_TestRomReplayOffset = TEST_REPLAY_ROM_OFFSET;
+  if (!load_test_rom_replay_header(TEST_REPLAY_ROM_OFFSET)) {
+    g_UseTestRomFixture = FALSE;
+    return;
+  }
+  g_TestRomReplayCount = 1;
+  g_TestRomReplayOffsets[0] = TEST_REPLAY_ROM_OFFSET;
+#else
   romCopy(&g_SavedReplayHeader, (void *)TEST_REPLAY_ROM_OFFSET,
           sizeof(g_SavedReplayHeader));
   if (!replay_header_is_valid(&g_SavedReplayHeader)) {
@@ -448,6 +537,7 @@ void practice_replay_use_test_rom_fixture(void) {
     return;
   }
   g_UseTestRomFixture = TRUE;
+#endif
 }
 
 void practice_replay_request_recording(void) {

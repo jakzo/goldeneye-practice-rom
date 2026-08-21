@@ -89,7 +89,7 @@ the plan:
 
 ```bash
 python3 scripts/run_test_shard.py \
-  --task save-state/us/default/07-frigate
+  --task save-state/us/default
 ```
 
 ## Existing guest replay tests
@@ -121,21 +121,28 @@ the constant to the regional `.ram` file in `REPLAY_FIXTURES`.
 
 ## Replay save/load-state test
 
-`REPLAY_RUNWAY_SAVE_STATES` embeds the selected replay in the ROM so save-state
-SRAM writes cannot overwrite it. After one second of playback, the test repeats
-this sequence until the replay completes:
+`REPLAY_RUNWAY_SAVE_STATES` embeds replay payloads in the ROM so save-state
+writes cannot overwrite them. The default 1s suite (and the 1s camera variant)
+packs every selected `.ram` into one test ROM and runs them in a single
+emulator:
 
-1. Hold the pause-hotkey trigger for three frames, save, hold for three more
-   frames, and release.
-2. Play 60 replay frames, hold the trigger for one frame, then load while
-   seeking the replay cursor back to the saved timestamp.
-3. Hold the trigger for three more frames, release, replay the same 60 frames,
-   then begin the next save cycle.
+1. Start the first fixture, play one second, and save into that replay's
+   Expansion Pak slot.
+2. Choose the next incomplete fixture with a deterministic LCG, load its
+   level, and either play one second from the start (first visit) or wait a
+   few frames after level start and load the slot saved earlier.
+3. Continue that replay for one second, save over the same slot, and hop
+   again until every fixture reaches its recorded end.
 
-The test fails on replay RNG divergence, an incomplete replay, or a replay
-cursor mismatch between the original and reloaded 60-frame segment. Run the
-US Runway fixture with `just test-runway-save-states`, or
-run every `.ram` file in one regional directory with:
+Each fixture occupies one 128 KiB RDRAM slot. The pack header lives at
+`0x00FE0000`; the payloads start at `0x01000000` so they do not overlap the
+ROM config block. Long, near-end, cold-restart, and single-fixture runs keep
+the original one-replay save / play / load / verify cycle.
+
+The multiplexed test fails on replay RNG divergence, a failed save/load/seek,
+or a position/list mismatch after returning to a slot. Run the US Runway
+fixture with `just test-runway-save-states`, or run every `.ram` file in one
+regional directory with:
 
 ```bash
 just test-replay-save-states us tests/replays/us

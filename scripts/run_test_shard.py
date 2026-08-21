@@ -32,12 +32,13 @@ REPLAY_MAGIC = 0x47455250
 REPLAY_OFFSETS = (0x280, 0x600)
 SHORT_TEST_ESTIMATE_FRAMES = 600
 SAVE_STATE_ESTIMATE_MULTIPLIERS = {
-    "default": 2,
+    "default": 3,
     "long": 6,
-    "cameras": 2,
+    "cameras": 3,
     "near-end": 2,
     "cold-restart": 6,
 }
+MULTIPLEXED_SAVE_STATE_VARIANTS = ("default", "cameras")
 MANUAL_PRACTICE_TESTS = {"REPLAY_RUNWAY_SAVE_STATES"}
 PRACTICE_REPLAY_FIXTURES = {
     "US": {
@@ -159,8 +160,10 @@ def discover_tasks() -> list[TestTask]:
         replays = sorted((REPLAY_ROOT / region).glob("*.ram"))
         if not replays:
             raise ValueError(f"no replay fixtures found for {region}")
+        total_duration = 0
         for replay in replays:
             duration = replay_duration_frames(replay)
+            total_duration += duration
             tasks.append(
                 TestTask(
                     f"replay/{region}/{replay.stem}",
@@ -170,7 +173,7 @@ def discover_tasks() -> list[TestTask]:
                     replay=replay,
                 )
             )
-            for variant in ("default", "long", "cameras", "cold-restart"):
+            for variant in ("long", "cold-restart"):
                 tasks.append(
                     TestTask(
                         f"save-state/{region}/{variant}/{replay.stem}",
@@ -181,6 +184,16 @@ def discover_tasks() -> list[TestTask]:
                         variant=variant,
                     )
                 )
+        for variant in MULTIPLEXED_SAVE_STATE_VARIANTS:
+            tasks.append(
+                TestTask(
+                    f"save-state/{region}/{variant}",
+                    "save-state",
+                    region,
+                    total_duration * SAVE_STATE_ESTIMATE_MULTIPLIERS[variant],
+                    variant=variant,
+                )
+            )
 
         near_end_replay = next(
             (replay for replay in replays if replay.stem == "02-facility"),
@@ -252,8 +265,8 @@ def task_command(task: TestTask, artifacts: Path) -> tuple[list[str], dict[str, 
             environment,
         )
 
-    assert task.replay is not None
     if task.kind == "replay":
+        assert task.replay is not None
         rom = ROOT / f"build/{code}/ge007.{code}.z64"
         patch = subprocess.run(
             [sys.executable, str(PATCH_ROM_SCRIPT), str(rom), "--flags", "1"],
@@ -288,11 +301,12 @@ def task_command(task: TestTask, artifacts: Path) -> tuple[list[str], dict[str, 
     environment.update(
         {
             "REPLAY_SAVE_STATE_BUILD_MODE": "release",
-            "REPLAY_SAVE_STATE_FILTER": task.replay.stem,
             "REPLAY_SAVE_STATE_JOBS": "1",
             "REPLAY_SAVE_STATE_SKIP_BUILD": "1",
         }
     )
+    if task.replay is not None:
+        environment["REPLAY_SAVE_STATE_FILTER"] = task.replay.stem
     if task.variant == "long":
         environment.update(
             {

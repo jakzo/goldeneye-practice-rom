@@ -76,7 +76,7 @@ class BalancingTests(unittest.TestCase):
         task = next(
             task
             for task in RUNNER.discover_tasks()
-            if task.task_id == "save-state/us/default/03-runway"
+            if task.task_id == "save-state/us/default"
         )
 
         _, environment = RUNNER.task_command(task, ROOT / "build/test-artifacts")

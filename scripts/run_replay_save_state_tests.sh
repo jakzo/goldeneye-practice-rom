@@ -78,6 +78,14 @@ if [ "${#selected_replays[@]}" -eq 0 ]; then
     exit 2
 fi
 
+should_multiplex_replays() {
+    [ -z "$end_margin_frames" ] &&
+        [ -z "$restart_between_loads" ] &&
+        [ "$spacing_seconds" -eq 1 ] &&
+        [ "$duration_seconds" -eq 1 ] &&
+        [ "${#selected_replays[@]}" -gt 1 ]
+}
+
 run_replay() {
     local replay="$1"
     local build_arg="$2"
@@ -126,12 +134,47 @@ run_replay() {
     fi
 }
 
+run_multiplexed_replays() {
+    local build_arg="$1"
+    local test_param
+    local timeout
+    local replay
+    local name
+    local -a fixture_args=()
+    local -a build_args=()
+
+    if [ -n "$build_arg" ]; then
+        build_args+=("$build_arg")
+    fi
+    test_param=$((spacing_seconds | wait_frames << 8 | duration_seconds << 16 | camera_flags << 24))
+    timeout=$((1800 + 900 * ${#selected_replays[@]}))
+    for replay in "${selected_replays[@]}"; do
+        name="$(basename "$replay" .ram)"
+        fixture_args+=(--replay-fixture "$replay")
+        echo "=== multiplexed replay: $name ==="
+    done
+    echo "=== replay save/load states: ${#selected_replays[@]} fixtures ==="
+    ./scripts/run_practice_tests.py \
+        --test REPLAY_RUNWAY_SAVE_STATES \
+        "${fixture_args[@]}" \
+        --version "$version" \
+        --build-mode "$build_mode" \
+        --test-param "$test_param" \
+        --timeout "$timeout" \
+        "${build_args[@]}"
+}
+
 next_replay=0
 if [ -z "$skip_build" ]; then
     build_jobs="${PRACTICE_TEST_BUILD_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
     echo "=== building replay save-state test ROM ==="
     make -j"$build_jobs" VERSION="$version" DEV="$dev" PRACTICE_TEST_ROM=1
     skip_build="--skip-build"
+fi
+
+if should_multiplex_replays; then
+    run_multiplexed_replays "$skip_build"
+    exit 0
 fi
 
 while [ "$next_replay" -lt "${#selected_replays[@]}" ]; do

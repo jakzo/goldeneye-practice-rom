@@ -77,6 +77,7 @@ def prepare_test_rom(
     test_case,
     test_param=0,
     replay_fixture=None,
+    replay_fixtures=None,
     config_flags=0,
     output_name=None,
 ):
@@ -88,7 +89,11 @@ def prepare_test_rom(
     shutil.copyfile(base_rom, rom)
 
     boot_level = run_practice_tests.install_replay_fixture(
-        test_case, rom, "US", replay_fixture=replay_fixture
+        test_case,
+        rom,
+        "US",
+        replay_fixture=replay_fixture,
+        replay_fixtures=replay_fixtures,
     )
     if boot_level is not None:
         config_flags |= 1

@@ -25,6 +25,12 @@
 #define REPLAY_FLAG_FRAME_SEEDS 0x01
 #define REPLAY_KNOWN_FLAGS REPLAY_FLAG_FRAME_SEEDS
 #define TEST_REPLAY_ROM_OFFSET 0x00fe0000
+#ifdef PRACTICE_TEST_ROM
+#define TEST_REPLAY_PACK_MAGIC 0x47525058 /* "GRPX" */
+#define TEST_REPLAY_PACK_VERSION 1
+#define TEST_REPLAY_PACK_MAX 16
+#define TEST_REPLAY_PACK_DATA_OFFSET 0x01000000
+#endif
 
 enum PracticeReplayMode {
   PRACTICE_REPLAY_DISABLED,
@@ -78,6 +84,11 @@ void practice_replay_request_recording(void);
 void practice_replay_request_seeded_recording(void);
 void practice_replay_request_playback(void);
 void practice_replay_use_test_rom_fixture(void);
+#ifdef PRACTICE_TEST_ROM
+s32 practice_replay_test_fixture_count(void);
+s32 practice_replay_use_test_rom_fixture_index(s32 index);
+s32 practice_replay_saved_stage_id(void);
+#endif
 void practice_replay_stop_recording(void);
 void practice_replay_stop_playback(void);
 

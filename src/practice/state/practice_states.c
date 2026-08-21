@@ -24,6 +24,9 @@ extern void store_osgetcount(void);
 static SaveStateHeader g_SavedHeader __attribute__((aligned(16)));
 bool g_HasSavedState = FALSE;
 static PracticeStorageLocation g_SaveStateStorage = PRACTICE_STORAGE_SRAM;
+#ifdef PRACTICE_TEST_ROM
+static s32 g_TestSaveStateSlot;
+#endif
 
 static u32 get_save_state_storage_offset(void) {
 #ifdef PRACTICE_TEST_ROM
@@ -34,10 +37,29 @@ static u32 get_save_state_storage_offset(void) {
       practice_tests_uses_config_sram_save_state()) {
     return CONFIG_SRAM_OFFSET;
   }
+  if (g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM &&
+      g_practice_test_case == PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES &&
+      !practice_tests_uses_config_sram_save_state()) {
+    return (u32)g_TestSaveStateSlot * TEST_SAVE_STATE_SLOT_SIZE;
+  }
 #endif
   return g_SaveStateStorage == PRACTICE_STORAGE_SRAM ? SAVE_STATE_SRAM_OFFSET
                                                      : 0;
 }
+
+#ifdef PRACTICE_TEST_ROM
+void practice_states_set_test_slot(s32 slot) {
+  if (slot < 0) {
+    slot = 0;
+  }
+  g_TestSaveStateSlot = slot;
+  if (g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM) {
+    init_save_state_system();
+  }
+}
+
+s32 practice_states_get_test_slot(void) { return g_TestSaveStateSlot; }
+#endif
 
 static u32 get_saved_state_size(void) {
   return g_SavedHeader.full_size != 0 ? g_SavedHeader.full_size
@@ -146,6 +168,13 @@ static SaveSerializationResult serialize_game_state_to_memory(void) {
   MemoryStream stream;
   memory_stream_init_write(&stream, g_SaveStateStorage,
                            get_save_state_storage_offset());
+#ifdef PRACTICE_TEST_ROM
+  if (g_practice_test_case == PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES &&
+      !practice_tests_uses_config_sram_save_state() &&
+      stream.capacity > stream.base.base_address + TEST_SAVE_STATE_SLOT_SIZE) {
+    stream.capacity = stream.base.base_address + TEST_SAVE_STATE_SLOT_SIZE;
+  }
+#endif
   return serialize_game_state(&stream.base, &stream.error);
 }
 

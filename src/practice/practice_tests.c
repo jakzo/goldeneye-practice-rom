@@ -300,8 +300,118 @@ enum ReplaySaveStatePhase {
   REPLAY_STATE_PRESS_LOAD,
   REPLAY_STATE_HOLD_AFTER_LOAD,
   REPLAY_STATE_PLAY_BEFORE_SAVE,
+  REPLAY_STATE_WAIT_LEVEL,
   REPLAY_STATE_DONE
 };
+
+typedef struct ReplayHopSnapshot {
+  PracticeReplayCheckpoint checkpoint;
+  coord3d player_pos;
+  coord3d prop_pos;
+  u32 active_hash;
+  u32 free_hash;
+  u32 chr_flags_hash;
+  u32 chr_hidden_hash;
+  s32 viewer_matrices_fixed;
+} ReplayHopSnapshot;
+
+static u32 g_ReplayHopSeed;
+static u16 g_ReplayStartedMask;
+static u16 g_ReplayCompleteMask;
+static u8 g_ReplayPackCount;
+static u8 g_ReplayCurrentIndex;
+static ReplayHopSnapshot g_ReplayHopSnapshots[TEST_REPLAY_PACK_MAX];
+
+static s32 replay_hop_active(void) {
+  return g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
+         !g_ReplayRestartSaveStateMode && g_ReplayPackCount > 1;
+}
+
+static s32 replay_hop_started(s32 index) {
+  return (g_ReplayStartedMask & (1u << index)) != 0;
+}
+
+static s32 replay_hop_complete(s32 index) {
+  return (g_ReplayCompleteMask & (1u << index)) != 0;
+}
+
+static u32 replay_hop_random(void) {
+  g_ReplayHopSeed = g_ReplayHopSeed * 1664525u + 1013904223u;
+  return g_ReplayHopSeed;
+}
+
+static s32 replay_hop_pick_next(void) {
+  s32 incomplete[TEST_REPLAY_PACK_MAX];
+  s32 count = 0;
+  s32 i;
+
+  for (i = 0; i < g_ReplayPackCount; i++) {
+    if (!replay_hop_complete(i)) {
+      incomplete[count++] = i;
+    }
+  }
+  if (count == 0) {
+    return -1;
+  }
+  return incomplete[replay_hop_random() % (u32)count];
+}
+
+static void replay_hop_store_snapshot(void) {
+  ReplayHopSnapshot *snapshot = &g_ReplayHopSnapshots[g_ReplayCurrentIndex];
+
+  snapshot->checkpoint = g_ReplaySaveCheckpoint;
+  snapshot->player_pos = g_ReplaySavePlayerPos;
+  snapshot->prop_pos = g_ReplaySavePropPos;
+  snapshot->active_hash = g_ReplaySaveActiveListHash;
+  snapshot->free_hash = g_ReplaySaveFreeListHash;
+  snapshot->chr_flags_hash = g_ReplaySaveChrFlagsHash;
+  snapshot->chr_hidden_hash = g_ReplaySaveChrHiddenHash;
+  snapshot->viewer_matrices_fixed = g_ReplaySaveViewerMatricesFixed;
+}
+
+static void replay_hop_restore_snapshot(void) {
+  ReplayHopSnapshot *snapshot = &g_ReplayHopSnapshots[g_ReplayCurrentIndex];
+
+  g_ReplaySaveCheckpoint = snapshot->checkpoint;
+  g_ReplaySavePlayerPos = snapshot->player_pos;
+  g_ReplaySavePropPos = snapshot->prop_pos;
+  g_ReplaySaveActiveListHash = snapshot->active_hash;
+  g_ReplaySaveFreeListHash = snapshot->free_hash;
+  g_ReplaySaveChrFlagsHash = snapshot->chr_flags_hash;
+  g_ReplaySaveChrHiddenHash = snapshot->chr_hidden_hash;
+  g_ReplaySaveViewerMatricesFixed = snapshot->viewer_matrices_fixed;
+  g_RunwaySaveStateTarget = snapshot->checkpoint.timestamp;
+}
+
+static void replay_hop_switch(s32 index) {
+  s32 stage_id;
+
+  g_ReplayCurrentIndex = (u8)index;
+  if (!practice_replay_use_test_rom_fixture_index(index)) {
+    emu_log("RUNWAY_STATE_HOP_FIXTURE_FAILED index=%d", index);
+    emu_log("TEST_FAILED");
+    g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+    return;
+  }
+  practice_states_set_test_slot(index);
+  stage_id = practice_replay_saved_stage_id();
+  if (stage_id == LEVELID_NONE) {
+    emu_log("RUNWAY_STATE_HOP_STAGE_FAILED index=%d", index);
+    emu_log("TEST_FAILED");
+    g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+    return;
+  }
+  if (replay_hop_started(index)) {
+    replay_hop_restore_snapshot();
+  }
+  emu_log("RUNWAY_STATE_HOP index=%d stage=%d started=%d", index, stage_id,
+          replay_hop_started(index));
+  practice_replay_request_playback();
+  g_RunwaySaveStatePausedFrames = 0;
+  g_RunwaySaveStatePhase = REPLAY_STATE_WAIT_LEVEL;
+  unpause();
+  bossSetLoadedStage(stage_id);
+}
 
 static s32 replay_state_param_value(s32 shift, s32 default_value) {
   s32 value = (g_ReplayTestPlaybackCount >> shift) & 0xff;
@@ -376,6 +486,14 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
   if (test_case == REPLAY_RUNWAY_SAVE_STATES) {
     g_ReplayRestartSaveStateMode = restart_save_state_mode;
     g_ReplayTestPlaybackCount = test_param;
+    g_ReplayHopSeed = 1;
+    g_ReplayStartedMask = 0;
+    g_ReplayCompleteMask = 0;
+    g_ReplayCurrentIndex = 0;
+    g_ReplayPackCount = (u8)practice_replay_test_fixture_count();
+    if (g_ReplayPackCount > TEST_REPLAY_PACK_MAX) {
+      g_ReplayPackCount = TEST_REPLAY_PACK_MAX;
+    }
     if (g_ReplayRestartSaveStateMode) {
       u32 packed_checkpoint = (u32)test_param;
 
@@ -396,7 +514,7 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
     } else {
       if (!practice_states_set_storage_location(
               PRACTICE_STORAGE_EXPANSION_RAM)) {
-        if (practice_sc64_is_present()) {
+        if (practice_sc64_is_present() && g_ReplayPackCount <= 1) {
           practice_states_set_storage_location(PRACTICE_STORAGE_SRAM);
           emu_log("USING_SC64_SRAM_FOR_TEST_STATE");
         } else {
@@ -404,6 +522,7 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
           emu_log("TEST_FAILED");
         }
       }
+      practice_states_set_test_slot(0);
     }
   }
 
@@ -2249,6 +2368,21 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
         break;
       }
       g_RunwaySaveStateLastTimestamp = g_RunwaySaveStateTarget;
+      if (replay_hop_active()) {
+        s32 next_index;
+
+        replay_hop_store_snapshot();
+        g_ReplayStartedMask |= (u16)(1u << g_ReplayCurrentIndex);
+        next_index = replay_hop_pick_next();
+        if (next_index < 0) {
+          emu_log("RUNWAY_STATE_ALL_COMPLETE count=%d", g_ReplayPackCount);
+          emu_log("TEST_COMPLETE");
+          g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+        } else {
+          replay_hop_switch(next_index);
+        }
+        break;
+      }
       g_RunwaySaveStatePhase = REPLAY_STATE_PLAY_BEFORE_LOAD;
     }
     break;
@@ -2361,6 +2495,9 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
       if (g_ReplayRestartSaveStateMode) {
         g_RunwaySaveStateSegmentEnd =
             g_RunwaySaveStateTarget + REPLAY_STATE_FRAMES_PER_SECOND;
+      } else if (replay_hop_active()) {
+        g_RunwaySaveStateSegmentEnd =
+            g_RunwaySaveStateTarget + replay_state_duration_frames();
       }
       g_RunwaySaveStatePhase = REPLAY_STATE_PLAY_BEFORE_SAVE;
     }
@@ -2506,7 +2643,36 @@ void practice_tests_frame() {
               replay_timestamp, replay_duration);
       emu_log("TEST_FAILED");
       g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
-    } else if (!g_ReplayIsPlaying &&
+    } else if (replay_hop_active() &&
+               g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_LEVEL) {
+      if (g_ReplayIsPlaying) {
+        if (replay_hop_started(g_ReplayCurrentIndex)) {
+          if (replay_timestamp >= (u32)replay_state_wait_frames()) {
+            replay_hop_restore_snapshot();
+            g_RunwaySaveStatePausedFrames = 0;
+            g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_LOAD;
+          }
+        } else {
+          g_RunwaySaveStatePausedFrames = 0;
+          g_RunwaySaveStatePhase = REPLAY_STATE_WAIT_TO_SAVE;
+        }
+      }
+    } else if (replay_hop_active() && !g_ReplayIsPlaying &&
+               g_RunwaySaveStatePhase != REPLAY_STATE_DONE) {
+      s32 next_index;
+
+      emu_log("RUNWAY_STATE_REPLAY_COMPLETE index=%d timestamp=%d",
+              g_ReplayCurrentIndex, replay_timestamp);
+      g_ReplayCompleteMask |= (u16)(1u << g_ReplayCurrentIndex);
+      next_index = replay_hop_pick_next();
+      if (next_index < 0) {
+        emu_log("RUNWAY_STATE_ALL_COMPLETE count=%d", g_ReplayPackCount);
+        emu_log("TEST_COMPLETE");
+        g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+      } else {
+        replay_hop_switch(next_index);
+      }
+    } else if (!replay_hop_active() && !g_ReplayIsPlaying &&
                g_RunwaySaveStatePhase != REPLAY_STATE_DONE) {
       /* Regional fixtures include short diagnostic recordings which are not
        * intended to finish their mission. Reaching the replay's recorded end
@@ -2542,7 +2708,10 @@ void practice_tests_frame() {
           (g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_SAVE &&
            replay_timestamp >= (u32)g_RunwaySaveStateSegmentEnd)) {
         g_RunwaySaveStatePausedFrames = 0;
-        if (g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_LOAD) {
+        if (replay_hop_active() &&
+            g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_SAVE) {
+          g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_SAVE;
+        } else if (g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_LOAD) {
           g_RunwaySaveStateSegmentEnd = replay_timestamp;
           g_ReplaySegmentPlayerPos =
               g_CurrentPlayer->field_488.collision_position;

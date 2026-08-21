@@ -105,5 +105,43 @@ class ReplayTimeoutTests(unittest.TestCase):
         self.assertEqual(detail, "completed")
 
 
+class ReplayPackTests(unittest.TestCase):
+    def test_write_replay_pack_extends_rom_and_records_offsets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            rom = Path(directory) / "test.z64"
+            rom.write_bytes(b"\xff" * (RUNNER.ROM_CONFIG_OFFSET + 64))
+            first = b"GERP" + b"\x01" * 44
+            second = b"GERP" + b"\x02" * 60
+            RUNNER.write_replay_pack(rom, [first, second])
+
+            data = rom.read_bytes()
+            self.assertGreaterEqual(len(data), RUNNER.TEST_REPLAY_PACK_ROM_SIZE)
+            header = data[
+                RUNNER.TEST_REPLAY_ROM_OFFSET : RUNNER.TEST_REPLAY_ROM_OFFSET + 16
+            ]
+            self.assertEqual(
+                int.from_bytes(header[0:4], "big"), RUNNER.TEST_REPLAY_PACK_MAGIC
+            )
+            self.assertEqual(int.from_bytes(header[6:8], "big"), 2)
+            self.assertEqual(
+                int.from_bytes(header[8:12], "big"),
+                RUNNER.TEST_REPLAY_PACK_DATA_OFFSET,
+            )
+            entries = data[
+                RUNNER.TEST_REPLAY_ROM_OFFSET
+                + 16 : RUNNER.TEST_REPLAY_ROM_OFFSET
+                + 32
+            ]
+            self.assertEqual(int.from_bytes(entries[0:4], "big"), 0)
+            self.assertEqual(int.from_bytes(entries[4:8], "big"), len(first))
+            self.assertEqual(int.from_bytes(entries[8:12], "big"), 48)
+            self.assertEqual(int.from_bytes(entries[12:16], "big"), len(second))
+            payload_base = RUNNER.TEST_REPLAY_PACK_DATA_OFFSET
+            self.assertEqual(data[payload_base : payload_base + len(first)], first)
+            self.assertEqual(
+                data[payload_base + 48 : payload_base + 48 + len(second)], second
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
