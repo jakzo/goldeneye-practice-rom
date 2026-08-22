@@ -4,6 +4,7 @@
 #include "game/lvl.h"
 #include "practice_config.h"
 #include "practice_sram.h"
+#include "practice_tests.h"
 #include "practice_timescale.h"
 #include "practice_ui.h"
 #include "ramrom.h"
@@ -71,6 +72,7 @@ static u32 g_ReplayFrameIndex;
 static u32 g_ReplayTimestamp;
 static u32 g_PlaybackEntryCount;
 static u32 g_PlaybackOptionsFrameIndex;
+static u32 g_PlaybackGeneration;
 static u16 g_LastRecordedSettingsFlags;
 static s32 g_PlaybackFrameLoaded;
 static s32 g_ReplayDiverged;
@@ -399,6 +401,7 @@ static void start_playback(void) {
   g_TestRealButtons = 0;
 #endif
   g_ReplayIsPlaying = TRUE;
+  g_PlaybackGeneration++;
 }
 
 static s32 load_playback_frame(void) {
@@ -511,6 +514,16 @@ s32 practice_replay_saved_stage_id(void) {
              ? g_SavedReplayHeader.stage_id
              : LEVELID_NONE;
 }
+
+s32 practice_replay_saved_difficulty(void) {
+  return replay_header_is_valid(&g_SavedReplayHeader)
+             ? g_SavedReplayHeader.difficulty
+             : DIFFICULTY_AGENT;
+}
+
+u32 practice_replay_playback_generation(void) {
+  return g_PlaybackGeneration;
+}
 #endif
 
 void practice_replay_use_test_rom_fixture(void) {
@@ -602,6 +615,10 @@ void practice_replay_on_stage_load(void) {
                         ? " (with seeds)"
                         : "");
   } else if (g_ReplayIsPlaying) {
+    /* A level switch can follow a practice-paused frame. Make the newly
+     * initialized level's seeds the frozen-frame baseline so the first tick
+     * cannot restore the previous level's RNG state. */
+    sync_frozen_rng_after_load();
     if (!load_playback_frame()) {
       practiceLogWarn("Replay: Invalid frame data");
       practice_replay_stop_playback();
@@ -777,7 +794,8 @@ void practice_replay_on_frame_start(void) {
       !g_PlaybackAdvanceFrame)
     return;
 
-  if ((g_ActiveReplayHeader.flags & REPLAY_FLAG_FRAME_SEEDS) &&
+  if (!practice_tests_should_skip_replay_frame_check() &&
+      (g_ActiveReplayHeader.flags & REPLAY_FLAG_FRAME_SEEDS) &&
       (g_randomSeed != g_PlaybackFrame.random_seed ||
        g_chrObjRandomSeed != g_PlaybackFrame.chr_obj_random_seed)) {
     g_ReplayDiverged = TRUE;

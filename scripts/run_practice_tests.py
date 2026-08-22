@@ -22,7 +22,12 @@ from pathlib import Path
 WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
-REPLAY_STATUS_TIMEOUT_SECONDS = 30
+# Headed ares may spend several minutes compiling a new level's Metal/Vulkan
+# pipelines before the ROM emits another replay marker. Keep the fast default
+# for CI while allowing headed runs to account for that driver work.
+REPLAY_STATUS_TIMEOUT_SECONDS = int(
+    os.environ.get("PRACTICE_REPLAY_STATUS_TIMEOUT", "30")
+)
 MINIMUM_TEST_TIMEOUT_SECONDS = {
     "FIRE_SLOWMO": 180,
 }

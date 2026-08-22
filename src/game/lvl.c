@@ -46,6 +46,7 @@
 #include "practice/practice_lag.h"
 #include "practice/practice_render.h"
 #include "practice/practice_timescale.h"
+#include "practice/state/practice_states.h"
 #include "bg.h"
 #include "objective.h"
 #include "mp_watch.h"
@@ -525,6 +526,8 @@ void lvlStageLoad(s32 stage)
     practice_bond_model_reset();
     practice_freecam_reset();
     practice_dialog_reset();
+    practice_render_reset();
+    practice_states_on_stage_load();
     if (g_CurrentStageToLoad != LEVELID_TITLE) {
         practice_replay_on_stage_load();
         splits_init();

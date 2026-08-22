@@ -20,6 +20,8 @@ typedef struct ChrAllocationState {
   s8 headnum;
   s8 bodynum;
   f32 heading;
+  u16 head_record_index;
+  u16 head_data_offset;
 } ChrAllocationState;
 
 void save_chr_record(StateStream *stream, const ChrRecord *chr);

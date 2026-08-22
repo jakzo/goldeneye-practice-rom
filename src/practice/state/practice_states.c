@@ -24,6 +24,7 @@ extern void store_osgetcount(void);
 static SaveStateHeader g_SavedHeader __attribute__((aligned(16)));
 bool g_HasSavedState = FALSE;
 static PracticeStorageLocation g_SaveStateStorage = PRACTICE_STORAGE_SRAM;
+static bool g_SaveStateCreatedThisStage = FALSE;
 #ifdef PRACTICE_TEST_ROM
 static s32 g_TestSaveStateSlot;
 #endif
@@ -45,6 +46,14 @@ static u32 get_save_state_storage_offset(void) {
 #endif
   return g_SaveStateStorage == PRACTICE_STORAGE_SRAM ? SAVE_STATE_SRAM_OFFSET
                                                      : 0;
+}
+
+void practice_states_on_stage_load(void) {
+  g_SaveStateCreatedThisStage = FALSE;
+}
+
+bool practice_states_save_is_from_current_stage(void) {
+  return g_SaveStateCreatedThisStage;
 }
 
 #ifdef PRACTICE_TEST_ROM
@@ -238,6 +247,11 @@ void save_game_state(void) {
     return;
   }
 
+  /* The save hotkey runs during a paused render. Muzzle flashes and other
+   * render-only paths can consume the global RNG before serialization; save
+   * the frozen gameplay boundary which the render cleanup will restore. */
+  restore_rng_after_paused_render();
+
   result = g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM
                ? serialize_game_state_to_memory()
                : serialize_game_state_to_storage();
@@ -284,6 +298,7 @@ void save_game_state(void) {
   }
 
   g_HasSavedState = TRUE;
+  g_SaveStateCreatedThisStage = TRUE;
 
   practice_sfx_play_save_state_sound();
   practiceLogInfo("State saved (%dKB)", (get_saved_state_size() + 1023) / 1024);
@@ -383,6 +398,15 @@ void load_game_state(void) {
     return;
   }
 
+  /* A save retained across a level reload has render pointers into an older
+   * stage arena. Preserve the last completed frame before replacing gameplay
+   * state so the forced paused load frame never submits those pointers. This
+   * also covers hotkey loads which pause and deserialize before the ordinary
+   * paused-render path has had a chance to populate its framebuffer cache. */
+  if (!g_SaveStateCreatedThisStage) {
+    practice_capture_paused_framebuffer();
+  }
+
   /* Stop all active sound effects before loading state. */
   sndDeactivateAllSfxByFlag_1();
 
@@ -410,10 +434,30 @@ void load_game_state(void) {
 
   freeze_current_frame_after_load(paused_resume_delta);
 
-  practice_grenade_cam_refresh();
+  if (g_SaveStateCreatedThisStage) {
+    practice_grenade_cam_refresh();
+  } else {
+    /* External-camera views are rebuilt by the first normal live tick. Do not
+     * discover restored projectile/model pointers in the forced paused frame
+     * after a complete stage reload. */
+    practice_grenade_cam_reset();
+    /* The destination stage has already rendered before this older lifecycle
+     * is restored. Model render positions point into its per-frame arena and
+     * can contain fixed matrices or display data by the time gameplay resumes.
+     * Leave them absent so the first normal object/character tick rebuilds
+     * current float matrices without forcing a synthetic paused render. */
+    practice_clear_model_render_positions();
+  }
 
-  /* The current paused frame did not tick the newly restored model graph. */
-  practice_invalidate_render_state();
+  /* The current paused frame did not tick the newly restored model graph.
+   * Third-person Bond is the exception: its model is assembled inside the
+   * first-person hand buffers, and rebuilding those buffers in a synthetic
+   * zero-time render can submit display data from the pre-load layout. Keep
+   * the cached paused framebuffer until the next normal live frame instead. */
+  if (g_SaveStateCreatedThisStage &&
+      g_CurrentPlayer->ptr_char_objectinstance == NULL) {
+    practice_invalidate_render_state();
+  }
 
   // Re-baseline frame timer so time isn't dumped into the next deltaFrames
   store_osgetcount();

@@ -38,12 +38,15 @@ void restore_global_rng_after_load(void);
 bool save_viewer_players_state(StateStream *stream);
 bool load_viewer_players_state(StateStream *stream,
                                bool force_model_rebuild);
+bool practice_states_model_node_tree_is_valid(ModelNode *root);
 bool save_props_state(StateStream *stream);
 bool load_props_state(StateStream *stream);
 
 extern bool g_HasSavedState;
 
 void init_save_state_system(void);
+void practice_states_on_stage_load(void);
+bool practice_states_save_is_from_current_stage(void);
 void save_game_state(void);
 void load_game_state(void);
 bool practice_states_set_storage_location(PracticeStorageLocation location);

@@ -20,11 +20,14 @@
 #include "practice_external_camera.h"
 #include "practice_freecam.h"
 #include "practice_render.h"
+#include "state/practice_states.h"
 
 extern s32 object_interaction(PropRecord *prop);
 extern void sub_GAME_7F052D8C(DoorRecord *door);
 extern s32 modelFindNodeMtxIndex(ModelNode *node, s32 arg1);
 extern s32 g_viColorOutputMode;
+
+#define MAX_REFRESH_MODEL_MATRICES 256
 
 typedef struct PracticeRenderJoint {
   void *model;
@@ -82,6 +85,14 @@ static u8 g_LoadedFloatHandMatrices;
 static bool g_HasPausedFramebuffer;
 
 #define PRACTICE_PROP_STATE_BITMAP_SIZE ((POS_DATA_ENTRY_LEN + 7) / 8)
+
+static bool practice_render_is_rdram_range(const void *ptr, u32 size) {
+  u32 address = (u32)ptr;
+  u32 end = address + size;
+
+  return address >= 0x80000000 && end >= address &&
+         end <= 0x80000000 + osMemSize;
+}
 
 typedef struct PracticePausedPropState {
   u8 onscreen[PRACTICE_PROP_STATE_BITMAP_SIZE];
@@ -222,8 +233,7 @@ void practice_capture_paused_framebuffer(void) {
   s32 rect_index;
 
   if (background == NULL || g_viColorOutputMode == COLORMODE_32BIT ||
-      z_buffer_width * z_buffer_height < SCREEN_WIDTH * SCREEN_HEIGHT ||
-      g_PracticeUiBackgroundRectCount == 0) {
+      z_buffer_width * z_buffer_height < SCREEN_WIDTH * SCREEN_HEIGHT) {
     g_HasPausedFramebuffer = FALSE;
     return;
   }
@@ -440,8 +450,7 @@ static void restore_watch_state(PracticeRenderContext *context) {
   D_800409D8 = saved->unknown_409D8;
 }
 
-static void save_prop_visibility_state(PracticeRenderContext *context) {
-  PracticePausedPropState *state = dynAllocate(sizeof(*state));
+static void capture_prop_visibility_state(PracticePausedPropState *state) {
   s32 i;
 
   bzero(state, sizeof(*state));
@@ -458,11 +467,17 @@ static void save_prop_visibility_state(PracticeRenderContext *context) {
         state->has_been_seen[i >> 3] |= bit;
     }
   }
+}
 
+static void save_prop_visibility_state(PracticeRenderContext *context) {
+  PracticePausedPropState *state = dynAllocate(sizeof(*state));
+
+  capture_prop_visibility_state(state);
   context->prop_visibility_state = state;
 }
 
-static void restore_prop_visibility_state(PracticeRenderContext *context) {
+static void restore_prop_visibility_state(PracticeRenderContext *context,
+                                          s32 restore_seen_state) {
   PracticePausedPropState *state = context->prop_visibility_state;
   s32 i;
 
@@ -483,10 +498,12 @@ static void restore_prop_visibility_state(PracticeRenderContext *context) {
         prop->chr->hidden |= CHRHIDDEN_OFFSCREEN_PATROL;
       else
         prop->chr->hidden &= ~CHRHIDDEN_OFFSCREEN_PATROL;
-      if (state->has_been_seen[i >> 3] & bit)
-        prop->chr->chrflags |= CHRFLAG_HAS_BEEN_ON_SCREEN;
-      else
-        prop->chr->chrflags &= ~CHRFLAG_HAS_BEEN_ON_SCREEN;
+      if (restore_seen_state) {
+        if (state->has_been_seen[i >> 3] & bit)
+          prop->chr->chrflags |= CHRFLAG_HAS_BEEN_ON_SCREEN;
+        else
+          prop->chr->chrflags &= ~CHRFLAG_HAS_BEEN_ON_SCREEN;
+      }
     }
   }
 
@@ -1066,12 +1083,28 @@ void practice_begin_live_render(void) {
   g_PracticeUiBackgroundRectCount = 0;
 }
 
+void practice_render_reset(void) {
+  /* Matrix-conversion bits and loaded-render caches refer to allocations in
+   * the previous stage's dynamic arena. A level switch can render one more
+   * zero-delta frame before the ordinary live-render path clears them. */
+  clear_converted_render_matrices();
+  g_LoadedFloatHandMatrices = 0;
+  g_IsRenderStateInvalidated = FALSE;
+  g_HasLoadedProjectionMatrix = FALSE;
+  g_HasLoadedRoomProjectionMatrix = FALSE;
+  g_HasPausedFramebuffer = FALSE;
+  g_PracticeUiBackgroundRectCount = 0;
+  g_IsRenderOnly = FALSE;
+}
+
 static void initialize_model_matrices(Model *model) {
   RenderPosView *new_render_pos;
   u32 render_pos_size;
   s32 matrix;
 
-  if (model == NULL || model->obj == NULL)
+  if (model == NULL || model->obj == NULL || model->obj->numMatrices <= 0 ||
+      model->obj->numMatrices > MAX_REFRESH_MODEL_MATRICES ||
+      !practice_states_model_node_tree_is_valid(model->obj->RootNode))
     return;
 
   render_pos_size = model->obj->numMatrices * sizeof(*new_render_pos);
@@ -1172,6 +1205,15 @@ static void clear_active_model_render_positions(void) {
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
     clear_prop_tree_render_positions(prop, 0);
+  }
+}
+
+void practice_clear_model_render_positions(void) {
+  s32 hand;
+
+  clear_active_model_render_positions();
+  for (hand = 0; hand < 2; hand++) {
+    g_CurrentPlayer->hands[hand].field_B74 = 0;
   }
 }
 
@@ -1371,7 +1413,13 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
         (prop->type == PROP_TYPE_OBJ ||
          prop->type == PROP_TYPE_WEAPON ||
          prop->type == PROP_TYPE_DOOR) &&
-        prop->obj != NULL && prop->obj->model != NULL) {
+      prop->obj != NULL && prop->obj->model != NULL) {
+      if (prop->obj->model->obj == NULL ||
+          !practice_states_model_node_tree_is_valid(
+              prop->obj->model->obj->RootNode)) {
+        prop->flags &= ~PROPFLAG_ONSCREEN;
+        continue;
+      }
       refresh_object_render_state(prop);
       continue;
     }
@@ -1392,6 +1440,12 @@ void practice_prepare_character_render(PracticeRenderContext *context) {
        * contain either float or fixed-point matrices. Rebuild from model state
        * in an unambiguous current-arena float buffer. */
       initialize_character_matrices(chr);
+      if (chr->model->obj == NULL ||
+          !practice_states_model_node_tree_is_valid(
+              chr->model->obj->RootNode)) {
+        prop->flags &= ~PROPFLAG_ONSCREEN;
+        continue;
+      }
       chrTickBeams(prop);
 
       prop->zDepth = z_depth;
@@ -1428,10 +1482,26 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
         (RenderPosView *)hand_state->field_B74;
 
     if (header != NULL && old_render_pos != NULL) {
-      s32 render_pos_size = header->numMatrices * sizeof(RenderPosView);
+      s32 render_pos_size;
       u8 *active_buffer = g_VtxBuffers[g_GfxActiveBufferIndex];
       RenderPosView *new_render_pos;
       s32 matrix;
+
+      if (!practice_render_is_rdram_range(header, sizeof(*header)) ||
+          header->numMatrices <= 0 ||
+          header->numMatrices > MAX_REFRESH_MODEL_MATRICES ||
+          !practice_states_model_node_tree_is_valid(header->RootNode)) {
+        hand_state->field_B74 = 0;
+        g_LoadedFloatHandMatrices &= ~(1 << hand);
+        continue;
+      }
+
+      render_pos_size = header->numMatrices * sizeof(RenderPosView);
+      if (!practice_render_is_rdram_range(old_render_pos, render_pos_size)) {
+        hand_state->field_B74 = 0;
+        g_LoadedFloatHandMatrices &= ~(1 << hand);
+        continue;
+      }
 
       if ((u8 *)old_render_pos >= active_buffer &&
           (u8 *)old_render_pos + render_pos_size <= g_GfxMemPos) {
@@ -1498,6 +1568,7 @@ void practice_prepare_refreshed_render(PracticeRenderContext *context) {
 
 void practice_finish_character_render(PracticeRenderContext *context) {
   PropRecord *prop;
+  s32 state_was_invalidated = g_IsRenderStateInvalidated == TRUE;
 
   for (prop = get_ptr_obj_pos_list_current_entry(); prop != NULL;
        prop = prop->prev) {
@@ -1534,7 +1605,7 @@ void practice_finish_character_render(PracticeRenderContext *context) {
   /* Visibility is gameplay state. A render-only paused frame may calculate a
    * different visible set while rebuilding matrices, but it must not expose
    * that transient set to the next live tick. */
-  restore_prop_visibility_state(context);
+  restore_prop_visibility_state(context, !state_was_invalidated);
   g_CurrentPlayer->current_model_pos = context->current_model_pos;
   g_CurrentPlayer->previous_model_pos = context->previous_model_pos;
   g_CurrentPlayer->current_room_pos = context->current_room_pos;

@@ -74,7 +74,7 @@ static bool is_active_gfx_range(const void *ptr, u32 size) {
   return addr >= start && end >= addr && end <= (u32)g_GfxMemPos;
 }
 
-static bool model_node_tree_is_valid(ModelNode *root) {
+bool practice_states_model_node_tree_is_valid(ModelNode *root) {
   ModelNode *node = root;
   s32 node_count = 0;
   s32 traversal_steps = 0;
@@ -130,7 +130,7 @@ static bool player_model_is_valid_for_chr(Model *model, ChrRecord *chr) {
     return FALSE;
   }
 
-  return model_node_tree_is_valid(model->obj->RootNode);
+  return practice_states_model_node_tree_is_valid(model->obj->RootNode);
 }
 
 static bool current_player_model_is_valid(void) {
@@ -1315,6 +1315,18 @@ bool load_viewer_players_state(StateStream *stream, bool force_model_rebuild) {
               assert(FALSE);
               return FALSE;
             }
+          }
+          set_cur_player(player_index);
+          if (current_player_model_is_valid()) {
+            disable_sounds_attached_to_player_then_something(live_prop);
+            live_prop->chr = NULL;
+            sub_GAME_7F07DE9C(g_CurrentPlayer);
+            g_CurrentPlayer->ptr_char_objectinstance = NULL;
+          } else if (live_prop->chr != NULL) {
+            practiceLogError("Player %d has invalid live viewer model at prop %d",
+                             player_index, get_prop_index(live_prop));
+            assert(FALSE);
+            return FALSE;
           }
           release_player_presence_prop(live_prop);
         }

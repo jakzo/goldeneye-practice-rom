@@ -7,5 +7,6 @@
 
 bool save_props_state(StateStream *stream);
 bool load_props_state(StateStream *stream);
+void practice_states_sanitize_chr_attachments(ChrRecord *chr);
 
 #endif /* PRACTICE_STATES_PROPS_H */

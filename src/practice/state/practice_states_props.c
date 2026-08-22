@@ -92,6 +92,93 @@ static bool is_rdram_range(const void *ptr, u32 size) {
   return addr >= 0x80000000 && end >= addr && end <= rdram_end;
 }
 
+static bool is_prop_slot(const PropRecord *prop) {
+  u32 address = (u32)prop;
+  u32 start = (u32)pos_data_entry;
+  u32 end = (u32)&pos_data_entry[POS_DATA_ENTRY_LEN];
+
+  return address >= start && address < end &&
+         (address - start) % sizeof(*prop) == 0;
+}
+
+static bool chr_attachment_is_valid(ChrRecord *chr, PropRecord *prop) {
+  ObjectRecord *obj;
+  Model *model;
+
+  if (prop == NULL) {
+    return TRUE;
+  }
+  if (!is_rdram_range(prop, sizeof(*prop)) || prop->parent != chr->prop ||
+      (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_WEAPON) ||
+      !is_rdram_range(prop->obj, sizeof(*prop->obj))) {
+    return FALSE;
+  }
+  obj = prop->obj;
+  model = obj->model;
+  return is_rdram_range(model, sizeof(*model)) &&
+         is_rdram_range(model->obj, sizeof(*model->obj));
+}
+
+static void discard_invalid_chr_attachment(ChrRecord *chr,
+                                           PropRecord *prop) {
+  PropRecord *parent;
+
+  if (prop == NULL || chr_attachment_is_valid(chr, prop)) {
+    return;
+  }
+  if (!is_rdram_range(prop, sizeof(*prop))) {
+    return;
+  }
+
+  parent = prop->parent;
+  if (is_rdram_range(parent, sizeof(*parent))) {
+    if (parent->child == prop) {
+      parent->child = is_rdram_range(prop->prev, sizeof(*prop->prev))
+                          ? prop->prev
+                          : NULL;
+    }
+    if (is_rdram_range(prop->next, sizeof(*prop->next))) {
+      prop->next->prev = is_rdram_range(prop->prev, sizeof(*prop->prev))
+                             ? prop->prev
+                             : NULL;
+    }
+    if (is_rdram_range(prop->prev, sizeof(*prop->prev))) {
+      prop->prev->next = is_rdram_range(prop->next, sizeof(*prop->next))
+                             ? prop->next
+                             : NULL;
+    }
+  }
+  prop->parent = NULL;
+  prop->prev = NULL;
+  prop->next = NULL;
+}
+
+void practice_states_sanitize_chr_attachments(ChrRecord *chr) {
+  PropRecord *right;
+  PropRecord *left;
+  PropRecord *hat;
+
+  if (chr == NULL || !is_rdram_range(chr->prop, sizeof(*chr->prop))) {
+    return;
+  }
+  right = chr->weapons_held[GUNRIGHT];
+  left = chr->weapons_held[GUNLEFT];
+  hat = chr->handle_positiondata_hat;
+
+  if (!chr_attachment_is_valid(chr, right)) {
+    chr->weapons_held[GUNRIGHT] = NULL;
+    discard_invalid_chr_attachment(chr, right);
+  }
+  if (!chr_attachment_is_valid(chr, left)) {
+    chr->weapons_held[GUNLEFT] = NULL;
+    discard_invalid_chr_attachment(chr, left);
+  }
+  if (!chr_attachment_is_valid(chr, hat)) {
+    chr->handle_positiondata_hat = NULL;
+    discard_invalid_chr_attachment(chr, hat);
+  }
+}
+
 static u8 get_deformation_colour_mode(Vertex *saved, Vertex *base) {
   if (saved->r == base->r && saved->g == base->g && saved->b == base->b &&
       saved->a == base->a) {
@@ -570,8 +657,20 @@ static void destroy_chr_prop(PropRecord *prop, bool release_prop) {
     return;
   }
 
-  if (prop->chr != NULL && prop->chr->model != NULL) {
+  if (prop->chr != NULL && is_rdram_range(prop->chr->model,
+                                          sizeof(*prop->chr->model)) &&
+      is_rdram_range(prop->chr->model->obj,
+                     sizeof(*prop->chr->model->obj)) &&
+      prop->chr->model->chr == prop->chr &&
+      practice_states_model_node_tree_is_valid(
+          prop->chr->model->obj->RootNode)) {
     disable_sounds_attached_to_player_then_something(prop);
+  } else if (prop->chr != NULL && prop->chr->model != NULL) {
+    /* A different prop replacement can release a shared/stale model instance
+     * before this alias is reached. clear_aircraft_model_obj marks the model
+     * free by clearing obj, so do not walk its former node graph again. */
+    prop->chr->model = NULL;
+    prop->chr->chrnum = -1;
   } else if (prop->flags & PROPFLAG_ENABLED) {
     forget_prop_rooms(prop);
   }
@@ -582,6 +681,112 @@ static void destroy_chr_prop(PropRecord *prop, bool release_prop) {
   }
 
   clear_plain_prop(prop, release_prop);
+}
+
+static void clear_object_transient_sounds(ObjectRecord *obj) {
+  switch (obj->type) {
+    case PROPDEF_AUTOGUN:
+      ((AutogunRecord *)obj)->unkC4 = NULL;
+      ((AutogunRecord *)obj)->unkC8 = NULL;
+      break;
+    case PROPDEF_DOOR:
+      ((DoorRecord *)obj)->openSoundState = NULL;
+      ((DoorRecord *)obj)->closeSoundState = NULL;
+      break;
+    case PROPDEF_AIRCRAFT:
+      ((AircraftRecord *)obj)->Sound = NULL;
+      break;
+    case PROPDEF_VEHICHLE:
+      ((VehichleRecord *)obj)->Sound = NULL;
+      break;
+  }
+}
+
+static bool restore_chr_model_attachment(
+    ChrRecord *chr, const ChrAllocationState *allocation) {
+  Model *model;
+  ModelNode *head_node;
+  ModelRwData_HeadPlaceholderRecord *head_data;
+
+  if (chr == NULL || chr->bodynum != allocation->bodynum ||
+      chr->headnum != allocation->headnum ||
+      !is_rdram_range(chr->model, sizeof(*chr->model))) {
+    return FALSE;
+  }
+  model = chr->model;
+  if (model->chr != chr ||
+      model->obj != c_item_entries[allocation->bodynum].header ||
+      model->datas == NULL || model->Type <= 0) {
+    return FALSE;
+  }
+  if (allocation->headnum < 0 || c_item_entries[allocation->bodynum].hasHead) {
+    return TRUE;
+  }
+  if (allocation->head_record_index == 0xffff ||
+      allocation->head_data_offset == 0xffff ||
+      allocation->head_record_index + 1 >= model->Type ||
+      allocation->head_data_offset >= model->Type ||
+      model->obj->Switches == NULL || model->obj->numSwitches <= 4 ||
+      model->obj->Switches[4] == NULL ||
+      model->obj->Switches[4]->Data == NULL) {
+    return FALSE;
+  }
+
+  head_node = model->obj->Switches[4];
+  if ((head_node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
+    return FALSE;
+  }
+  head_node->Data->HeadPlaceholder.RwDataIndex =
+      allocation->head_record_index;
+  head_data = (ModelRwData_HeadPlaceholderRecord *)&model
+                  ->datas[allocation->head_record_index];
+  head_data->ModelFileHeader = c_item_entries[allocation->headnum].header;
+  head_data->RwDatas = &model->datas[allocation->head_data_offset];
+  return TRUE;
+}
+
+static bool destroy_object_prop(PropRecord *prop, bool release_prop) {
+  ObjectRecord *obj = prop->obj;
+
+  if (!is_rdram_range(obj, sizeof(*obj)) ||
+      !is_rdram_range(obj->model, sizeof(*obj->model)) ||
+      !is_rdram_range(obj->model->obj, sizeof(*obj->model->obj))) {
+    /* Player hand buffers can be repopulated between a state load and the
+     * next replacement pass. Their old child PropRecord survives, but the
+     * ObjectRecord's model graph has already been overwritten and cannot be
+     * passed to objFreePermanently. The backing buffer is owned by the
+     * player and needs no pool release here. */
+    if (is_rdram_range(obj, sizeof(*obj)) && obj->prop == prop) {
+      obj->prop = NULL;
+    }
+    clear_plain_prop(prop, release_prop);
+    return TRUE;
+  }
+  if (obj->prop != prop) {
+    PropRecord *owner = obj->prop;
+
+    if (is_prop_slot(owner) && owner->obj == obj) {
+      /* The allocation still has a valid owner. This stale forward link must
+       * not destroy an object belonging to a different prop. */
+      clear_plain_prop(prop, release_prop);
+      return TRUE;
+    }
+    /* Player hand buffers can overwrite an ObjectRecord's backlink while its
+     * pool-backed prop remains live. The forward link and model graph still
+     * identify the allocation being replaced, so restore the backlink before
+     * objFreePermanently walks it. */
+    obj->prop = prop;
+  }
+
+  /* load_state stops all SFX before replacing props. These handles point into
+   * the dynamic audio pool, so objFree must not inspect addresses from the
+   * pre-load timeline after that pool has advanced. */
+  clear_object_transient_sounds(obj);
+  objFreePermanently(obj, release_prop);
+  if (!release_prop) {
+    clear_plain_prop(prop, FALSE);
+  }
+  return TRUE;
 }
 
 static bool clear_prop_for_replacement(PropRecord *prop) {
@@ -601,11 +806,9 @@ static bool clear_prop_for_replacement(PropRecord *prop) {
   if ((prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_DOOR ||
        prop->type == PROP_TYPE_WEAPON) &&
       prop->obj != NULL) {
-    // Keep the PropRecord itself out of the free list because the saved record
-    // at this index is about to reuse it.
-    objFreePermanently(prop->obj, FALSE);
-    clear_plain_prop(prop, FALSE);
-    return TRUE;
+    /* Keep the PropRecord itself out of the free list because the saved record
+     * at this index is about to reuse it. */
+    return destroy_object_prop(prop, FALSE);
   }
 
   if (prop->type == PROP_TYPE_EXPLOSION && prop->explosion != NULL) {
@@ -928,6 +1131,7 @@ typedef struct SavedPropLinks {
   u16 prev;
   u16 next;
   s16 attachmentNode;
+  u8 objectWasInPlayerBuffer;
   u32 objectRuntimeBitflags;
   void *objectProjectile;
 } SavedPropLinks;
@@ -966,6 +1170,8 @@ static bool prop_is_chr_attachment(PropRecord *prop,
  * returned to the prop free list.
  */
 static bool prop_slot_has_live_owner(PropRecord *prop) {
+  s32 i;
+
   if (prop == NULL) {
     return FALSE;
   }
@@ -985,8 +1191,15 @@ static bool prop_slot_has_live_owner(PropRecord *prop) {
   case PROP_TYPE_VIEWER:
     /* Player/viewer slots are owned outside the object/CHR backing-record
      * pools. They can be temporarily absent from the active list while the
-     * player state is reconstructed, but must never become allocatable. */
-    return TRUE;
+     * player state is reconstructed, but a stale presence prop which has been
+     * detached from every player is free even though its old type remains in
+     * the PropRecord. */
+    for (i = 0; i < getPlayerCount(); i++) {
+      if (g_playerPointers[i] != NULL && g_playerPointers[i]->prop == prop) {
+        return TRUE;
+      }
+    }
+    return FALSE;
   default:
     return FALSE;
   }
@@ -1627,7 +1840,7 @@ static void removePropAtIndex(s16 index) {
   } else if (toClear->type == PROP_TYPE_OBJ ||
              toClear->type == PROP_TYPE_DOOR ||
              toClear->type == PROP_TYPE_WEAPON) {
-    objFreePermanently(toClear->obj, TRUE);
+    destroy_object_prop(toClear, TRUE);
   } else if (toClear->type == PROP_TYPE_EXPLOSION) {
     release_explosion_prop(toClear);
     clear_plain_prop(toClear, TRUE);
@@ -4267,7 +4480,7 @@ saved_state_requires_player_model_rebuild(const SavedPropLinks *savedLinks,
     PropRecord *parent;
 
     if ((s16)savedLinks[i].parent < 0 ||
-        savedLinks[i].attachmentNode != OBJ_ALLOC_PLAYER_BUFFER) {
+        !savedLinks[i].objectWasInPlayerBuffer) {
       continue;
     }
     parent = get_prop_by_index(savedLinks[i].parent);
@@ -4308,14 +4521,8 @@ static PropRecord *find_saved_player_child(PropRecord *player_prop,
   return NULL;
 }
 
-static bool replace_saved_player_weapon(PropRecord *saved_prop,
-                                        PropRecord *generated_prop) {
-  WeaponObjRecord saved_weapon;
-  WeaponObjRecord *generated_weapon;
-  Model *generated_model;
-  ChrRecord *player_chr;
-  s32 hand;
-
+static bool discard_generated_player_weapon(PropRecord *saved_prop,
+                                            PropRecord *generated_prop) {
   if (saved_prop == NULL || generated_prop == NULL || saved_prop->obj == NULL ||
       generated_prop->obj == NULL ||
       saved_prop->obj->type != PROPDEF_COLLECTABLE ||
@@ -4325,34 +4532,12 @@ static bool replace_saved_player_weapon(PropRecord *saved_prop,
     return FALSE;
   }
 
-  saved_weapon = *saved_prop->weapon;
-  generated_weapon = generated_prop->weapon;
-  generated_model = generated_weapon->model;
-  player_chr =
-      generated_prop->parent != NULL ? generated_prop->parent->chr : NULL;
-
-  objFreePermanently(saved_prop->obj, FALSE);
-  chrpropDetach(generated_prop);
-
-  *generated_weapon = saved_weapon;
-  generated_weapon->prop = saved_prop;
-  generated_weapon->model = generated_model;
-  saved_prop->weapon = generated_weapon;
-
-  if (player_chr != NULL) {
-    for (hand = 0; hand < 2; hand++) {
-      if (player_chr->weapons_held[hand] == generated_prop) {
-        player_chr->weapons_held[hand] = saved_prop;
-      }
-    }
-    if (player_chr->handle_positiondata_hat == generated_prop) {
-      player_chr->handle_positiondata_hat = saved_prop;
-    }
-  }
-
-  generated_prop->obj = NULL;
-  chrpropDisable(generated_prop);
-  chrpropFree(generated_prop);
+  /* The saved child has already been migrated out of the transient player
+   * hand buffer. solo_char_load creates a replacement child while rebuilding
+   * Bond; discard that duplicate and attach the saved pool-backed object in
+   * the final pass. Transferring the generated allocation would put the saved
+   * object back in memory which first-person weapon loading later overwrites. */
+  objFreePermanently(generated_prop->obj, TRUE);
   return TRUE;
 }
 
@@ -4381,7 +4566,7 @@ static bool cleanup_live_player_children(PropRecord *player_prop,
       PropRecord *saved_child =
           find_saved_player_child(player_prop, child, savedLinks, recordCount);
       if (saved_child != NULL) {
-        if (!replace_saved_player_weapon(saved_child, child)) {
+        if (!discard_generated_player_weapon(saved_child, child)) {
           return FALSE;
         }
       } else {
@@ -4627,6 +4812,7 @@ static bool load_props_state_with_scratch(
     }
     savedLinks[i].index = savedPropIndex;
     savedLinks[i].attachmentNode = -1;
+    savedLinks[i].objectWasInPlayerBuffer = FALSE;
     savedLinks[i].objectRuntimeBitflags = 0;
     savedLinks[i].objectProjectile = NULL;
 
@@ -4659,12 +4845,10 @@ static bool load_props_state_with_scratch(
     PropRecord *prop = get_prop_by_index(savedPropIndex);
 
     if (hasObjAllocation &&
-        savedObjAllocation.setupCmdIndex == OBJ_ALLOC_PLAYER_BUFFER &&
-        !slot_matches_object(prop, savedPropType, &savedObjAllocation)) {
-      // Compact player weapons have no serialized model attachment node. This
-      // sentinel requests reconstruction of the player-buffer allocation graph
-      // after the rest of the prop payload has loaded.
-      savedLinks[i].attachmentNode = OBJ_ALLOC_PLAYER_BUFFER;
+        savedObjAllocation.setupCmdIndex == OBJ_ALLOC_PLAYER_BUFFER) {
+      /* Keep this separate from attachmentNode: load_object_base reads the
+       * real saved node index into that field later in this iteration. */
+      savedLinks[i].objectWasInPlayerBuffer = TRUE;
     }
 
     // Remove any enabled props occupying slots the save skipped over so the
@@ -4689,7 +4873,8 @@ static bool load_props_state_with_scratch(
           prop->chr == &g_ChrSlots[savedChrAllocation.slot_index] &&
           prop->chr->model != NULL && prop->chr->model->chr == prop->chr &&
           prop->chr->bodynum == savedChrAllocation.bodynum &&
-          prop->chr->headnum == savedChrAllocation.headnum) {
+          prop->chr->headnum == savedChrAllocation.headnum &&
+          restore_chr_model_attachment(prop->chr, &savedChrAllocation)) {
         break;
       }
 
@@ -4723,7 +4908,12 @@ static bool load_props_state_with_scratch(
 
     case PROP_TYPE_OBJ:
     case PROP_TYPE_WEAPON:
-      if (!slot_matches_object(prop, savedPropType, &savedObjAllocation) &&
+      /* Third-person Bond equipment is originally allocated inside the
+       * first-person hand buffers. Always migrate it to an ordinary runtime
+       * weapon/hat record: restoring it in place leaves ObjectRecord and Model
+       * pointers in memory that the next first-person model load overwrites. */
+      if ((savedObjAllocation.setupCmdIndex == OBJ_ALLOC_PLAYER_BUFFER ||
+           !slot_matches_object(prop, savedPropType, &savedObjAllocation)) &&
           can_recreate_object(&savedObjAllocation)) {
         if (!clear_prop_for_replacement(prop)) {
           practiceLogWarn(
@@ -4787,6 +4977,23 @@ static bool load_props_state_with_scratch(
           skip_prop_data(stream, savedPropType, compactContainedObject);
           continue;
         }
+      }
+      break;
+
+    case PROP_TYPE_VIEWER:
+      /* Viewer props are restored after ordinary props, but their exact prop
+       * slot can currently belong to a guard. Clear that backing record before
+       * changing the common type field; otherwise player reconciliation sees
+       * the guard's ChrRecord as Bond's and tears down the wrong model. */
+      if (prop->type != PROP_TYPE_VIEWER) {
+        if (!clear_prop_for_replacement(prop)) {
+          practiceLogWarn(
+              "Cannot retain prop slot %d while replacing type %d with viewer",
+              savedPropIndex, prop->type);
+          return FALSE;
+        }
+      } else if (!prop_slot_has_live_owner(prop)) {
+        clear_plain_prop(prop, FALSE);
       }
       break;
 
@@ -5189,7 +5396,9 @@ static bool load_props_state_with_scratch(
   detach_saved_player_children(savedLinks, recordCount);
   if (!load_viewer_players_state(
           stream,
-          saved_state_requires_player_model_rebuild(savedLinks, recordCount))) {
+          !practice_states_save_is_from_current_stage() ||
+              saved_state_requires_player_model_rebuild(savedLinks,
+                                                        recordCount))) {
     return FALSE;
   }
   if (!restore_saved_player_children(savedLinks, recordCount)) {
@@ -5285,6 +5494,54 @@ static bool load_props_state_with_scratch(
     return FALSE;
   }
   load_onscreen_prop_list(stream);
+
+  /* Replacing characters by exact prop and ChrRecord slots can leave an old,
+   * now-unowned ChrRecord pointing at a model-pool entry that another teardown
+   * already released (model->obj is NULL). Normal level unload scans every
+   * non-NULL chr->model, so normalize those orphaned slots now. */
+  for (i = 0; i < g_NumChrSlots; i++) {
+    ChrRecord *chr = &g_ChrSlots[i];
+
+    if (chr->model != NULL && chr->model->obj == NULL) {
+      if (chr->prop != NULL && chr->prop->type == PROP_TYPE_CHR &&
+          (chr->prop->flags & PROPFLAG_ENABLED) && chr->prop->chr == chr) {
+        practiceLogError("Active CHR %d has a released model", i);
+        assert(FALSE);
+        return FALSE;
+      }
+      chr->model = NULL;
+      chr->chrnum = -1;
+    }
+  }
+
+  /* Setup ObjectRecords outlive their props. Exact-slot replacement can free
+   * one model while leaving an unused setup record's convenience pointers
+   * intact; cleanupObjects later treats obj->prop as ownership and would walk
+   * the released model a second time. */
+  {
+    u32 *command = (u32 *)g_CurrentSetup.propDefs;
+    s32 setup_index = 0;
+
+    while (command != NULL && (u8)command[0] != PROPDEF_END) {
+      PropDefHeaderRecord *pdef = (PropDefHeaderRecord *)command;
+      ObjectRecord *obj = setupCommandGetObject(
+          lvlGetCurrentStageToLoad(), setup_index);
+
+      if (obj != NULL && obj->model != NULL && obj->model->obj == NULL) {
+        if (obj->prop != NULL && (obj->prop->flags & PROPFLAG_ENABLED) &&
+            obj->prop->obj == obj) {
+          practiceLogError("Active setup object has a released model type=%d",
+                           obj->type);
+          assert(FALSE);
+          return FALSE;
+        }
+        obj->model = NULL;
+        obj->prop = NULL;
+      }
+      command += sizepropdef(pdef);
+      setup_index++;
+    }
+  }
 
   return TRUE;
 }

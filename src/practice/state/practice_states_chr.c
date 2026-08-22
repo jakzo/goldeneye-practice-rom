@@ -1072,8 +1072,50 @@ static void read_animation_zero_rle(StateStream *stream, u8 *dst, u32 size) {
   }
 }
 
-static bool model_rw_scalar_value(Model *model, ModelNode *node, u32 **value) {
-  union ModelRwData *rwdata = modelGetNodeRwData(model, node);
+static bool model_rw_scalar_value(ModelNode *node,
+                                  union ModelRwData **datas,
+                                  s32 rwdata_count, u32 **value) {
+  union ModelRwData *rwdata;
+  u16 rwdata_index;
+
+  if (datas == NULL || node == NULL || node->Data == NULL) {
+    practiceLogError("Model scalar has incomplete model/node data");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  switch (node->Opcode & 0xff) {
+  case MODELNODE_OPCODE_OP07:
+    rwdata_index = node->Data->Op07.RwDataIndex;
+    break;
+  case MODELNODE_OPCODE_LOD:
+    rwdata_index = node->Data->LOD.RwDataIndex;
+    break;
+  case MODELNODE_OPCODE_SWITCH:
+    rwdata_index = node->Data->Switch.RwDataIndex;
+    break;
+  case MODELNODE_OPCODE_BSP:
+    rwdata_index = node->Data->BSP.RwDataIndex;
+    break;
+  case MODELNODE_OPCODE_OP11:
+    rwdata_index = node->Data->Op11.RwDataIndex;
+    break;
+  case MODELNODE_OPCODE_GUNFIRE:
+    rwdata_index = node->Data->Gunfire.RwDataIndex;
+    break;
+  default:
+    return FALSE;
+  }
+
+  if (rwdata_index >= rwdata_count) {
+    practiceLogError(
+        "Model scalar opcode=%d RW index %d exceeds %d instance records",
+        node->Opcode & 0xff, rwdata_index, rwdata_count);
+    assert(FALSE);
+    return FALSE;
+  }
+
+  rwdata = (union ModelRwData *)&datas[rwdata_index];
 
   switch (node->Opcode & 0xff) {
   case MODELNODE_OPCODE_OP07:
@@ -1099,6 +1141,19 @@ static bool model_rw_scalar_value(Model *model, ModelNode *node, u32 **value) {
   }
 }
 
+static ModelNode *model_rw_scalar_child(ModelNode *node) {
+  switch (node->Opcode & 0xff) {
+  case MODELNODE_OPCODE_LOD:
+    return node->Data->LOD.Affects;
+  case MODELNODE_OPCODE_SWITCH:
+    return node->Data->Switch.Controls;
+  case MODELNODE_OPCODE_HEAD:
+    return NULL;
+  default:
+    return node->Child;
+  }
+}
+
 static s32 count_model_rw_scalars(ModelNode *node, s32 depth) {
   s32 count = 0;
 
@@ -1116,46 +1171,59 @@ static s32 count_model_rw_scalars(ModelNode *node, s32 depth) {
       count++;
       break;
     }
-    if ((node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
-      count += count_model_rw_scalars(node->Child, depth + 1);
+    {
+      ModelNode *child = model_rw_scalar_child(node);
+      if (child != NULL) {
+        count += count_model_rw_scalars(child, depth + 1);
+      }
     }
     node = node->Next;
   }
   return count;
 }
 
-static void save_model_rw_scalars(StateStream *stream, Model *model,
-                                  ModelNode *node, s32 depth) {
+static void save_model_rw_scalars(StateStream *stream, ModelNode *node,
+                                  union ModelRwData **datas,
+                                  s32 rwdata_count, s32 depth) {
   if (node == NULL || depth >= 64) {
     return;
   }
   while (node != NULL) {
     u32 *value;
-    if (model_rw_scalar_value(model, node, &value)) {
+
+    if (model_rw_scalar_value(node, datas, rwdata_count, &value)) {
       write_u32(stream, *value);
     }
-    if ((node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
-      save_model_rw_scalars(stream, model, node->Child, depth + 1);
+    {
+      ModelNode *child = model_rw_scalar_child(node);
+      if (child != NULL) {
+        save_model_rw_scalars(stream, child, datas, rwdata_count, depth + 1);
+      }
     }
     node = node->Next;
   }
 }
 
-static void load_model_rw_scalars(StateStream *stream, Model *model,
-                                  ModelNode *node, s32 depth, s32 saved_count,
+static void load_model_rw_scalars(StateStream *stream, ModelNode *node,
+                                  union ModelRwData **datas,
+                                  s32 rwdata_count, s32 depth, s32 saved_count,
                                   s32 *loaded_count) {
   if (node == NULL || depth >= 64 || *loaded_count >= saved_count) {
     return;
   }
   while (node != NULL && *loaded_count < saved_count) {
     u32 *value;
-    if (model_rw_scalar_value(model, node, &value)) {
+
+    if (model_rw_scalar_value(node, datas, rwdata_count, &value)) {
       *value = read_u32(stream);
       (*loaded_count)++;
     }
-    if ((node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
-      load_model_rw_scalars(stream, model, node->Child, depth + 1, saved_count,
-                            loaded_count);
+    {
+      ModelNode *child = model_rw_scalar_child(node);
+      if (child != NULL) {
+        load_model_rw_scalars(stream, child, datas, rwdata_count, depth + 1,
+                              saved_count, loaded_count);
+      }
     }
     node = node->Next;
   }
@@ -1233,7 +1301,10 @@ void practice_states_save_model_animation(StateStream *stream,
                            : 0;
     write_u16(stream, scalar_count);
     if (scalar_count > 0) {
-      save_model_rw_scalars(stream, (Model *)model, model->obj->RootNode, 0);
+      save_model_rw_scalars(stream, model->obj->RootNode, model->datas,
+                            model->Type > 0 ? model->Type
+                                            : model->obj->numRecords,
+                            0);
     }
   }
 }
@@ -1252,8 +1323,10 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
     s32 loaded_count = 0;
 
     if (model != NULL && model->obj != NULL) {
-      load_model_rw_scalars(stream, model, model->obj->RootNode, 0,
-                            scalar_count, &loaded_count);
+      load_model_rw_scalars(stream, model->obj->RootNode, model->datas,
+                            model->Type > 0 ? model->Type
+                                            : model->obj->numRecords,
+                            0, scalar_count, &loaded_count);
     }
     while (loaded_count < scalar_count) {
       read_u32(stream);
@@ -1275,8 +1348,11 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
   model->unk2c = saved.unk2c;
   model->framea = saved.framea;
   model->frameb = saved.frameb;
-  model->unk34 = saved.unk34;
-  model->unk38 = saved.unk38;
+  /* These are decoded-frame cache slots. subcalcmatrices regenerates them
+   * from anim/framea/frameb before consuming them. A value captured from a
+   * previous model instance is not persistent animation state. */
+  model->unk34 = 0;
+  model->unk38 = 0;
   model->endframe = saved.endframe;
   model->speed = saved.speed;
   model->newspeed = saved.newspeed;
@@ -1287,8 +1363,8 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
   model->unk5c = saved.unk5c;
   model->frame2a = saved.frame2a;
   model->frame2b = saved.frame2b;
-  model->unk64 = saved.unk64;
-  model->unk68 = saved.unk68;
+  model->unk64 = 0;
+  model->unk68 = 0;
   model->unk6c = saved.unk6c;
   model->speed2 = saved.speed2;
   model->unk74 = saved.unk74;
@@ -1622,6 +1698,8 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   StateStream *storage_stream = stream;
   ChrCommonStream common_stream;
   s32 ailist_reference;
+  u16 head_record_index = 0xffff;
+  u16 head_data_offset = 0xffff;
 
   bool supported_action = is_supported_chr_action(chr);
   bool has_model_transform =
@@ -1632,12 +1710,46 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
                           ? normalize_chr_heading(getsubroty(chr->model))
                           : 0.0f;
 
+  if (chr->model != NULL && chr->model->obj != NULL &&
+      chr->model->datas != NULL && chr->model->Type > 0 && chr->headnum >= 0 &&
+      chr->model->obj == c_item_entries[chr->bodynum].header &&
+      !c_item_entries[chr->bodynum].hasHead &&
+      chr->model->obj->Switches != NULL &&
+      chr->model->obj->numSwitches > 4 &&
+      chr->model->obj->Switches[4] != NULL &&
+      chr->model->obj->Switches[4]->Data != NULL) {
+    ModelNode *head_node = chr->model->obj->Switches[4];
+    ModelRwData_HeadPlaceholderRecord *head_data;
+    u32 data_start = (u32)chr->model->datas;
+    u32 data_end = data_start + chr->model->Type * sizeof(*chr->model->datas);
+    u32 attached_data;
+
+    head_record_index = head_node->Data->HeadPlaceholder.RwDataIndex;
+    if (head_record_index + 1 < chr->model->Type) {
+      head_data = (ModelRwData_HeadPlaceholderRecord *)&chr->model
+                      ->datas[head_record_index];
+      attached_data = (u32)head_data->RwDatas;
+      if (head_data->ModelFileHeader == c_item_entries[chr->headnum].header &&
+          attached_data >= data_start && attached_data < data_end &&
+          (attached_data - data_start) % sizeof(*chr->model->datas) == 0) {
+        head_data_offset =
+            (attached_data - data_start) / sizeof(*chr->model->datas);
+      } else {
+        head_record_index = 0xffff;
+      }
+    } else {
+      head_record_index = 0xffff;
+    }
+  }
+
   // Allocation metadata is consumed before the destination ChrRecord exists so
   // a missing CHR can be recreated in its saved slot before the payload loads.
   write_u16(stream, (u16)(chr - g_ChrSlots));
   write_u8(stream, (u8)chr->headnum);
   write_u8(stream, (u8)chr->bodynum);
   write_f32(stream, model_heading);
+  write_u16(stream, head_record_index);
+  write_u16(stream, head_data_offset);
 
   chr_common_stream_init(&common_stream, 0);
   stream = &common_stream.base;
@@ -1783,6 +1895,8 @@ void load_chr_allocation_state(StateStream *stream,
   allocation->headnum = (s8)read_u8(stream);
   allocation->bodynum = (s8)read_u8(stream);
   allocation->heading = normalize_chr_heading(read_f32(stream));
+  allocation->head_record_index = read_u16(stream);
+  allocation->head_data_offset = read_u16(stream);
 }
 
 void load_chr_record(StateStream *stream, ChrRecord *chr,
@@ -1791,6 +1905,7 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   ChrCommonStream common_stream;
   s32 ailist_reference;
   bool has_model_transform;
+  bool loaded_model_animation = FALSE;
   coord3d model_offset;
   f32 model_heading;
   s16 weapon_indices[3];
@@ -1894,12 +2009,6 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   if (has_model_transform) {
     read_bytes(stream, &model_offset, sizeof(coord3d));
     model_heading = normalize_chr_heading(read_f32(stream));
-
-    if (chr->model != NULL && chr->model->obj != NULL &&
-        chr->model->obj->RootNode != NULL) {
-      setsuboffset(chr->model, &model_offset);
-      setsubroty(chr->model, model_heading);
-    }
   }
 
   if (stream->total_processed != common_stream.size) {
@@ -1914,7 +2023,23 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
     if (read_u8(stream)) {
       practice_states_load_model_animation(stream,
                                            chr != NULL ? chr->model : NULL);
+      loaded_model_animation = TRUE;
     }
+  }
+
+  if (has_model_transform && chr->model != NULL && chr->model->obj != NULL &&
+      chr->model->obj->RootNode != NULL) {
+    ModelNode *root = chr->model->obj->RootNode;
+
+    if (!loaded_model_animation &&
+        (root->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
+      ModelRwData_HeaderRecord *root_data =
+          (ModelRwData_HeaderRecord *)modelGetNodeRwData(chr->model, root);
+
+      bzero(root_data, sizeof(*root_data));
+    }
+    setsuboffset(chr->model, &model_offset);
+    setsubroty(chr->model, model_heading);
   }
 
   load_model_blood_patches(stream, chr->model);

@@ -11,6 +11,8 @@
 #include "chrlv.h"
 #include "chrobjhandler.h"
 #include "emu_log.h"
+#include "file.h"
+#include "front.h"
 #include "gun.h"
 #include "init.h"
 #include "initanitable.h"
@@ -30,6 +32,7 @@
 #include "player.h"
 #include "practice_config.h"
 #include "practice_hotkeys.h"
+#include "practice_music.h"
 #include "practice_render.h"
 #include "practice_replay.h"
 #include "practice_sc64.h"
@@ -316,6 +319,9 @@ typedef struct ReplayHopSnapshot {
 } ReplayHopSnapshot;
 
 static u32 g_ReplayHopSeed;
+static u32 g_ReplayHopPlaybackGeneration;
+static s32 g_ReplayHopPendingStage;
+static s32 g_ReplayHopStableMenu;
 static u16 g_ReplayStartedMask;
 static u16 g_ReplayCompleteMask;
 static u8 g_ReplayPackCount;
@@ -346,9 +352,14 @@ static s32 replay_hop_pick_next(void) {
   s32 i;
 
   for (i = 0; i < g_ReplayPackCount; i++) {
-    if (!replay_hop_complete(i)) {
+    if (!replay_hop_complete(i) && i != g_ReplayCurrentIndex) {
       incomplete[count++] = i;
     }
+  }
+  /* Once every other replay has completed, the current replay is the only
+   * remaining candidate and must be allowed to continue. */
+  if (count == 0 && !replay_hop_complete(g_ReplayCurrentIndex)) {
+    incomplete[count++] = g_ReplayCurrentIndex;
   }
   if (count == 0) {
     return -1;
@@ -386,6 +397,15 @@ static void replay_hop_restore_snapshot(void) {
 static void replay_hop_switch(s32 index) {
   s32 stage_id;
 
+  if (index == g_ReplayCurrentIndex && replay_hop_started(index) &&
+      g_ReplayIsPlaying) {
+    replay_hop_restore_snapshot();
+    g_RunwaySaveStateLastTimestamp = g_RunwaySaveStateTarget;
+    g_RunwaySaveStatePhase = REPLAY_STATE_PLAY_BEFORE_LOAD;
+    unpause();
+    return;
+  }
+
   g_ReplayCurrentIndex = (u8)index;
   if (!practice_replay_use_test_rom_fixture_index(index)) {
     emu_log("RUNWAY_STATE_HOP_FIXTURE_FAILED index=%d", index);
@@ -406,11 +426,11 @@ static void replay_hop_switch(s32 index) {
   }
   emu_log("RUNWAY_STATE_HOP index=%d stage=%d started=%d", index, stage_id,
           replay_hop_started(index));
-  practice_replay_request_playback();
   g_RunwaySaveStatePausedFrames = 0;
+  g_ReplayHopStableMenu = MENU_INVALID;
   g_RunwaySaveStatePhase = REPLAY_STATE_WAIT_LEVEL;
+  g_ReplayHopPendingStage = stage_id;
   unpause();
-  bossSetLoadedStage(stage_id);
 }
 
 static s32 replay_state_param_value(s32 shift, s32 default_value) {
@@ -487,6 +507,9 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
     g_ReplayRestartSaveStateMode = restart_save_state_mode;
     g_ReplayTestPlaybackCount = test_param;
     g_ReplayHopSeed = 1;
+    g_ReplayHopPlaybackGeneration = 0;
+    g_ReplayHopPendingStage = LEVELID_NONE;
+    g_ReplayHopStableMenu = MENU_INVALID;
     g_ReplayStartedMask = 0;
     g_ReplayCompleteMask = 0;
     g_ReplayCurrentIndex = 0;
@@ -2255,6 +2278,11 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
   if (g_practice_test_case != REPLAY_RUNWAY_SAVE_STATES) {
     return;
   }
+  if (g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_LEVEL) {
+    g_SimulatedButtons = 0;
+    g_SimulatedButtonsPressed = 0;
+    return;
+  }
   trigger = hotkey_trigger();
   if (pending_gfx_tasks != 0 &&
       g_RunwaySaveStatePhase >= REPLAY_STATE_HOLD_TO_SAVE &&
@@ -2405,6 +2433,20 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
       g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
       break;
     }
+    if (g_RunwaySaveStatePausedFrames > 0 &&
+        !g_ReplayRestartSaveStateMode && g_CurrentPlayer->prop != NULL &&
+        g_CurrentPlayer->prop->chr != NULL &&
+        g_CurrentPlayer->prop->chr->model != NULL &&
+        g_CurrentPlayer->ptr_char_objectinstance == NULL &&
+        practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop) !=
+            g_ReplaySaveViewerMatricesFixed) {
+      emu_log("RUNWAY_LOAD_VIEWER_MATRIX_FORMAT_MISMATCH expected=%d actual=%d",
+              g_ReplaySaveViewerMatricesFixed,
+              practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop));
+      emu_log("TEST_FAILED");
+      g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+      break;
+    }
     if (g_RunwaySaveStatePausedFrames == 0) {
       if (!g_IsTimePaused) {
         emu_log("RUNWAY_STATE_NOT_PAUSED timestamp=%d",
@@ -2473,19 +2515,6 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
         g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
         break;
       }
-      if (!g_ReplayRestartSaveStateMode && g_CurrentPlayer->prop != NULL &&
-          g_CurrentPlayer->prop->chr != NULL &&
-          g_CurrentPlayer->prop->chr->model != NULL &&
-          practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop) !=
-              g_ReplaySaveViewerMatricesFixed) {
-        emu_log("RUNWAY_LOAD_VIEWER_MATRIX_FORMAT_MISMATCH expected=%d actual=%d",
-                g_ReplaySaveViewerMatricesFixed,
-                practice_prop_render_matrices_are_fixed(
-                    g_CurrentPlayer->prop));
-        emu_log("TEST_FAILED");
-        g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
-        break;
-      }
       emu_log("RUNWAY_STATE_LOADED timestamp=%d", g_RunwaySaveStateTarget);
     }
     g_SimulatedButtons = trigger;
@@ -2500,6 +2529,9 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
             g_RunwaySaveStateTarget + replay_state_duration_frames();
       }
       g_RunwaySaveStatePhase = REPLAY_STATE_PLAY_BEFORE_SAVE;
+      g_SimulatedButtons = 0;
+      g_SimulatedButtonsPressed = 0;
+      unpause();
     }
     break;
   default:
@@ -2510,6 +2542,12 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
 }
 
 void practice_tests_before_replay_frame_check(void) {}
+
+s32 practice_tests_should_skip_replay_frame_check(void) {
+  return g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
+         replay_hop_active() &&
+         g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_LEVEL;
+}
 
 // Determinism check for loading a save state. Save once, then repeatedly load
 // the state and log LOG_FRAMES consecutive frames of (deltaFrames, RNG seeds).
@@ -2645,7 +2683,120 @@ void practice_tests_frame() {
       g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
     } else if (replay_hop_active() &&
                g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_LEVEL) {
+      /* Use the game's normal mission -> title menu -> mission lifecycle. Walk
+       * through the normal solo menu states so each screen owns its setup and
+       * teardown before MENU_RUN_STAGE starts the destination. */
+      if (g_ReplayHopPendingStage != LEVELID_NONE) {
+        if (lvlGetCurrentStageToLoad() != LEVELID_TITLE) {
+          /* The hop is selected from a paused hotkey frame. Resume through one
+           * complete live frame before asking boss to unload the mission, as a
+           * normal in-game exit does. */
+          if (++g_RunwaySaveStatePausedFrames < 2) {
+            return;
+          }
+          g_RunwaySaveStatePausedFrames = 0;
+          frontChangeMenu(MENU_LEGAL_SCREEN, TRUE);
+          bossSetLoadedStage(LEVELID_TITLE);
+          return;
+        }
+        if (lvlGetCurrentStageToLoad() == LEVELID_TITLE &&
+            menu_update == MENU_INVALID && maybe_prev_menu == MENU_INVALID) {
+          s32 stage_id = g_ReplayHopPendingStage;
+
+          /* Let each screen complete normal interface/render work before
+           * selecting its next entry. In particular, the briefing screen owns
+           * a temporary character model which its update path must tear down
+           * before the title stage is unloaded. */
+          if (g_ReplayHopStableMenu != current_menu) {
+            g_ReplayHopStableMenu = current_menu;
+            g_RunwaySaveStatePausedFrames = 0;
+            return;
+          }
+          if (++g_RunwaySaveStatePausedFrames < 2) {
+            return;
+          }
+
+          switch (current_menu) {
+          case MENU_LEGAL_SCREEN:
+            /* Legal-screen initialization stops the mission music. Wait for
+             * the audio thread to process that stop before file select starts
+             * folder music; musicTrack1Play otherwise busy-waits here. */
+            if (!practice_music_track_was_playing(0)) {
+              g_ReplayHopStableMenu = MENU_INVALID;
+              g_RunwaySaveStatePausedFrames = 0;
+              frontChangeMenu(MENU_FILE_SELECT, TRUE);
+            }
+            break;
+          case MENU_FILE_SELECT:
+            /* Selecting a folder normally happens through this screen's
+             * input handler. Keep that selection valid while the mode-select
+             * screen queries its save data. */
+            fileSetCurrentFolder(FOLDER1);
+            g_ReplayHopStableMenu = MENU_INVALID;
+            g_RunwaySaveStatePausedFrames = 0;
+            frontChangeMenu(MENU_MODE_SELECT, FALSE);
+            break;
+          case MENU_MODE_SELECT:
+            gamemode = GAMEMODE_SOLO;
+            g_ReplayHopStableMenu = MENU_INVALID;
+            g_RunwaySaveStatePausedFrames = 0;
+            frontChangeMenu(MENU_MISSION_SELECT, FALSE);
+            break;
+          case MENU_MISSION_SELECT: {
+            s32 briefing = 0;
+
+            while (mission_folder_setup_entries[briefing]
+                       .folder_text_preset != 0 &&
+                   mission_folder_setup_entries[briefing].stage_id !=
+                       stage_id) {
+              briefing++;
+            }
+            if (mission_folder_setup_entries[briefing].folder_text_preset ==
+                0) {
+              emu_log("RUNWAY_STATE_HOP_MENU_STAGE_FAILED stage=%d",
+                      stage_id);
+              emu_log("TEST_FAILED");
+              g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+              return;
+            }
+            gamemode = GAMEMODE_SOLO;
+            selected_stage = stage_id;
+            briefingpage = briefing;
+            g_ReplayHopStableMenu = MENU_INVALID;
+            g_RunwaySaveStatePausedFrames = 0;
+            frontChangeMenu(MENU_DIFFICULTY, FALSE);
+            break;
+          }
+          case MENU_DIFFICULTY:
+            set_selected_difficulty(practice_replay_saved_difficulty());
+            g_ReplayHopStableMenu = MENU_INVALID;
+            g_RunwaySaveStatePausedFrames = 0;
+            frontChangeMenu(MENU_BRIEFING, FALSE);
+            break;
+          case MENU_BRIEFING:
+            g_ReplayHopPendingStage = LEVELID_NONE;
+            g_ReplayHopStableMenu = MENU_INVALID;
+            g_RunwaySaveStatePausedFrames = 0;
+            g_ReplayHopPlaybackGeneration =
+                practice_replay_playback_generation() + 1;
+            practice_replay_request_playback();
+            frontChangeMenu(MENU_RUN_STAGE, TRUE);
+            break;
+          default:
+            break;
+          }
+        }
+        return;
+      }
       if (g_ReplayIsPlaying) {
+        /* bossSetLoadedStage is asynchronous. The old level and replay remain
+         * active until boss finishes its unload, so only accept the freshly
+         * started destination playback generation. */
+        if (lvlGetCurrentStageToLoad() != practice_replay_saved_stage_id() ||
+            practice_replay_playback_generation() !=
+                g_ReplayHopPlaybackGeneration) {
+          return;
+        }
         if (replay_hop_started(g_ReplayCurrentIndex)) {
           if (replay_timestamp >= (u32)replay_state_wait_frames()) {
             replay_hop_restore_snapshot();

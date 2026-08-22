@@ -17,6 +17,7 @@ s32 practice_tests_should_disable_intro(s32 test_case);
 void practice_tests_tick();
 void practice_tests_frame();
 void practice_tests_before_replay_frame_check(void);
+s32 practice_tests_should_skip_replay_frame_check(void);
 void practice_tests_before_hotkeys(s32 pending_gfx_tasks);
 void practice_tests_before_player_model_reconcile(void);
 #else
@@ -29,6 +30,7 @@ void practice_tests_before_player_model_reconcile(void);
 #define practice_tests_tick() ((void)0)
 #define practice_tests_frame() ((void)0)
 #define practice_tests_before_replay_frame_check() ((void)0)
+#define practice_tests_should_skip_replay_frame_check() FALSE
 #define practice_tests_before_hotkeys(pending_gfx_tasks) ((void)0)
 #define practice_tests_before_player_model_reconcile() ((void)0)
 #endif

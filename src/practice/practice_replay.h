@@ -88,6 +88,8 @@ void practice_replay_use_test_rom_fixture(void);
 s32 practice_replay_test_fixture_count(void);
 s32 practice_replay_use_test_rom_fixture_index(s32 index);
 s32 practice_replay_saved_stage_id(void);
+s32 practice_replay_saved_difficulty(void);
+u32 practice_replay_playback_generation(void);
 #endif
 void practice_replay_stop_recording(void);
 void practice_replay_stop_playback(void);
