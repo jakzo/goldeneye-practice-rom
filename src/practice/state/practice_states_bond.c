@@ -1373,6 +1373,21 @@ bool load_viewer_players_state(StateStream *stream, bool force_model_rebuild) {
         viewer_chr->unk180[1].unk00 = -1;
         viewer_chr = target_chr;
       }
+      if (viewer_chr->bodynum != allocation.bodynum ||
+          viewer_chr->headnum != allocation.headnum) {
+        practiceLogError(
+            "Viewer model allocation mismatch player=%d saved=%d/%d live=%d/%d",
+            player_index, allocation.bodynum, allocation.headnum,
+            viewer_chr->bodynum, viewer_chr->headnum);
+        assert(FALSE);
+        return FALSE;
+      }
+      if (!practice_states_restore_model_parent_links(viewer_chr->model)) {
+        practiceLogError("Viewer CHR model graph invalid player=%d",
+                         player_index);
+        assert(FALSE);
+        return FALSE;
+      }
       load_chr_record(stream, viewer_chr, &attachments);
     }
   }

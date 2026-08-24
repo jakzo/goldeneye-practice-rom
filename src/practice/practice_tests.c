@@ -11,7 +11,6 @@
 #include "chrlv.h"
 #include "chrobjhandler.h"
 #include "emu_log.h"
-#include "file.h"
 #include "front.h"
 #include "gun.h"
 #include "init.h"
@@ -320,6 +319,7 @@ typedef struct ReplayHopSnapshot {
 
 static u32 g_ReplayHopSeed;
 static u32 g_ReplayHopPlaybackGeneration;
+static s32 g_ReplayHopPendingIndex;
 static s32 g_ReplayHopPendingStage;
 static s32 g_ReplayHopStableMenu;
 static u16 g_ReplayStartedMask;
@@ -331,6 +331,10 @@ static ReplayHopSnapshot g_ReplayHopSnapshots[TEST_REPLAY_PACK_MAX];
 static s32 replay_hop_active(void) {
   return g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
          !g_ReplayRestartSaveStateMode && g_ReplayPackCount > 1;
+}
+
+s32 practice_tests_replay_pack_count(void) {
+  return g_ReplayPackCount > 0 ? g_ReplayPackCount : 1;
 }
 
 static s32 replay_hop_started(s32 index) {
@@ -395,8 +399,6 @@ static void replay_hop_restore_snapshot(void) {
 }
 
 static void replay_hop_switch(s32 index) {
-  s32 stage_id;
-
   if (index == g_ReplayCurrentIndex && replay_hop_started(index) &&
       g_ReplayIsPlaying) {
     replay_hop_restore_snapshot();
@@ -406,30 +408,14 @@ static void replay_hop_switch(s32 index) {
     return;
   }
 
-  g_ReplayCurrentIndex = (u8)index;
-  if (!practice_replay_use_test_rom_fixture_index(index)) {
-    emu_log("RUNWAY_STATE_HOP_FIXTURE_FAILED index=%d", index);
-    emu_log("TEST_FAILED");
-    g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
-    return;
-  }
-  practice_states_set_test_slot(index);
-  stage_id = practice_replay_saved_stage_id();
-  if (stage_id == LEVELID_NONE) {
-    emu_log("RUNWAY_STATE_HOP_STAGE_FAILED index=%d", index);
-    emu_log("TEST_FAILED");
-    g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
-    return;
-  }
-  if (replay_hop_started(index)) {
-    replay_hop_restore_snapshot();
-  }
-  emu_log("RUNWAY_STATE_HOP index=%d stage=%d started=%d", index, stage_id,
-          replay_hop_started(index));
+  /* Keep the current fixture active for the live frame below. Activating the
+   * destination here can make the old replay reader fetch its next page from
+   * the destination fixture at the old fixture's offset. */
+  g_ReplayHopPendingIndex = index;
   g_RunwaySaveStatePausedFrames = 0;
   g_ReplayHopStableMenu = MENU_INVALID;
   g_RunwaySaveStatePhase = REPLAY_STATE_WAIT_LEVEL;
-  g_ReplayHopPendingStage = stage_id;
+  g_ReplayHopPendingStage = LEVELID_DEFAULT;
   unpause();
 }
 
@@ -508,6 +494,7 @@ void practice_tests_set_case(s32 test_case, s32 test_param) {
     g_ReplayTestPlaybackCount = test_param;
     g_ReplayHopSeed = 1;
     g_ReplayHopPlaybackGeneration = 0;
+    g_ReplayHopPendingIndex = -1;
     g_ReplayHopPendingStage = LEVELID_NONE;
     g_ReplayHopStableMenu = MENU_INVALID;
     g_ReplayStartedMask = 0;
@@ -2683,9 +2670,15 @@ void practice_tests_frame() {
       g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
     } else if (replay_hop_active() &&
                g_RunwaySaveStatePhase == REPLAY_STATE_WAIT_LEVEL) {
-      /* Use the game's normal mission -> title menu -> mission lifecycle. Walk
-       * through the normal solo menu states so each screen owns its setup and
-       * teardown before MENU_RUN_STAGE starts the destination. */
+      /* Use the game's normal mission -> title -> MENU_RUN_STAGE lifecycle.
+       * Intermediate title screens only add presentation-model ownership that
+       * is unrelated to the cross-stage save-state behavior under test. */
+      if (g_IsTimePaused) {
+        /* A replay that reaches its recorded end can leave practice time
+         * paused. Menu screen switches require advancing frames, so keep the
+         * test lifecycle live while it walks to the next fixture. */
+        unpause();
+      }
       if (g_ReplayHopPendingStage != LEVELID_NONE) {
         if (lvlGetCurrentStageToLoad() != LEVELID_TITLE) {
           /* The hop is selected from a paused hotkey frame. Resume through one
@@ -2701,12 +2694,42 @@ void practice_tests_frame() {
         }
         if (lvlGetCurrentStageToLoad() == LEVELID_TITLE &&
             menu_update == MENU_INVALID && maybe_prev_menu == MENU_INVALID) {
-          s32 stage_id = g_ReplayHopPendingStage;
+          s32 stage_id;
 
-          /* Let each screen complete normal interface/render work before
-           * selecting its next entry. In particular, the briefing screen owns
-           * a temporary character model which its update path must tear down
-           * before the title stage is unloaded. */
+          /* Wait until the old mission's replay has stopped. Changing the
+           * fixture base is then safe from its in-flight page reads. */
+          if (g_ReplayHopPendingIndex >= 0) {
+            s32 index = g_ReplayHopPendingIndex;
+
+            if (g_ReplayIsPlaying) {
+              return;
+            }
+            g_ReplayCurrentIndex = (u8)index;
+            if (!practice_replay_use_test_rom_fixture_index(index)) {
+              emu_log("RUNWAY_STATE_HOP_FIXTURE_FAILED index=%d", index);
+              emu_log("TEST_FAILED");
+              g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+              return;
+            }
+            practice_states_set_test_slot(index);
+            g_ReplayHopPendingStage = practice_replay_saved_stage_id();
+            if (g_ReplayHopPendingStage == LEVELID_NONE) {
+              emu_log("RUNWAY_STATE_HOP_STAGE_FAILED index=%d", index);
+              emu_log("TEST_FAILED");
+              g_RunwaySaveStatePhase = REPLAY_STATE_DONE;
+              return;
+            }
+            if (replay_hop_started(index)) {
+              replay_hop_restore_snapshot();
+            }
+            emu_log("RUNWAY_STATE_HOP index=%d stage=%d started=%d", index,
+                    g_ReplayHopPendingStage, replay_hop_started(index));
+            g_ReplayHopPendingIndex = -1;
+          }
+          stage_id = g_ReplayHopPendingStage;
+
+          /* Let the legal screen complete its interface/render work before
+           * selecting the next mission. */
           if (g_ReplayHopStableMenu != current_menu) {
             g_ReplayHopStableMenu = current_menu;
             g_RunwaySaveStatePausedFrames = 0;
@@ -2717,33 +2740,17 @@ void practice_tests_frame() {
           }
 
           switch (current_menu) {
-          case MENU_LEGAL_SCREEN:
-            /* Legal-screen initialization stops the mission music. Wait for
-             * the audio thread to process that stop before file select starts
-             * folder music; musicTrack1Play otherwise busy-waits here. */
-            if (!practice_music_track_was_playing(0)) {
-              g_ReplayHopStableMenu = MENU_INVALID;
-              g_RunwaySaveStatePausedFrames = 0;
-              frontChangeMenu(MENU_FILE_SELECT, TRUE);
-            }
-            break;
-          case MENU_FILE_SELECT:
-            /* Selecting a folder normally happens through this screen's
-             * input handler. Keep that selection valid while the mode-select
-             * screen queries its save data. */
-            fileSetCurrentFolder(FOLDER1);
-            g_ReplayHopStableMenu = MENU_INVALID;
-            g_RunwaySaveStatePausedFrames = 0;
-            frontChangeMenu(MENU_MODE_SELECT, FALSE);
-            break;
-          case MENU_MODE_SELECT:
-            gamemode = GAMEMODE_SOLO;
-            g_ReplayHopStableMenu = MENU_INVALID;
-            g_RunwaySaveStatePausedFrames = 0;
-            frontChangeMenu(MENU_MISSION_SELECT, FALSE);
-            break;
-          case MENU_MISSION_SELECT: {
+          case MENU_LEGAL_SCREEN: {
             s32 briefing = 0;
+
+            /* Legal-screen initialization stops the mission music. Wait for
+             * the audio thread to process that stop before starting the next
+             * mission. Configure the solo selection directly: intermediate
+             * title screens own wallet/character presentation models which
+             * are irrelevant to the stage lifecycle under test. */
+            if (practice_music_track_was_playing(0)) {
+              break;
+            }
 
             while (mission_folder_setup_entries[briefing]
                        .folder_text_preset != 0 &&
@@ -2762,18 +2769,7 @@ void practice_tests_frame() {
             gamemode = GAMEMODE_SOLO;
             selected_stage = stage_id;
             briefingpage = briefing;
-            g_ReplayHopStableMenu = MENU_INVALID;
-            g_RunwaySaveStatePausedFrames = 0;
-            frontChangeMenu(MENU_DIFFICULTY, FALSE);
-            break;
-          }
-          case MENU_DIFFICULTY:
             set_selected_difficulty(practice_replay_saved_difficulty());
-            g_ReplayHopStableMenu = MENU_INVALID;
-            g_RunwaySaveStatePausedFrames = 0;
-            frontChangeMenu(MENU_BRIEFING, FALSE);
-            break;
-          case MENU_BRIEFING:
             g_ReplayHopPendingStage = LEVELID_NONE;
             g_ReplayHopStableMenu = MENU_INVALID;
             g_RunwaySaveStatePausedFrames = 0;
@@ -2782,7 +2778,15 @@ void practice_tests_frame() {
             practice_replay_request_playback();
             frontChangeMenu(MENU_RUN_STAGE, TRUE);
             break;
+          }
           default:
+            /* A replay that ends naturally can leave MENU_RUN_STAGE (or an
+             * end-of-mission screen) current when the title stage takes over.
+             * Re-enter the known menu route instead of waiting forever on a
+             * screen the hop walker does not own. */
+            g_ReplayHopStableMenu = MENU_INVALID;
+            g_RunwaySaveStatePausedFrames = 0;
+            frontChangeMenu(MENU_LEGAL_SCREEN, TRUE);
             break;
           }
         }

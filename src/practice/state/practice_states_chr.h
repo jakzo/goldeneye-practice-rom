@@ -32,6 +32,10 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
 void practice_states_save_model_animation(StateStream *stream,
                                           const Model *model);
 void practice_states_load_model_animation(StateStream *stream, Model *model);
+bool practice_states_restore_model_parent_links(Model *model);
+bool practice_states_rebuild_chr_model_allocation(ChrRecord *chr);
+bool practice_states_restore_chr_model_allocation(
+    ChrRecord *chr, const ChrAllocationState *allocation);
 bool practice_states_save_chr_action(StateStream *stream,
                                      const ChrRecord *chr);
 void practice_states_load_chr_action(StateStream *stream, ChrRecord *chr);

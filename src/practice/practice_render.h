@@ -91,6 +91,7 @@ void practice_set_loaded_camera_matrices(Mtxf *matrix10cc, Mtxf *matrix10d4,
 void practice_set_loaded_projection_matrix(Mtxf *projection);
 void practice_set_loaded_room_projection_matrix(Mtx *room_projection);
 void practice_invalidate_render_state(void);
+void practice_defer_render_state_refresh(void);
 bool practice_is_render_state_invalidated(void);
 void practice_clear_model_render_positions(void);
 bool practice_needs_refreshed_render(void);

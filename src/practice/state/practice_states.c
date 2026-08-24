@@ -27,6 +27,13 @@ static PracticeStorageLocation g_SaveStateStorage = PRACTICE_STORAGE_SRAM;
 static bool g_SaveStateCreatedThisStage = FALSE;
 #ifdef PRACTICE_TEST_ROM
 static s32 g_TestSaveStateSlot;
+
+static u32 get_test_save_state_slot_size(void) {
+  u32 count = (u32)practice_tests_replay_pack_count();
+
+  return (storage_location_size(PRACTICE_STORAGE_EXPANSION_RAM) / count) &
+         ~0xf;
+}
 #endif
 
 static u32 get_save_state_storage_offset(void) {
@@ -41,7 +48,7 @@ static u32 get_save_state_storage_offset(void) {
   if (g_SaveStateStorage == PRACTICE_STORAGE_EXPANSION_RAM &&
       g_practice_test_case == PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES &&
       !practice_tests_uses_config_sram_save_state()) {
-    return (u32)g_TestSaveStateSlot * TEST_SAVE_STATE_SLOT_SIZE;
+    return (u32)g_TestSaveStateSlot * get_test_save_state_slot_size();
   }
 #endif
   return g_SaveStateStorage == PRACTICE_STORAGE_SRAM ? SAVE_STATE_SRAM_OFFSET
@@ -180,8 +187,10 @@ static SaveSerializationResult serialize_game_state_to_memory(void) {
 #ifdef PRACTICE_TEST_ROM
   if (g_practice_test_case == PRACTICE_TEST_REPLAY_RUNWAY_SAVE_STATES &&
       !practice_tests_uses_config_sram_save_state() &&
-      stream.capacity > stream.base.base_address + TEST_SAVE_STATE_SLOT_SIZE) {
-    stream.capacity = stream.base.base_address + TEST_SAVE_STATE_SLOT_SIZE;
+      stream.capacity >
+          stream.base.base_address + get_test_save_state_slot_size()) {
+    stream.capacity =
+        stream.base.base_address + get_test_save_state_slot_size();
   }
 #endif
   return serialize_game_state(&stream.base, &stream.error);
@@ -447,6 +456,7 @@ void load_game_state(void) {
      * Leave them absent so the first normal object/character tick rebuilds
      * current float matrices without forcing a synthetic paused render. */
     practice_clear_model_render_positions();
+    practice_defer_render_state_refresh();
   }
 
   /* The current paused frame did not tick the newly restored model graph.

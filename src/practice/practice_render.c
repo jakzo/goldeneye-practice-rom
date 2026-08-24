@@ -712,6 +712,14 @@ void practice_invalidate_render_state(void) {
   g_IsRenderStateInvalidated = TRUE;
 }
 
+void practice_defer_render_state_refresh(void) {
+  /* The cached paused framebuffer remains valid, but gameplay must not read
+   * matrices from the previous stage before the first live render replaces
+   * them. State 2 selects those two behaviours simultaneously. */
+  clear_converted_render_matrices();
+  g_IsRenderStateInvalidated = 2;
+}
+
 bool practice_is_render_state_invalidated(void) {
   return g_IsRenderStateInvalidated != FALSE;
 }
@@ -1212,6 +1220,13 @@ void practice_clear_model_render_positions(void) {
   s32 hand;
 
   clear_active_model_render_positions();
+  /* During a cross-stage restore the viewer prop can be temporarily detached
+   * from the active list while its private Bond model is rebuilt. Clear that
+   * model directly too: held paused frames reuse the dynamic arena before the
+   * first live character tick reconstructs its matrices. */
+  if (g_CurrentPlayer->ptr_char_objectinstance != NULL) {
+    g_CurrentPlayer->ptr_char_objectinstance->render_pos = NULL;
+  }
   for (hand = 0; hand < 2; hand++) {
     g_CurrentPlayer->hands[hand].field_B74 = 0;
   }

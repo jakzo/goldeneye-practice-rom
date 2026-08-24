@@ -661,9 +661,32 @@ static void destroy_chr_prop(PropRecord *prop, bool release_prop) {
                                           sizeof(*prop->chr->model)) &&
       is_rdram_range(prop->chr->model->obj,
                      sizeof(*prop->chr->model->obj)) &&
+      prop->chr->model->datas != NULL && prop->chr->model->Type > 0 &&
       prop->chr->model->chr == prop->chr &&
       practice_states_model_node_tree_is_valid(
           prop->chr->model->obj->RootNode)) {
+    PropRecord *child = prop->child;
+
+    /* A prior replacement can release a held weapon or hat model while its
+     * prop is still linked to the guard. The original guard destructor assumes
+     * every child model is live, so unlink stale children before delegating. */
+    while (child != NULL) {
+      PropRecord *next = child->prev;
+      ObjectRecord *child_obj = child->obj;
+
+      if (!is_rdram_range(child_obj, sizeof(*child_obj)) ||
+          !is_rdram_range(child_obj->model, sizeof(*child_obj->model)) ||
+          !is_rdram_range(child_obj->model->obj,
+                          sizeof(*child_obj->model->obj))) {
+        chrpropDetach(child);
+        if (is_rdram_range(child_obj, sizeof(*child_obj)) &&
+            child_obj->prop == child) {
+          child_obj->prop = NULL;
+        }
+        clear_plain_prop(child, TRUE);
+      }
+      child = next;
+    }
     disable_sounds_attached_to_player_then_something(prop);
   } else if (prop->chr != NULL && prop->chr->model != NULL) {
     /* A different prop replacement can release a shared/stale model instance
@@ -700,49 +723,6 @@ static void clear_object_transient_sounds(ObjectRecord *obj) {
       ((VehichleRecord *)obj)->Sound = NULL;
       break;
   }
-}
-
-static bool restore_chr_model_attachment(
-    ChrRecord *chr, const ChrAllocationState *allocation) {
-  Model *model;
-  ModelNode *head_node;
-  ModelRwData_HeadPlaceholderRecord *head_data;
-
-  if (chr == NULL || chr->bodynum != allocation->bodynum ||
-      chr->headnum != allocation->headnum ||
-      !is_rdram_range(chr->model, sizeof(*chr->model))) {
-    return FALSE;
-  }
-  model = chr->model;
-  if (model->chr != chr ||
-      model->obj != c_item_entries[allocation->bodynum].header ||
-      model->datas == NULL || model->Type <= 0) {
-    return FALSE;
-  }
-  if (allocation->headnum < 0 || c_item_entries[allocation->bodynum].hasHead) {
-    return TRUE;
-  }
-  if (allocation->head_record_index == 0xffff ||
-      allocation->head_data_offset == 0xffff ||
-      allocation->head_record_index + 1 >= model->Type ||
-      allocation->head_data_offset >= model->Type ||
-      model->obj->Switches == NULL || model->obj->numSwitches <= 4 ||
-      model->obj->Switches[4] == NULL ||
-      model->obj->Switches[4]->Data == NULL) {
-    return FALSE;
-  }
-
-  head_node = model->obj->Switches[4];
-  if ((head_node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
-    return FALSE;
-  }
-  head_node->Data->HeadPlaceholder.RwDataIndex =
-      allocation->head_record_index;
-  head_data = (ModelRwData_HeadPlaceholderRecord *)&model
-                  ->datas[allocation->head_record_index];
-  head_data->ModelFileHeader = c_item_entries[allocation->headnum].header;
-  head_data->RwDatas = &model->datas[allocation->head_data_offset];
-  return TRUE;
 }
 
 static bool destroy_object_prop(PropRecord *prop, bool release_prop) {
@@ -4756,6 +4736,30 @@ static bool load_props_state_with_scratch(
     }
   }
 
+  /* A newly loaded stage can contain compatible-looking guards backed by a
+   * different model lifecycle. Tear every one down before creating any saved
+   * CHR: body headers and HEAD nodes are shared, so interleaving teardown and
+   * recreation lets the new head attachment corrupt the next live guard's
+   * traversal. Normalize each live instance immediately before its teardown. */
+  if (!practice_states_save_is_from_current_stage()) {
+    for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+      PropRecord *live_prop = get_prop_by_index(i);
+
+      if (live_prop != NULL && live_prop->type == PROP_TYPE_CHR &&
+          live_prop->chr != NULL && live_prop->chr->prop == live_prop) {
+        if (live_prop->chr->model != NULL &&
+            live_prop->chr->model->chr == live_prop->chr &&
+            live_prop->chr->model->datas != NULL &&
+            live_prop->chr->model->Type > 0 &&
+            !practice_states_rebuild_chr_model_allocation(live_prop->chr)) {
+          practiceLogWarn("Could not rebuild CHR model at prop slot %d", i);
+          return FALSE;
+        }
+        destroy_chr_prop(live_prop, FALSE);
+      }
+    }
+  }
+
   for (i = 0; i < recordCount; i++) {
     u32 savedPropDelta = read_u8(stream);
     u16 savedPropIndex;
@@ -4797,6 +4801,7 @@ static bool load_props_state_with_scratch(
                             savedPropType == PROP_TYPE_OBJ ||
                             savedPropType == PROP_TYPE_WEAPON;
     bool createdObjProp = FALSE;
+    bool createdChrProp = FALSE;
     bool shouldRegisterObjectRooms = FALSE;
     u8 savedEffectBufferIndex = 0xff;
 
@@ -4863,18 +4868,22 @@ static bool load_props_state_with_scratch(
     // with the save so every index-based reference stays valid.
     switch ((PROP_TYPE)savedPropType) {
     case PROP_TYPE_CHR:
-      // If the same character still owns this slot, reuse it in place. Body and
-      // head IDs alone are insufficient: a freed/reused prop can retain a stale
-      // ChrRecord pointer whose actual chr->prop owner is another slot. Reusing
-      // that alias restores collision at this prop while leaving the model at
-      // the owner's position, producing an invisible blocking guard.
-      if (prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
+      // If the same character still owns this slot in the save's original
+      // stage lifecycle, reuse it in place. A matching body/head in a newly
+      // loaded lifecycle is still a different allocation and must be rebuilt.
+      // Body and head IDs alone are also insufficient: a freed/reused prop can
+      // retain a stale ChrRecord pointer whose actual chr->prop owner is another
+      // slot. Reusing that alias restores collision here while leaving the model
+      // at the owner's position, producing an invisible blocking guard.
+      if (practice_states_save_is_from_current_stage() &&
+          prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
           (prop->flags & PROPFLAG_ENABLED) && prop->chr->prop == prop &&
           prop->chr == &g_ChrSlots[savedChrAllocation.slot_index] &&
           prop->chr->model != NULL && prop->chr->model->chr == prop->chr &&
           prop->chr->bodynum == savedChrAllocation.bodynum &&
           prop->chr->headnum == savedChrAllocation.headnum &&
-          restore_chr_model_attachment(prop->chr, &savedChrAllocation)) {
+          practice_states_restore_chr_model_allocation(
+              prop->chr, &savedChrAllocation)) {
         break;
       }
 
@@ -4904,6 +4913,7 @@ static bool load_props_state_with_scratch(
         skip_prop_data(stream, savedPropType, compactContainedObject);
         return FALSE;
       }
+      createdChrProp = TRUE;
       break;
 
     case PROP_TYPE_OBJ:
@@ -5207,6 +5217,12 @@ static bool load_props_state_with_scratch(
         }
         prop->chr->headnum = savedChrAllocation.headnum;
         prop->chr->bodynum = savedChrAllocation.bodynum;
+        if (!(createdChrProp
+                  ? TRUE
+                  : practice_states_restore_chr_model_allocation(
+                        prop->chr, &savedChrAllocation))) {
+          return FALSE;
+        }
         load_chr_prop_spatial_state(prop, &savedPropPos, savedPropStanOffset,
                                     savedPropRooms);
         pendingChrAttachments[pendingChrCount].prop_index = savedPropIndex;

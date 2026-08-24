@@ -1154,6 +1154,270 @@ static ModelNode *model_rw_scalar_child(ModelNode *node) {
   }
 }
 
+static bool restore_model_parent_links(ModelNode *node, ModelNode *parent,
+                                       union ModelRwData **datas,
+                                       s32 rwdata_count, s32 depth,
+                                       s32 *nodes_seen) {
+  ModelNode *previous = NULL;
+
+  if (depth >= 64) {
+    practiceLogError("Model parent-link restoration exceeded depth limit");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  while (node != NULL) {
+    ModelNode *child;
+    union ModelRwData **child_datas = datas;
+    s32 child_rwdata_count = rwdata_count;
+    u8 opcode;
+
+    if (++(*nodes_seen) > MAX_MODEL_TRAVERSAL_NODES || node->Data == NULL) {
+      practiceLogError("Model parent-link restoration found invalid graph");
+      assert(FALSE);
+      return FALSE;
+    }
+
+    opcode = node->Opcode & 0xff;
+    node->Parent = parent;
+    node->Prev = previous;
+    child = model_rw_scalar_child(node);
+
+    if (opcode == MODELNODE_OPCODE_LOD) {
+      u16 index = node->Data->LOD.RwDataIndex;
+
+      if (datas == NULL || index >= rwdata_count) {
+        return FALSE;
+      }
+      node->Child = ((union ModelRwData *)&datas[index])->LOD.visible
+                        ? child
+                        : NULL;
+    } else if (opcode == MODELNODE_OPCODE_SWITCH) {
+      u16 index = node->Data->Switch.RwDataIndex;
+
+      if (datas == NULL || index >= rwdata_count) {
+        return FALSE;
+      }
+      node->Child = ((union ModelRwData *)&datas[index])->Switch.visible
+                        ? child
+                        : NULL;
+    } else if (opcode == MODELNODE_OPCODE_BSP) {
+      u16 index = node->Data->BSP.RwDataIndex;
+
+      if (datas == NULL || index >= rwdata_count) {
+        return FALSE;
+      }
+      modelApplyReorderRelationsByArg(
+          node, ((union ModelRwData *)&datas[index])->BSP.visible);
+      child = node->Child;
+    }
+
+    if (opcode == MODELNODE_OPCODE_HEAD) {
+      u16 index = node->Data->HeadPlaceholder.RwDataIndex;
+
+      child = NULL;
+      if (datas != NULL && index + 1 < rwdata_count) {
+        ModelRwData_HeadPlaceholderRecord *head_data =
+            (ModelRwData_HeadPlaceholderRecord *)&datas[index];
+
+        if (head_data->ModelFileHeader != NULL && head_data->RwDatas != NULL) {
+          u32 data_start = (u32)datas;
+          u32 child_start = (u32)head_data->RwDatas;
+          u32 child_offset;
+
+          if (child_start >= data_start &&
+              (child_start - data_start) % sizeof(*datas) == 0) {
+            child_offset = (child_start - data_start) / sizeof(*datas);
+          } else {
+            child_offset = rwdata_count;
+          }
+          if (child_offset < (u32)rwdata_count) {
+            child = head_data->ModelFileHeader->RootNode;
+            child_datas = head_data->RwDatas;
+            child_rwdata_count = rwdata_count - child_offset;
+            node->Child = child;
+          }
+        }
+      }
+    }
+
+    if (child != NULL &&
+        !restore_model_parent_links(child, node, child_datas,
+                                    child_rwdata_count, depth + 1,
+                                    nodes_seen)) {
+      return FALSE;
+    }
+    previous = node;
+    node = node->Next;
+  }
+
+  return TRUE;
+}
+
+bool practice_states_restore_model_parent_links(Model *model) {
+  s32 nodes_seen = 0;
+
+  if (model == NULL || model->obj == NULL || model->obj->RootNode == NULL ||
+      model->datas == NULL || model->Type <= 0) {
+    practiceLogError("Cannot restore parent links for incomplete model");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  return restore_model_parent_links(model->obj->RootNode, NULL, model->datas,
+                                    model->Type, 0, &nodes_seen);
+}
+
+static bool restore_model_definition_links(ModelNode *node,
+                                           ModelNode *parent, s32 depth,
+                                           s32 *nodes_seen) {
+  ModelNode *previous = NULL;
+
+  if (depth >= 64) {
+    return FALSE;
+  }
+  while (node != NULL) {
+    ModelNode *child;
+    u8 opcode;
+
+    if (++(*nodes_seen) > MAX_MODEL_TRAVERSAL_NODES || node->Data == NULL) {
+      return FALSE;
+    }
+    opcode = node->Opcode & 0xff;
+    node->Parent = parent;
+    node->Prev = previous;
+
+    switch (opcode) {
+    case MODELNODE_OPCODE_LOD:
+      child = node->Data->LOD.Affects;
+      node->Child = child;
+      break;
+    case MODELNODE_OPCODE_SWITCH:
+      child = node->Data->Switch.Controls;
+      node->Child = child;
+      break;
+    case MODELNODE_OPCODE_BSP:
+      modelApplyReorderRelationsByArg(node, FALSE);
+      child = node->Child;
+      break;
+    case MODELNODE_OPCODE_HEAD:
+      child = NULL;
+      node->Child = NULL;
+      break;
+    default:
+      child = node->Child;
+      break;
+    }
+
+    if (child != NULL &&
+        !restore_model_definition_links(child, node, depth + 1,
+                                        nodes_seen)) {
+      return FALSE;
+    }
+    previous = node;
+    node = node->Next;
+  }
+  return TRUE;
+}
+
+static bool restore_model_file_definition(ModelFileHeader *header) {
+  s32 nodes_seen = 0;
+
+  return header != NULL && header->RootNode != NULL &&
+         restore_model_definition_links(header->RootNode, NULL, 0,
+                                        &nodes_seen);
+}
+
+bool practice_states_rebuild_chr_model_allocation(ChrRecord *chr) {
+  Model *model;
+  ModelFileHeader *body_header;
+
+  if (chr == NULL || chr->model == NULL || chr->bodynum < 0) {
+    return FALSE;
+  }
+  model = chr->model;
+  body_header = c_item_entries[chr->bodynum].header;
+  if (model->obj != body_header || model->datas == NULL || model->Type <= 0 ||
+      !restore_model_file_definition(body_header)) {
+    return FALSE;
+  }
+
+  modelCalculateRwDataLen(body_header);
+  if (body_header->numRecords > model->Type) {
+    return FALSE;
+  }
+  modelInitRwData(model, body_header->RootNode);
+
+  if (chr->headnum >= 0 && !c_item_entries[chr->bodynum].hasHead) {
+    ModelFileHeader *head_header = c_item_entries[chr->headnum].header;
+    ModelNode *head_node;
+
+    if (!restore_model_file_definition(head_header)) {
+      return FALSE;
+    }
+    modelCalculateRwDataLen(head_header);
+    if (body_header->numRecords + head_header->numRecords > model->Type ||
+        body_header->Switches == NULL || body_header->numSwitches <= 4 ||
+        body_header->Switches[4] == NULL) {
+      return FALSE;
+    }
+    head_node = body_header->Switches[4];
+    if ((head_node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
+      return FALSE;
+    }
+    modelAttachHead(model, head_node, head_header);
+  }
+
+  return practice_states_restore_model_parent_links(model);
+}
+
+bool practice_states_restore_chr_model_allocation(
+    ChrRecord *chr, const ChrAllocationState *allocation) {
+  Model *model;
+
+  if (chr == NULL || allocation == NULL || allocation->bodynum < 0 ||
+      chr->bodynum != allocation->bodynum ||
+      chr->headnum != allocation->headnum || chr->model == NULL) {
+    return FALSE;
+  }
+
+  model = chr->model;
+  if (model->chr != chr ||
+      model->obj != c_item_entries[allocation->bodynum].header ||
+      model->datas == NULL || model->Type <= 0) {
+    return FALSE;
+  }
+
+  if (allocation->headnum >= 0 &&
+      !c_item_entries[allocation->bodynum].hasHead) {
+    ModelNode *head_node;
+    ModelRwData_HeadPlaceholderRecord *head_data;
+
+    if (allocation->head_record_index == 0xffff ||
+        allocation->head_data_offset == 0xffff ||
+        allocation->head_record_index + 1 >= model->Type ||
+        allocation->head_data_offset >= model->Type ||
+        model->obj->Switches == NULL || model->obj->numSwitches <= 4 ||
+        model->obj->Switches[4] == NULL ||
+        model->obj->Switches[4]->Data == NULL) {
+      return FALSE;
+    }
+
+    head_node = model->obj->Switches[4];
+    if ((head_node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
+      return FALSE;
+    }
+    head_node->Data->HeadPlaceholder.RwDataIndex =
+        allocation->head_record_index;
+    head_data = (ModelRwData_HeadPlaceholderRecord *)&model
+                    ->datas[allocation->head_record_index];
+    head_data->ModelFileHeader = c_item_entries[allocation->headnum].header;
+    head_data->RwDatas = &model->datas[allocation->head_data_offset];
+  }
+
+  return practice_states_restore_model_parent_links(model);
+}
+
 static s32 count_model_rw_scalars(ModelNode *node, s32 depth) {
   s32 count = 0;
 
@@ -1296,15 +1560,17 @@ void practice_states_save_model_animation(StateStream *stream,
     write_animation_zero_rle(stream, (u8 *)root_data, sizeof(*root_data));
   }
   {
-    s32 scalar_count = model->obj != NULL
+    s32 rwdata_count = model->Type > 0
+                           ? model->Type
+                           : model->obj != NULL ? model->obj->numRecords : 0;
+    s32 scalar_count = model->obj != NULL && model->datas != NULL &&
+                               rwdata_count > 0
                            ? count_model_rw_scalars(model->obj->RootNode, 0)
                            : 0;
     write_u16(stream, scalar_count);
     if (scalar_count > 0) {
       save_model_rw_scalars(stream, model->obj->RootNode, model->datas,
-                            model->Type > 0 ? model->Type
-                                            : model->obj->numRecords,
-                            0);
+                            rwdata_count, 0);
     }
   }
 }
@@ -1321,12 +1587,16 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
   {
     s32 scalar_count = read_u16(stream);
     s32 loaded_count = 0;
+    s32 rwdata_count = model != NULL && model->Type > 0
+                           ? model->Type
+                           : model != NULL && model->obj != NULL
+                                 ? model->obj->numRecords
+                                 : 0;
 
-    if (model != NULL && model->obj != NULL) {
+    if (model != NULL && model->obj != NULL && model->datas != NULL &&
+        rwdata_count > 0) {
       load_model_rw_scalars(stream, model->obj->RootNode, model->datas,
-                            model->Type > 0 ? model->Type
-                                            : model->obj->numRecords,
-                            0, scalar_count, &loaded_count);
+                            rwdata_count, 0, scalar_count, &loaded_count);
     }
     while (loaded_count < scalar_count) {
       read_u32(stream);

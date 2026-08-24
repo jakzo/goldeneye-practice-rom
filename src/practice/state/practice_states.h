@@ -54,7 +54,6 @@ PracticeStorageLocation practice_states_get_storage_location(void);
 void practice_states_notify_sram_overwritten(void);
 void practice_states_log_test_fixture(void);
 #ifdef PRACTICE_TEST_ROM
-#define TEST_SAVE_STATE_SLOT_SIZE 0x20000
 void practice_states_set_test_slot(s32 slot);
 s32 practice_states_get_test_slot(void);
 #endif
