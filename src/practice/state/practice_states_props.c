@@ -24,6 +24,7 @@
 #include "practice_states_utils.h"
 #include "practice_ui.h"
 #include "../practice_render.h"
+#include "stan.h"
 #include "unk_0A1DA0.h"
 #include <assert.h>
 #include <bondconstants.h>
@@ -68,6 +69,8 @@ extern u32 num_obj_position_data_entries;
 extern struct s_darkened_light darkened_light_table[];
 extern s32 cur_entry_darkened_light_table;
 extern bg_portal_data_entry *g_BgPortals;
+extern u8 list_of_tilesizes[];
+extern StandTile *D_80040F60;
 #if !defined(VERSION_EU)
 extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 #endif
@@ -895,9 +898,201 @@ static bool can_recreate_object(const ObjAllocationState *alloc) {
 // re-enables a prop whose model has been released, crashing on the next tick).
 static bool slot_matches_object(PropRecord *prop, u8 propType,
                                 const ObjAllocationState *alloc) {
+  ModelFileHeader *expected_header =
+      alloc->modelnum != 0xffff ? PitemZ_entries[alloc->modelnum].header : NULL;
+
   return prop != NULL && prop->type == propType && prop->obj != NULL &&
          prop->obj->obj == alloc->modelnum &&
-         prop->obj->type == alloc->objtype && prop->obj->prop == prop;
+         prop->obj->type == alloc->objtype && prop->obj->prop == prop &&
+         prop->obj->model != NULL &&
+         prop->obj->model->obj == expected_header && expected_header != NULL &&
+         expected_header->RootNode != NULL && prop->obj->model->datas != NULL;
+}
+
+static u32 get_object_model_switch_states(Model *model) {
+  u32 states = 0;
+  s32 i;
+  s32 count;
+
+  if (model == NULL || model->obj == NULL || model->datas == NULL) {
+    return 0;
+  }
+
+  count = model->obj->numSwitches > 32 ? 32 : model->obj->numSwitches;
+  for (i = 0; i < count; i++) {
+    ModelNode *node = model->obj->Switches[i];
+    if (node != NULL && (node->Opcode & 0xff) == MODELNODE_OPCODE_SWITCH &&
+        modelGetNodeRwData(model, node)->Switch.visible) {
+      states |= 1 << i;
+    }
+  }
+  return states;
+}
+
+static void restore_object_model_switch_states(Model *model, u32 states) {
+  s32 i;
+  s32 count;
+
+  if (model == NULL || model->obj == NULL || model->datas == NULL) {
+    return;
+  }
+
+  count = model->obj->numSwitches > 32 ? 32 : model->obj->numSwitches;
+  for (i = 0; i < count; i++) {
+    ModelNode *node = model->obj->Switches[i];
+    if (node != NULL && (node->Opcode & 0xff) == MODELNODE_OPCODE_SWITCH) {
+      modelGetNodeRwData(model, node)->Switch.visible =
+          (states & (1 << i)) != 0;
+      modelApplyToggleRelations(model, node);
+    }
+  }
+}
+
+/* Display-list pointers in model RW data are render-frame state, not
+ * persistent gameplay state. Animated monitors replace both commands and
+ * vertices with frame-arena allocations, while static and persistently
+ * deformed models retain the canonical command pointer. A cross-stage load can
+ * reuse the same model allocation after that arena has been recycled, so
+ * normalize these pointers only after every prop replacement has finished. */
+static bool restore_model_display_list_branch(ModelNode *node,
+                                              union ModelRwData **datas,
+                                              s32 rwdata_count, s32 depth,
+                                              s32 *nodes_seen,
+                                              ModelFileHeader *definition) {
+  if (depth >= 64) {
+    practiceLogError("Model display-list traversal is too deep");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  while (node != NULL) {
+    ModelNode *child = node->Child;
+    union ModelRwData **child_datas = datas;
+    ModelFileHeader *child_definition = definition;
+    s32 child_rwdata_count = rwdata_count;
+    u8 opcode;
+
+    if (++(*nodes_seen) > 512 || node->Data == NULL) {
+      practiceLogError("Model display-list traversal is invalid");
+      assert(FALSE);
+      return FALSE;
+    }
+
+    opcode = node->Opcode & 0xff;
+    /* Model render commands use segmented addresses whose segment base is the
+     * start of the owning loaded file. That base lives in mutable stage memory
+     * alongside the node definition and can survive a cross-stage restore as
+     * either a stale pointer or zero. Rebuild it from the current header for
+     * every render-node kind; attached heads have their own file/header. */
+    switch (opcode) {
+    case MODELNODE_OPCODE_DL:
+      node->Data->DisplayList.BaseAddr = definition->Switches;
+      break;
+    case MODELNODE_OPCODE_DLCOLLISION:
+      node->Data->DisplayListCollisions.BaseAddr = definition->Switches;
+      break;
+    case MODELNODE_OPCODE_OP05:
+      node->Data->Op05.BaseAddr = definition->Switches;
+      break;
+    case MODELNODE_OPCODE_OP06:
+      node->Data->Op06.BaseAddr = definition->Switches;
+      break;
+    case MODELNODE_OPCODE_OP07:
+      node->Data->Op07.BaseAddr = definition->Switches;
+      break;
+    case MODELNODE_OPCODE_OP11:
+      node->Data->Op11.BaseAddr = definition->Switches;
+      break;
+    case MODELNODE_OPCODE_GUNFIRE:
+      node->Data->Gunfire.BaseAddr = (u32)definition->Switches;
+      break;
+    case MODELNODE_OPCODE_SHADOW:
+      node->Data->Shadow.BaseAddr = definition->Switches;
+      break;
+    case MODELNODE_OPCODE_DLPRIMARY:
+      node->Data->DisplayListPrimary.BaseAddr = definition->Switches;
+      break;
+    }
+
+    if (opcode == MODELNODE_OPCODE_DLCOLLISION) {
+      struct ModelRoData_DisplayList_CollisionRecord *rodata =
+          &node->Data->DisplayListCollisions;
+      struct ModelRwData_DisplayList_CollisionRecord *rwdata;
+
+      if (rodata->RwDataIndex < 0 || rodata->RwDataIndex + 1 >= rwdata_count) {
+        practiceLogError("Model display-list RW index is invalid");
+        assert(FALSE);
+        return FALSE;
+      }
+
+      rwdata = &((union ModelRwData *)&datas[rodata->RwDataIndex])
+                    ->DisplayListCollisions;
+      if (rwdata->gdl != rodata->Primary) {
+        /* Animated monitors build both their commands and vertices in the
+         * frame arena. They must be reset as a pair; retaining the old vertex
+         * pointer with the canonical display list lets a later graphics task
+         * consume arena memory that has already become unrelated commands. */
+        rwdata->Vertices = rodata->Vertices;
+      }
+      rwdata->gdl = rodata->Primary;
+    } else if (opcode == MODELNODE_OPCODE_LOD) {
+      child = node->Data->LOD.Affects;
+    } else if (opcode == MODELNODE_OPCODE_SWITCH) {
+      /* modelApplyToggleRelations disconnects an invisible switch's controls
+       * from Node::Child. Walk the immutable definition link so display lists
+       * in currently hidden branches are valid if animation reveals them on a
+       * later frame. */
+      child = node->Data->Switch.Controls;
+    } else if (opcode == MODELNODE_OPCODE_HEAD) {
+      u16 index = node->Data->HeadPlaceholder.RwDataIndex;
+
+      child = NULL;
+      if (index + 1 < rwdata_count) {
+        ModelRwData_HeadPlaceholderRecord *head_data =
+            (ModelRwData_HeadPlaceholderRecord *)&datas[index];
+        u32 data_start = (u32)datas;
+        u32 child_start = (u32)head_data->RwDatas;
+
+        if (head_data->ModelFileHeader != NULL &&
+            head_data->RwDatas != NULL && child_start >= data_start &&
+            (child_start - data_start) % sizeof(*datas) == 0) {
+          u32 child_offset = (child_start - data_start) / sizeof(*datas);
+
+          if (child_offset < (u32)rwdata_count) {
+            child = head_data->ModelFileHeader->RootNode;
+            child_datas = head_data->RwDatas;
+            child_rwdata_count = rwdata_count - child_offset;
+            child_definition = head_data->ModelFileHeader;
+          }
+        }
+      }
+    }
+
+    if (child != NULL &&
+        !restore_model_display_list_branch(child, child_datas,
+                                           child_rwdata_count, depth + 1,
+                                           nodes_seen, child_definition)) {
+      return FALSE;
+    }
+    node = node->Next;
+  }
+
+  return TRUE;
+}
+
+static bool restore_model_display_lists(Model *model) {
+  s32 nodes_seen = 0;
+  s32 rwdata_count;
+
+  if (model == NULL || model->obj == NULL || model->datas == NULL ||
+      model->obj->RootNode == NULL) {
+    return FALSE;
+  }
+
+  rwdata_count = model->Type > 0 ? model->Type : model->obj->numRecords;
+  return restore_model_display_list_branch(model->obj->RootNode, model->datas,
+                                           rwdata_count, 0, &nodes_seen,
+                                           model->obj);
 }
 
 // Recreate an object/weapon prop in its exact saved slot. Level-defined objects
@@ -1114,6 +1309,7 @@ typedef struct SavedPropLinks {
   u8 objectWasInPlayerBuffer;
   u32 objectRuntimeBitflags;
   void *objectProjectile;
+  u32 objectSwitchStates;
 } SavedPropLinks;
 
 static bool saved_links_name_chr_child(const SavedPropLinks *savedLinks,
@@ -3279,8 +3475,10 @@ static void load_darkened_lights_state(StateStream *stream) {
  * task. bgCheckIfRoomModelNeedsLoad reuses such cached allocations, while the
  * normal room-aging pass frees unrequested ones at its safe point. */
 static void save_bg_room_cache_state(StateStream *stream) {
+  StandTile *tile;
   s32 room;
   u16 portal_count = 0;
+  u32 stan_size = 0;
 
   write_u16(stream, (u16)g_MaxNumRooms);
   for (room = 0; room < g_MaxNumRooms; room++) {
@@ -3306,6 +3504,25 @@ static void save_bg_room_cache_state(StateStream *stream) {
     write_u8(stream, g_BgPortals[room].controlbytes1);
     write_u8(stream, g_BgPortals[room].controlbytes2);
   }
+
+  /* stanFillin's point records are persistent region/topology state. Some
+   * coordinates begin as zero placeholders and are completed during gameplay;
+   * they can differ after a later stage lifecycle and affect line walks.
+   * D_80040F60 is the last packed tile found when the STAN file is relocated.
+   * Do not use a zero tile header as the terminator here: stanFillin mutates its
+   * high visited bit, so that sentinel is not stable during gameplay. */
+  tile = standTileStart != NULL
+             ? (StandTile *)((u8 *)standTileStart + 0x80)
+             : NULL;
+  if (tile != NULL && D_80040F60 != NULL &&
+      (u8 *)tile <= (u8 *)D_80040F60) {
+    u8 last_point_count = (D_80040F60->tail.half >> 12) & 0xf;
+
+    stan_size = (u32)((u8 *)D_80040F60 - (u8 *)tile) +
+                list_of_tilesizes[last_point_count];
+  }
+  write_u32(stream, stan_size);
+  write_bytes(stream, tile, stan_size);
 }
 
 static bool bg_room_has_allocation(s32 room) {
@@ -3384,6 +3601,7 @@ static void redarken_restored_bg_rooms(void) {
 }
 
 static void load_bg_room_cache_state(StateStream *stream) {
+  StandTile *tile;
   u8 room_rendered[MAXROOMCOUNT];
   u8 room_neighbor[MAXROOMCOUNT];
   u8 model_loaded[MAXROOMCOUNT];
@@ -3392,6 +3610,7 @@ static void load_bg_room_cache_state(StateStream *stream) {
   u8 field_35[MAXROOMCOUNT];
   u16 count = read_u16(stream);
   u16 bg_portal_count;
+  u32 saved_stan_size;
   s32 room;
   s32 failed_room;
 
@@ -3429,6 +3648,22 @@ static void load_bg_room_cache_state(StateStream *stream) {
     g_BgPortals[room].controlbytes1 = control1;
     g_BgPortals[room].controlbytes2 = control2;
   }
+
+  saved_stan_size = read_u32(stream);
+  tile = standTileStart != NULL
+             ? (StandTile *)((u8 *)standTileStart + 0x80)
+             : NULL;
+  if (saved_stan_size != 0 &&
+      (tile == NULL || D_80040F60 == NULL ||
+       (u8 *)tile > (u8 *)D_80040F60 ||
+       saved_stan_size !=
+           (u32)((u8 *)D_80040F60 - (u8 *)tile) +
+               list_of_tilesizes[(D_80040F60->tail.half >> 12) & 0xf])) {
+    practiceLogError("Saved STAN size %d does not match level", saved_stan_size);
+    assert(FALSE);
+    return;
+  }
+  read_bytes(stream, tile, saved_stan_size);
 
   if (count != g_MaxNumRooms || count > MAXROOMCOUNT) {
     return;
@@ -4820,6 +5055,7 @@ static bool load_props_state_with_scratch(
     savedLinks[i].objectWasInPlayerBuffer = FALSE;
     savedLinks[i].objectRuntimeBitflags = 0;
     savedLinks[i].objectProjectile = NULL;
+    savedLinks[i].objectSwitchStates = 0;
 
     if (hasChrAllocation) {
       load_chr_allocation_state(stream, &savedChrAllocation);
@@ -5245,6 +5481,8 @@ static bool load_props_state_with_scratch(
         prop->obj != NULL) {
       savedLinks[i].objectRuntimeBitflags = prop->obj->runtime_bitflags;
       savedLinks[i].objectProjectile = prop->obj->projectile;
+      savedLinks[i].objectSwitchStates =
+          get_object_model_switch_states(prop->obj->model);
     }
   }
 
@@ -5419,6 +5657,45 @@ static bool load_props_state_with_scratch(
   }
   if (!restore_saved_player_children(savedLinks, recordCount)) {
     return FALSE;
+  }
+
+  /* Prop replacement, attachment restoration, and player model rebuilding can
+   * all recycle model storage. Normalize render pointers only after the final
+   * model reconstruction so no later load step can invalidate an object that
+   * was already restored. */
+  for (i = 0; i < recordCount; i++) {
+    PropRecord *prop = get_prop_by_index(savedLinks[i].index);
+    Model *model = NULL;
+
+    if (prop != NULL &&
+        (prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_DOOR ||
+         prop->type == PROP_TYPE_WEAPON) &&
+        prop->obj != NULL && prop->obj->prop == prop &&
+        prop->obj->model != NULL && prop->obj->model->obj != NULL &&
+        prop->obj->model->datas != NULL) {
+      restore_object_model_switch_states(
+          prop->obj->model, savedLinks[i].objectSwitchStates);
+    }
+
+    if (prop != NULL &&
+        (prop->type == PROP_TYPE_OBJ || prop->type == PROP_TYPE_DOOR ||
+         prop->type == PROP_TYPE_WEAPON) &&
+        prop->obj != NULL && prop->obj->prop == prop) {
+      model = prop->obj->model;
+    } else if (prop != NULL &&
+               (prop->type == PROP_TYPE_CHR ||
+                prop->type == PROP_TYPE_PLAYER ||
+                prop->type == PROP_TYPE_VIEWER) &&
+               prop->chr != NULL && prop->chr->prop == prop) {
+      model = prop->chr->model;
+    }
+
+    if (model != NULL && model->obj != NULL && model->datas != NULL &&
+        !restore_model_display_lists(model)) {
+      practiceLogWarn("Could not restore model display lists at prop slot %d",
+                      savedLinks[i].index);
+      return FALSE;
+    }
   }
 
   rebuild_room_prop_lists_from_active_props();

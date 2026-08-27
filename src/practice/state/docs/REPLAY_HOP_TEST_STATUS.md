@@ -1,137 +1,150 @@
 # Cross-level replay hop test status
 
-Updated 2026-08-25. This is the handoff for save-state replay tests that keep
+Updated 2026-08-27. This is the handoff for save-state replay tests that keep
 one emulator process alive while switching between replay fixtures and stages.
 
 ## Goal
 
-Make the hop test pass across every US replay, with ordinary gameplay and prop
-rendering, then run the remaining save-state replay suite. Test orchestration
-must remain in the test build. Save-state corrections that apply to normal use
-belong in the regular practice save-state code.
+Make the hop test pass across every US replay, with ordinary gameplay and all
+props rendered, then run the remaining save-state replay suite. Test
+orchestration must remain in `PRACTICE_TEST_ROM`; fixes to real save/load
+behaviour belong in the normal practice save-state code.
 
-## Current state
+## Current result
 
-The all-replay `default` step still fails, so the later suite steps were not
-run. The workspace has been left in a usable state:
+The six-replay long-hop reproducer now gets through the former Runway crash and
+fails deterministically on Frigate. The full all-replay hop test and the later
+suite steps have not passed yet.
 
-- All props are rendered normally. The temporary test-only graphics-command
-  suppression and prop-category bisection have been removed.
-- Temporary collision and model debug logging has been removed.
-- The hop harness remains confined to the test build.
-- Save-state changes retained in normal practice code address real model,
-  allocation, prop, and render-state lifecycle problems.
-- The test ROM and ordinary practice ROM both compile after cleanup. The 12
-  host-side replay harness unit tests also pass.
+The current tree is usable:
 
-A three-replay run passed while prop display lists were suppressed. That result
-is useful evidence about the remaining graphics failure, but it is not a valid
-test pass and the suppression is no longer present.
+- Props are rendered normally. There is no prop suppression or gameplay
+  special case used to make tests pass.
+- The confirmed prop/model and STAN corrections are normal practice save-state
+  code.
+- Replay hopping, replay comparisons, and the remaining diagnostic logging are
+  test-build-only.
+- An experimental paused-render root snapshot did not change the Frigate
+  failure and has been removed.
+- The speculative first-person hand switch serialization has also been removed.
 
-## Latest all-replay result
+## Latest reproduction
+
+Build:
+
+```sh
+docker run --rm -v /Users/jfield/oss/007:/home/dev goldeneye \
+  make -j8 VERSION=US PRACTICE_TEST_ROM=1 DEV=0
+```
 
 Run:
 
 ```sh
-just test-save-state-replay-suite-step default
-```
-
-The six-fixture run progressed through Dam, Frigate, Runway, Frigate, Dam,
-Surface 1, and back to Runway. During cross-stage teardown it trapped in
-`sub_GAME_7F050DE8`, called by `objFree`, while traversing an invalid model
-node/header. Subsequent fixes for transient character models and stale attached
-props moved execution past that failure.
-
-With those fixes and normal prop rendering, a later cross-lifecycle Runway load
-can leave the graphics task deadlocked. GDB showed every CPU thread waiting,
-with `curRSPTask` and `curRDPTask` both equal to `0x8004f2f0`. The RSP status was
-`0xc0`, its PC was `0x567`, and the task referred to a graphics display list at
-`0x800e39f0` of size `0x5a08`.
-
-Temporary category bisection established:
-
-- Rendering characters while skipping ordinary object props avoided that
-  graphics deadlock long enough to reach a later failure.
-- Enabling `PROP_TYPE_OBJ` rendering brought the deadlock back.
-- The individual object prop or object subtype has not yet been isolated.
-
-Do not restore the bisection as a fix. Ordinary props must render.
-
-## Reduced reproduction
-
-Build the test ROM:
-
-```sh
-docker run --rm -v /Users/jfield/oss/007:/home/dev -w /home/dev goldeneye-test \
-  make -j8 DEV=0 VERSION=US COMPARE=0 PRACTICE_TEST_ROM=1 TEST_CASE=
-```
-
-Then run:
-
-```sh
-env \
-  ARES=/Users/jfield/oss/007/ares/build_macos/desktop-ui/Release/ares.app/Contents/MacOS/ares \
+env ARES=/Applications/ares.app/Contents/MacOS/ares \
   ARES_ARGS='--no-file-prompt --setting Audio/Driver=None --setting Input/Driver=None' \
   PRACTICE_REPLAY_STATUS_TIMEOUT=120 \
   python3 scripts/run_practice_tests.py \
     --test REPLAY_RUNWAY_SAVE_STATES \
     --replay-fixture tests/replays/us/01-dam.ram \
-    --replay-fixture tests/replays/us/03-runway.ram \
     --replay-fixture tests/replays/us/02-facility.ram \
+    --replay-fixture tests/replays/us/03-runway.ram \
     --replay-fixture tests/replays/us/04-surface1.ram \
-    --version US --build-mode release --test-param 66305 \
-    --timeout 300 --skip-build
+    --replay-fixture tests/replays/us/07-frigate.ram \
+    --replay-fixture tests/replays/us/11-archives.ram \
+    --version US --build-mode release --test-param 1966858 \
+    --timeout 1200 --skip-build
 ```
 
-This approximately 18-second sequence is deterministic: Dam, Runway, Dam,
-Surface 1, then Runway. ares exposes GDB on `localhost:9123`.
+It fails at Frigate replay timestamp 2459, after loading the state saved at
+timestamp 2415 through other stage lifecycles. Runtime is about 95 seconds.
 
-## Fixes retained
+A focused Frigate-only run with the same parameter passes all four long hops
+and completes in about 132 seconds. The remaining bug therefore requires a
+cross-stage model/allocation lifecycle; it is not an ordinary same-stage load
+failure.
 
-- A replay fixture is activated only after playback from the previous fixture
-  has stopped, avoiding cross-stage ownership races.
-- Replay stage, difficulty, and playback generation are tracked explicitly.
-- Cross-stage loading uses a two-phase character teardown so shared body and
-  head model definitions are normalized before saved characters are created.
-- Character model graphs restore canonical parent, previous, LOD, switch, BSP,
-  and external-head relationships instead of retaining pointers mutated by a
-  previous stage lifecycle.
-- Saved character allocation metadata identifies stable slot, body, head, and
-  external-head RW-data positions.
-- Model animation serialization handles models without usable RW data without
-  dereferencing it.
-- Transient character model shells are not passed to model traversal during
-  teardown.
-- Stale weapon or hat props still linked to a guard are detached before the
-  original guard destructor traverses them. Valid attachments continue through
-  the original gameplay path.
-- Cross-stage state loads invalidate old render allocations and defer paused
-  render refresh until the new lifecycle owns valid data.
+## Confirmed fixes retained
 
-These are normal save-state fixes, not test-only behavior.
+### Prop model recreation and rendering
 
-## Secondary unresolved failure
+`slot_matches_object` now verifies that an apparently matching prop slot has a
+live model backed by the currently loaded `PitemZ` header. `proplvreset2`
+clears every loaded header's `RootNode`; previously, a later-timeline saved
+object could occupy the correct slot and model ID while pointing at that
+unloaded header. The loader then skipped `create_object_prop` and its
+`modelLoad`, causing the Runway projectile crash in
+`chrobjGetBboxFromObjFile`. Invalid matches are now torn down and recreated.
 
-Some reduced runs trap on a divide by zero in
-`bondviewCalcUpdatePlayerCollision`, at the random out-of-bounds recovery
-calculation. Instrumentation confirmed that the saved and restored Runway
-collision tile offset, tile tail, and collision position matched exactly in
-the observed runs. The collision pointer relocation theory is therefore not
-supported. Treat this as unresolved and possibly downstream of the graphics or
-lifecycle fault.
+Model render-node `BaseAddr` fields and display-list RW pointers are rebuilt
+from the current loaded model definition, including hidden switch branches and
+attached heads. Object model switch visibility is restored. This fixes the
+missing-prop rendering class and the earlier Runway RSP/display-list hang while
+keeping normal prop rendering enabled.
 
-## Resume order
+### Mutable STAN data
 
-1. Run the reduced reproduction with all rendering enabled.
-2. Use temporary test-only instrumentation to isolate the offending
-   `PROP_TYPE_OBJ` slot and subtype. Remove that instrumentation afterward.
-3. Inspect that object's model switch relations, deformation state, RW-data
-   indices, and display-list pointers before the stuck task is submitted.
-4. Put any genuine save-state lifecycle correction in non-test practice code.
-   Do not suppress rendering or alter gameplay to make the test pass.
-5. Re-run the reduced reproduction, then the complete `default` step.
-6. If `default` passes, run `regular`, `long`, `cameras`, `near-end`, and
-   `cold-restart` using the suite commands documented in `AGENTS.md`.
+The packed mutable STAN payload is saved from the first real tile through
+`D_80040F60`, the actual final tile, and restored on load. `stanFillin` mutates
+point/topology data during play, so rebuilding a stage alone was insufficient.
+This fixed the earlier Runway guard line-of-sight divergence.
 
-The remaining suite steps have not been run because `default` is still the
-gate.
+The payload is currently deliberately complete. Facility states can be about
+311 KB, which is acceptable for the in-memory tests but should be reviewed
+before relying on SRAM capacity. Compact only after correctness is established.
+
+### Replay pause boundary
+
+The playback callback consumes the current replay input when the frame delta
+was already committed, even if a pause hotkey activates later in that frame.
+The hop harness also pauses a fresh destination before loading and recognizes
+that destination only in the test build.
+
+## Remaining Frigate divergence
+
+At the saved timestamp 2415, guard literal ID 36 restores exactly apart from
+expected allocation addresses:
+
+- the `ChrRecord`, `Model`, `PropRecord`, animation controller, action union,
+  and model RW scalar data match;
+- the full root RW record matches (`3f3fca66` diagnostic hash);
+- the `ModelFileHeader`, root node/RO data, skeleton, and skeleton joints match;
+- the only raw differences are the recreated model allocation pointer, model
+  RW-data allocation pointer, and the attached-head RW-data allocation pointer.
+
+The same comparison immediately after `chrlvActionTick`, before animation
+movement, is still exact except for those three allocation pointers. The split
+therefore occurs inside the following animation-position update, not in AI
+action processing or the paused render:
+
+```text
+timestamp 2422 expected position x: 4336740a
+timestamp 2422 restored position x: 43248a3d
+```
+
+The restored run remains RNG-identical through timestamp 2453. At timestamp
+2459, the uninterrupted run's bullet hits prop slot 96 while the restored run
+hits the background. That changes three subsequent RNG calls and triggers the
+reported replay divergence (`20b259b4` versus `8b4c82b5`). The RNG mismatch is
+downstream, not the root cause.
+
+## Best next diagnostic
+
+Instrument guard 36 around `chrPositionRelated7F020E40` for timestamp 2422 in
+test builds only:
+
+1. Log/compare `getsuboffset` before animation advancement.
+2. Log the model controller and root immediately after
+   `modelTickAnimQuarterSpeed`.
+3. Log the root and returned offset immediately after `subcalcpos`.
+4. If the decoded offset first differs there, inspect address-sensitive
+   attached-head RW data and any global animation decode/cache state used by
+   `sub_GAME_7F06D490`; the body definition and skeleton have already been
+   ruled out.
+
+Do not reintroduce prop suppression or alter gameplay. Any address-lifecycle or
+serialization correction should be made in normal practice save-state code.
+
+After fixing Frigate, rerun the six-replay reproducer, then the complete hop
+test across all replays. If that passes, run `regular`, `default`, `long`,
+`cameras`, `near-end`, and `cold-restart` using the suite commands in
+`AGENTS.md`.

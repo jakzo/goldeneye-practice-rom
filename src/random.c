@@ -1,4 +1,7 @@
 #include <ultra64.h>
+#ifdef PRACTICE_TEST_ROM
+#include "practice/practice_tests.h"
+#endif
 
 /**
  * EU .data, offset from start of data_seg : 0x36a0
@@ -33,6 +36,39 @@ u32 randomGetNext(void) {
     // return (s32)(t);
 }
 #else
+#ifdef PRACTICE_TEST_ROM
+GLOBAL_ASM(
+.text
+glabel randomGetNextImpl
+/* 00B050 7000A450 3C048002 */  lui   $a0, %hi(g_randomSeed)
+/* 00B054 7000A454 DC844460 */  ld    $a0, %lo(g_randomSeed)($a0)
+/* 00B058 7000A458 3C018002 */  lui   $at, %hi(g_randomSeed)
+/* 00B05C 7000A45C 000437FC */  dsll32 $a2, $a0, 0x1f
+/* 00B060 7000A460 00042FF8 */  dsll  $a1, $a0, 0x1f
+/* 00B064 7000A464 000637FA */  dsrl  $a2, $a2, 0x1f
+/* 00B068 7000A468 0005283E */  dsrl32 $a1, $a1, 0
+/* 00B06C 7000A46C 0004233C */  dsll32 $a0, $a0, 0xc
+/* 00B070 7000A470 00C53025 */  or    $a2, $a2, $a1
+/* 00B074 7000A474 0004203E */  dsrl32 $a0, $a0, 0
+/* 00B078 7000A478 00C43026 */  xor   $a2, $a2, $a0
+/* 00B07C 7000A47C 0006253A */  dsrl  $a0, $a2, 0x14
+/* 00B080 7000A480 30840FFF */  andi  $a0, $a0, 0xfff
+/* 00B084 7000A484 00862026 */  xor   $a0, $a0, $a2
+/* 00B088 7000A488 0004103C */  dsll32 $v0, $a0, 0
+/* 00B08C 7000A48C FC244460 */  sd    $a0, %lo(g_randomSeed)($at)
+/* 00B090 7000A490 03E00008 */  jr    $ra
+/* 00B094 7000A494 0002103F */   dsra32 $v0, $v0, 0
+)
+
+extern u32 randomGetNextImpl(void);
+
+u32 randomGetNext(void) {
+    u32 caller = (u32)__builtin_return_address(0);
+    u32 result = randomGetNextImpl();
+    practice_tests_random_call(caller);
+    return result;
+}
+#else
 GLOBAL_ASM(
 .text
 glabel randomGetNext
@@ -55,6 +91,7 @@ glabel randomGetNext
 /* 00B090 7000A490 03E00008 */  jr    $ra
 /* 00B094 7000A494 0002103F */   dsra32 $v0, $v0, 0
 )
+#endif
 #endif
 
 
@@ -125,6 +162,5 @@ glabel randomGetNextFrom
 /* 00B0E8 7000A4E8 0002103F */   dsra32 $v0, $v0, 0
 )
 #endif
-
 
 

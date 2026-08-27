@@ -28,6 +28,7 @@
 #include "assets/obseg/text/LgunE.h"
 #include "textrelated.h"
 #include "practice/practice_render.h"
+#include "practice/practice_tests.h"
 #include "practice/practice_timescale.h"
 
 #ifdef PRACTICE_ROM
@@ -12918,6 +12919,10 @@ void recall_joy2_hits_edit_detail_edit_flag(enum ITEM_IDS item, PropRecord* prop
     struct BulletFleshSounds bullet_flesh_sounds_copy;
     u32 sfx_index;
 
+#ifdef PRACTICE_TEST_ROM
+    practice_tests_gun_hit_prop(prop);
+#endif
+
     sp6C = sub_GAME_7F0539E4(&prop->pos);
 
     rnd1 = randomGetNext();
@@ -13043,6 +13048,10 @@ void recall_joy2_hits_edit_flag(enum ITEM_IDS item, coord3d* arg1, s32 texture_i
     struct RicochetSoundsLarge rico_copied;
     u32 sfx_index;
     struct image_sound *img_sound;
+
+#ifdef PRACTICE_TEST_ROM
+    practice_tests_gun_hit_background(arg1);
+#endif
 
     rnd1 = randomGetNext();
     rnd2 = randomGetNext();

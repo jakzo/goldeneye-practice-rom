@@ -40,6 +40,7 @@
 #include "random.h"
 #include "state/practice_states.h"
 #include "state/practice_states_utils.h"
+#include "stan.h"
 #include "str.h"
 #include "tlb_random.h"
 #include "viewport.h"
@@ -55,6 +56,8 @@ extern u8 *g_GfxMemPos;
 extern s32 chraiGetAIListID(AIRecord *AIList, bool *isGlobalAIList);
 extern u64 g_randomSeed;
 extern u64 g_chrObjRandomSeed;
+extern u64 g_FrozenFrameRngSeed;
+extern u64 g_FrozenFrameChrObjRngSeed;
 extern u64 g_tlbRandomSeed;
 extern f32 g_sndSfxVolumeScale;
 extern void bondviewKillCurrentPlayer(void);
@@ -327,6 +330,350 @@ static u16 g_ReplayCompleteMask;
 static u8 g_ReplayPackCount;
 static u8 g_ReplayCurrentIndex;
 static ReplayHopSnapshot g_ReplayHopSnapshots[TEST_REPLAY_PACK_MAX];
+static s32 g_ReplayRngResumePending;
+static u32 g_RngProfileCallers[64];
+static u16 g_RngProfileCounts[64];
+static s16 g_RngProfileChrnums[64];
+static u8 g_RngProfileCallerCount;
+static bool g_RngProfileActive;
+static s16 g_RngProfileCurrentChrnum = -1;
+static u8 g_RunwayExpectedStanTile[0x58];
+static u8 g_RunwayExpectedStanTileSize;
+static ChrRecord g_ExpectedChr36;
+static Model g_ExpectedChr36Model;
+static PropRecord g_ExpectedChr36Prop;
+static ModelFileHeader g_ExpectedChr36Header;
+static ModelNode g_ExpectedChr36RootNode;
+static union ModelRoData g_ExpectedChr36RootRoData;
+static ModelSkeleton g_ExpectedChr36Skeleton;
+static ModelJoint g_ExpectedChr36Joints[64];
+static s32 g_ExpectedChr36JointCount;
+static u32 g_ExpectedChr36ModelData[512];
+static s32 g_ExpectedChr36ModelDataCount;
+static bool g_HasExpectedChr36;
+extern u8 list_of_tilesizes[];
+
+static void practice_tests_capture_chr36(void) {
+  ChrRecord *chr = chrFindByLiteralId(36);
+
+  g_HasExpectedChr36 =
+      chr != NULL && chr->model != NULL && chr->prop != NULL;
+  if (g_HasExpectedChr36) {
+    memcpy(&g_ExpectedChr36, chr, sizeof(g_ExpectedChr36));
+    memcpy(&g_ExpectedChr36Model, chr->model, sizeof(g_ExpectedChr36Model));
+    memcpy(&g_ExpectedChr36Prop, chr->prop, sizeof(g_ExpectedChr36Prop));
+    memcpy(&g_ExpectedChr36Header, chr->model->obj,
+           sizeof(g_ExpectedChr36Header));
+    memcpy(&g_ExpectedChr36RootNode, chr->model->obj->RootNode,
+           sizeof(g_ExpectedChr36RootNode));
+    memcpy(&g_ExpectedChr36RootRoData,
+           chr->model->obj->RootNode->Data,
+           sizeof(g_ExpectedChr36RootRoData));
+    memcpy(&g_ExpectedChr36Skeleton, chr->model->obj->Skeleton,
+           sizeof(g_ExpectedChr36Skeleton));
+    g_ExpectedChr36JointCount = chr->model->obj->Skeleton->numjoints;
+    if (g_ExpectedChr36JointCount > ARRAYCOUNT(g_ExpectedChr36Joints)) {
+      g_ExpectedChr36JointCount = ARRAYCOUNT(g_ExpectedChr36Joints);
+    }
+    memcpy(g_ExpectedChr36Joints, chr->model->obj->Skeleton->Joints,
+           g_ExpectedChr36JointCount * sizeof(ModelJoint));
+    g_ExpectedChr36ModelDataCount = chr->model->Type;
+    if (g_ExpectedChr36ModelDataCount >
+        ARRAYCOUNT(g_ExpectedChr36ModelData)) {
+      g_ExpectedChr36ModelDataCount = ARRAYCOUNT(g_ExpectedChr36ModelData);
+    }
+    memcpy(g_ExpectedChr36ModelData, chr->model->datas,
+           g_ExpectedChr36ModelDataCount * sizeof(u32));
+  }
+}
+
+static void practice_tests_compare_words(const char *label, const void *expected,
+                                         const void *actual, s32 size) {
+  const u32 *expected_words = expected;
+  const u32 *actual_words = actual;
+  s32 i;
+  s32 differences = 0;
+
+  for (i = 0; i < size / sizeof(u32); i++) {
+    if (expected_words[i] != actual_words[i]) {
+      if (differences < 80) {
+        emu_log("CHR36_RAW %s off=%03x expected=%08x actual=%08x", label,
+                i * sizeof(u32), expected_words[i], actual_words[i]);
+      }
+      differences++;
+    }
+  }
+  emu_log("CHR36_RAW_END %s differences=%d", label, differences);
+}
+
+static void practice_tests_compare_chr36(void) {
+  ChrRecord *chr = chrFindByLiteralId(36);
+
+  if (!g_HasExpectedChr36 || chr == NULL || chr->model == NULL ||
+      chr->prop == NULL) {
+    return;
+  }
+  practice_tests_compare_words("chr", &g_ExpectedChr36, chr,
+                               sizeof(g_ExpectedChr36));
+  practice_tests_compare_words("model", &g_ExpectedChr36Model, chr->model,
+                               sizeof(g_ExpectedChr36Model));
+  practice_tests_compare_words("prop", &g_ExpectedChr36Prop, chr->prop,
+                               sizeof(g_ExpectedChr36Prop));
+  practice_tests_compare_words("header", &g_ExpectedChr36Header,
+                               chr->model->obj, sizeof(g_ExpectedChr36Header));
+  practice_tests_compare_words("root-node", &g_ExpectedChr36RootNode,
+                               chr->model->obj->RootNode,
+                               sizeof(g_ExpectedChr36RootNode));
+  practice_tests_compare_words("root-ro", &g_ExpectedChr36RootRoData,
+                               chr->model->obj->RootNode->Data,
+                               sizeof(g_ExpectedChr36RootRoData));
+  practice_tests_compare_words("skeleton", &g_ExpectedChr36Skeleton,
+                               chr->model->obj->Skeleton,
+                               sizeof(g_ExpectedChr36Skeleton));
+  practice_tests_compare_words(
+      "joints", g_ExpectedChr36Joints,
+      chr->model->obj->Skeleton->Joints,
+      g_ExpectedChr36JointCount * sizeof(ModelJoint));
+  practice_tests_compare_words(
+      "datas", g_ExpectedChr36ModelData, chr->model->datas,
+      g_ExpectedChr36ModelDataCount * sizeof(u32));
+}
+
+static void practice_tests_log_chr36_checkpoint(const char *label) {
+  ChrRecord *chr = chrFindByLiteralId(36);
+  s32 target_path_index = -1;
+  s32 waypoint0_index = -1;
+
+  if (chr == NULL || chr->prop == NULL) {
+    emu_log("CHR36_CHECKPOINT %s missing", label);
+    return;
+  }
+  if (chr->actiontype == ACT_GOPOS && g_CurrentSetup.pathwaypoints != NULL) {
+    if (chr->act_gopos.target_path != NULL) {
+      target_path_index =
+          chr->act_gopos.target_path - g_CurrentSetup.pathwaypoints;
+    }
+    if (chr->act_gopos.waypoints[0] != NULL) {
+      waypoint0_index =
+          chr->act_gopos.waypoints[0] - g_CurrentSetup.pathwaypoints;
+    }
+  }
+  emu_log("CHR36_CHECKPOINT %s ts=%d action=%d pos=%08x,%08x,%08x stan=%08x "
+          "rooms=%d,%d target=%08x,%08x,%08x targetstan=%08x path=%d "
+          "wp0=%d cur=%d unk=%d,%04x way=%d,%d,%d,%d age=%d "
+          "waypos=%08x,%08x,%08x seg=%08x/%08x model=%d,%d,%08x",
+          label, practice_replay_get_timestamp(), chr->actiontype,
+          *(u32 *)&chr->prop->pos.x,
+          *(u32 *)&chr->prop->pos.y, *(u32 *)&chr->prop->pos.z,
+          get_tile_offset(chr->prop->stan), chr->prop->rooms[0],
+          chr->prop->rooms[1], *(u32 *)&chr->act_gopos.targetpos.x,
+          *(u32 *)&chr->act_gopos.targetpos.y,
+          *(u32 *)&chr->act_gopos.targetpos.z,
+          get_tile_offset(chr->act_gopos.target), target_path_index,
+          waypoint0_index, chr->act_gopos.curindex, chr->act_gopos.unk59,
+          chr->act_gopos.unk5a, chr->act_gopos.waydata.mode,
+          chr->act_gopos.waydata.unk01, chr->act_gopos.waydata.unk02,
+          chr->act_gopos.waydata.unk03, chr->act_gopos.waydata.age,
+          *(u32 *)&chr->act_gopos.waydata.pos.x,
+          *(u32 *)&chr->act_gopos.waydata.pos.y,
+          *(u32 *)&chr->act_gopos.waydata.pos.z,
+          *(u32 *)&chr->act_gopos.waydata.segdistdone,
+          *(u32 *)&chr->act_gopos.waydata.segdisttotal,
+          chr->model != NULL ? chr->model->framea : -1,
+          chr->model != NULL ? chr->model->frameb : -1,
+          chr->model != NULL ? *(u32 *)&chr->model->speed : 0);
+  if (chr->model != NULL && chr->model->obj != NULL &&
+      chr->model->obj->RootNode != NULL) {
+    ModelRwData_HeaderRecord *root =
+        (ModelRwData_HeaderRecord *)modelGetNodeRwData(
+            chr->model, chr->model->obj->RootNode);
+    u32 hash = 2166136261u;
+    u8 *bytes = (u8 *)root;
+    s32 i;
+
+    for (i = 0; i < sizeof(*root); i++) {
+      hash = (hash ^ bytes[i]) * 16777619u;
+    }
+    emu_log("CHR36_ROOT %s hash=%08x pos=%08x,%08x,%08x rot=%08x "
+            "u24=%08x,%08x,%08x u30=%08x u34=%08x,%08x,%08x "
+            "u40=%08x,%08x,%08x u4c=%08x,%08x,%08x",
+            label, hash, *(u32 *)&root->pos.x, *(u32 *)&root->pos.y,
+            *(u32 *)&root->pos.z, *(u32 *)&root->unk14,
+            *(u32 *)&root->unk24.x, *(u32 *)&root->unk24.y,
+            *(u32 *)&root->unk24.z, *(u32 *)&root->unk30,
+            *(u32 *)&root->unk34.x, *(u32 *)&root->unk34.y,
+            *(u32 *)&root->unk34.z, *(u32 *)&root->unk40.x,
+            *(u32 *)&root->unk40.y, *(u32 *)&root->unk40.z,
+            *(u32 *)&root->unk4c.x, *(u32 *)&root->unk4c.y,
+            *(u32 *)&root->unk4c.z);
+  }
+}
+
+static u32 practice_tests_stan_tile_hash(StandTile *tile) {
+  u32 hash = 2166136261u;
+  u8 size = list_of_tilesizes[(tile->tail.half >> 12) & 0xf];
+  u8 *bytes = (u8 *)tile;
+  s32 i;
+
+  for (i = 0; i < size; i++) {
+    hash = (hash ^ bytes[i]) * 16777619u;
+  }
+  return hash;
+}
+
+void practice_tests_chr_tick_enter(ChrRecord *chr) {
+  u32 timestamp = practice_replay_get_timestamp();
+
+  g_RngProfileCurrentChrnum = chr->chrnum;
+  if (chr->chrnum == 36 && timestamp == 2422) {
+    practice_tests_log_chr36_checkpoint("tick-enter");
+  }
+  if (g_RngProfileActive && chr->chrnum == 36 && chr->model != NULL) {
+    u32 action_hash = 2166136261u;
+    u32 matrix_hash = 2166136261u;
+    u8 *action = (u8 *)&chr->act_bytes;
+    u8 *matrices = (u8 *)chr->model->render_pos;
+    s32 matrix_bytes = chr->model->obj != NULL
+                           ? chr->model->obj->numMatrices * sizeof(RenderPosView)
+                           : 0;
+    s32 i;
+
+    for (i = 0; i < sizeof(chr->act_bytes); i++) {
+      action_hash = (action_hash ^ action[i]) * 16777619u;
+    }
+    for (i = 0; matrices != NULL && i < matrix_bytes; i++) {
+      matrix_hash = (matrix_hash ^ matrices[i]) * 16777619u;
+    }
+    emu_log("CHR36_STATE ts=%d action=%d sleep=%d ai=%04x random=%d "
+            "hidden=%04x flags=%08x actionhash=%08x pos=%08x,%08x,%08x "
+            "stan=%08x rooms=%d,%d anim=%08x frames=%d,%d speed=%08x "
+            "timespeed=%08x elapsed=%08x matrices=%08x",
+            timestamp, chr->actiontype, chr->sleep, chr->aioffset, chr->random,
+            chr->hidden, chr->chrflags, action_hash,
+            *(u32 *)&chr->prop->pos.x, *(u32 *)&chr->prop->pos.y,
+            *(u32 *)&chr->prop->pos.z, get_tile_offset(chr->prop->stan),
+            chr->prop->rooms[0], chr->prop->rooms[1], chr->model->anim,
+            chr->model->framea, chr->model->frameb,
+            *(u32 *)&chr->model->speed, *(u32 *)&chr->model->timespeed,
+            *(u32 *)&chr->model->elapsespeed, matrix_hash);
+  }
+  if (g_RngProfileActive && chr->chrnum == 26 && timestamp >= 2405 &&
+      timestamp <= 2408) {
+    u32 action_hash = 2166136261u;
+    u8 *action = (u8 *)&chr->act_bytes;
+    s32 i;
+
+    for (i = 0; i < sizeof(chr->act_bytes); i++) {
+      action_hash = (action_hash ^ action[i]) * 16777619u;
+    }
+    emu_log("CHR26_PRE case=%d action=%d sleep=%d ai=%04x random=%d "
+            "hidden=%04x flags=%08x invalid=%d actionhash=%08x "
+            "pos=%08x,%08x,%08x",
+            g_practice_test_case, chr->actiontype, chr->sleep, chr->aioffset,
+            chr->random, chr->hidden, chr->chrflags, chr->invalidmove,
+            action_hash, *(u32 *)&chr->prop->pos.x, *(u32 *)&chr->prop->pos.y,
+            *(u32 *)&chr->prop->pos.z);
+    if (chr->actiontype == ACT_GOPOS) {
+      u32 way_hash = 2166136261u;
+      u8 *way = (u8 *)&chr->act_gopos.waydata;
+
+      for (i = 0; i < sizeof(chr->act_gopos.waydata); i++) {
+        way_hash = (way_hash ^ way[i]) * 16777619u;
+      }
+      emu_log("CHR26_GOPOS target=%08x,%08x,%08x targetoff=%08x "
+              "path=%08x cur=%d unk59=%d unk5a=%04x wayhash=%08x "
+              "unk9c=%08x speed=%08x",
+              *(u32 *)&chr->act_gopos.targetpos.x,
+              *(u32 *)&chr->act_gopos.targetpos.y,
+              *(u32 *)&chr->act_gopos.targetpos.z,
+              chr->act_gopos.target != NULL
+                  ? get_tile_offset(chr->act_gopos.target)
+                  : (u32)-1,
+              chr->act_gopos.target_path, chr->act_gopos.curindex,
+              chr->act_gopos.unk59, chr->act_gopos.unk5a, way_hash,
+              chr->act_gopos.unk9c, *(u32 *)&chr->act_gopos.speed);
+    }
+  }
+}
+
+void practice_tests_chr_tick_leave(void) { g_RngProfileCurrentChrnum = -1; }
+
+void practice_tests_ai_command(ChrRecord *chr, u16 offset, u8 command) {
+  if (g_RngProfileActive && chr != NULL && chr->chrnum == 26) {
+    emu_log("CHR26_AI offset=%04x cmd=%02x action=%d random=%d", offset,
+            command, chr->actiontype, chr->random);
+  }
+}
+
+void practice_tests_chr_sight(ChrRecord *chr, PropRecord *bond,
+                              StandTile *start, StandTile *finish, s32 pass) {
+  if (g_RngProfileActive && chr != NULL && chr->chrnum == 26) {
+    emu_log("CHR26_SIGHT pass=%d start=%08x finish=%08x bondstan=%08x "
+            "bondpos=%08x,%08x,%08x rooms=%d,%d/%d,%d flags=%02x/%02x "
+            "coll=%d:%d",
+            pass, get_tile_offset(start), get_tile_offset(finish),
+            get_tile_offset(bond->stan), *(u32 *)&bond->pos.x,
+            *(u32 *)&bond->pos.y, *(u32 *)&bond->pos.z, chr->prop->rooms[0],
+            chr->prop->rooms[1], bond->rooms[0], bond->rooms[1],
+            chr->prop->flags, bond->flags, get_prop_index(stanSavedColl_posData),
+            stanSavedColl_posData != NULL ? stanSavedColl_posData->type : -1);
+    emu_log("CHR26_STAN hash=%08x,%08x,%08x",
+            practice_tests_stan_tile_hash(start),
+            practice_tests_stan_tile_hash(get_tile_by_offset(0x3068)),
+            practice_tests_stan_tile_hash(bond->stan));
+    if (g_RunwayExpectedStanTileSize != 0) {
+      u8 *actual = (u8 *)get_tile_by_offset(0x3068);
+      s32 i;
+
+      for (i = 0; i < g_RunwayExpectedStanTileSize; i++) {
+        if (actual[i] != g_RunwayExpectedStanTile[i]) {
+          emu_log("CHR26_STAN_DIFF offset=%02x expected=%02x actual=%02x", i,
+                  g_RunwayExpectedStanTile[i], actual[i]);
+        }
+      }
+    }
+  }
+}
+
+void practice_tests_random_call(u32 caller) {
+  s32 i;
+
+  if (!g_RngProfileActive) {
+    return;
+  }
+  for (i = 0; i < g_RngProfileCallerCount; i++) {
+    if (g_RngProfileCallers[i] == caller &&
+        g_RngProfileChrnums[i] == g_RngProfileCurrentChrnum) {
+      g_RngProfileCounts[i]++;
+      return;
+    }
+  }
+  if (g_RngProfileCallerCount < ARRAYCOUNT(g_RngProfileCallers)) {
+    g_RngProfileCallers[g_RngProfileCallerCount] = caller;
+    g_RngProfileChrnums[g_RngProfileCallerCount] =
+        g_RngProfileCurrentChrnum;
+    g_RngProfileCounts[g_RngProfileCallerCount] = 1;
+    g_RngProfileCallerCount++;
+  }
+}
+
+void practice_tests_gun_hit_prop(PropRecord *prop) {
+  if (g_RngProfileActive) {
+    emu_log("GUN_HIT_PROP index=%d type=%d chr=%d pos=%08x,%08x,%08x",
+            get_prop_index(prop), prop != NULL ? prop->type : -1,
+            prop != NULL && prop->chr != NULL ? prop->chr->chrnum : -1,
+            prop != NULL ? *(u32 *)&prop->pos.x : 0,
+            prop != NULL ? *(u32 *)&prop->pos.y : 0,
+            prop != NULL ? *(u32 *)&prop->pos.z : 0);
+  }
+}
+
+void practice_tests_gun_hit_background(const coord3d *pos) {
+  if (g_RngProfileActive) {
+    emu_log("GUN_HIT_BG pos=%08x,%08x,%08x", *(u32 *)&pos->x,
+            *(u32 *)&pos->y, *(u32 *)&pos->z);
+  }
+}
 
 static s32 replay_hop_active(void) {
   return g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
@@ -412,6 +759,8 @@ static void replay_hop_switch(s32 index) {
    * destination here can make the old replay reader fetch its next page from
    * the destination fixture at the old fixture's offset. */
   g_ReplayHopPendingIndex = index;
+  g_ReplayHopPlaybackGeneration =
+      practice_replay_playback_generation() + 1;
   g_RunwaySaveStatePausedFrames = 0;
   g_ReplayHopStableMenu = MENU_INVALID;
   g_RunwaySaveStatePhase = REPLAY_STATE_WAIT_LEVEL;
@@ -2305,6 +2654,17 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
     g_ReplaySaveViewerMatricesFixed =
         practice_prop_render_matrices_are_fixed(g_CurrentPlayer->prop);
     practice_replay_get_checkpoint(&g_ReplaySaveCheckpoint);
+    if (g_ReplayCurrentIndex == 4) {
+      practice_tests_log_chr36_checkpoint("save");
+      if (g_ReplaySaveCheckpoint.timestamp > 2000) {
+        practice_tests_capture_chr36();
+      }
+    }
+    emu_log("HOP_RNG_SAVE index=%d timestamp=%d rng=%08x%08x chr=%08x%08x frozen=%08x%08x",
+            g_ReplayCurrentIndex, g_ReplaySaveCheckpoint.timestamp,
+            (u32)(g_randomSeed >> 32), (u32)g_randomSeed,
+            (u32)(g_chrObjRandomSeed >> 32), (u32)g_chrObjRandomSeed,
+            (u32)(g_FrozenFrameRngSeed >> 32), (u32)g_FrozenFrameRngSeed);
     g_SimulatedButtons = trigger | D_JPAD;
     g_SimulatedButtonsPressed = D_JPAD;
     g_RunwaySaveStatePausedFrames = 0;
@@ -2435,6 +2795,12 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
       break;
     }
     if (g_RunwaySaveStatePausedFrames == 0) {
+      if (g_ReplayCurrentIndex == 4) {
+        practice_tests_log_chr36_checkpoint("load");
+        if (g_RunwaySaveStateTarget > 2000) {
+          practice_tests_compare_chr36();
+        }
+      }
       if (!g_IsTimePaused) {
         emu_log("RUNWAY_STATE_NOT_PAUSED timestamp=%d",
                 g_RunwaySaveStateTarget);
@@ -2503,6 +2869,11 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
         break;
       }
       emu_log("RUNWAY_STATE_LOADED timestamp=%d", g_RunwaySaveStateTarget);
+      emu_log("HOP_RNG_LOAD index=%d rng=%08x%08x chr=%08x%08x frozen=%08x%08x",
+              g_ReplayCurrentIndex, (u32)(g_randomSeed >> 32),
+              (u32)g_randomSeed, (u32)(g_chrObjRandomSeed >> 32),
+              (u32)g_chrObjRandomSeed, (u32)(g_FrozenFrameRngSeed >> 32),
+              (u32)g_FrozenFrameRngSeed);
     }
     g_SimulatedButtons = trigger;
     g_SimulatedButtonsPressed = 0;
@@ -2518,6 +2889,7 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
       g_RunwaySaveStatePhase = REPLAY_STATE_PLAY_BEFORE_SAVE;
       g_SimulatedButtons = 0;
       g_SimulatedButtonsPressed = 0;
+      g_ReplayRngResumePending = TRUE;
       unpause();
     }
     break;
@@ -2528,7 +2900,72 @@ void practice_tests_before_hotkeys(s32 pending_gfx_tasks) {
   }
 }
 
-void practice_tests_before_replay_frame_check(void) {}
+void practice_tests_before_replay_frame_check(void) {
+  u32 timestamp = practice_replay_get_timestamp();
+  s32 i;
+
+  if ((g_practice_test_case == REPLAY_FRIGATE ||
+       (g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
+        g_ReplayCurrentIndex == 4)) &&
+      timestamp >= 2415 && timestamp <= 2453 &&
+      g_TimeScaleDeltaFrames != 0) {
+    practice_tests_log_chr36_checkpoint("live");
+  }
+
+  if (g_ReplayCurrentIndex == 2 && timestamp == 2405 &&
+      g_RunwaySaveStatePhase == REPLAY_STATE_PRESS_SAVE) {
+    StandTile *tile = get_tile_by_offset(0x3068);
+
+    g_RunwayExpectedStanTileSize =
+        list_of_tilesizes[(tile->tail.half >> 12) & 0xf];
+    memcpy(g_RunwayExpectedStanTile, tile, g_RunwayExpectedStanTileSize);
+  }
+
+  if (g_RngProfileActive && timestamp != 2453) {
+    g_RngProfileActive = FALSE;
+    emu_log("RNG_PROFILE_END case=%d timestamp=%d callers=%d",
+            g_practice_test_case, timestamp, g_RngProfileCallerCount);
+    for (i = 0; i < g_RngProfileCallerCount; i++) {
+      emu_log("RNG_PROFILE caller=%08x chr=%d count=%d",
+              g_RngProfileCallers[i], g_RngProfileChrnums[i],
+              g_RngProfileCounts[i]);
+    }
+  }
+  if (!g_RngProfileActive &&
+      (g_practice_test_case == REPLAY_RUNWAY ||
+       g_practice_test_case == REPLAY_FRIGATE || g_ReplayCurrentIndex == 4) &&
+      timestamp == 2453 &&
+      g_TimeScaleDeltaFrames != 0 &&
+      (g_practice_test_case == REPLAY_RUNWAY ||
+       g_practice_test_case == REPLAY_FRIGATE ||
+       (g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
+        g_RunwaySaveStatePhase == REPLAY_STATE_PLAY_BEFORE_SAVE))) {
+    bzero(g_RngProfileCallers, sizeof(g_RngProfileCallers));
+    bzero(g_RngProfileCounts, sizeof(g_RngProfileCounts));
+    bzero(g_RngProfileChrnums, sizeof(g_RngProfileChrnums));
+    g_RngProfileCallerCount = 0;
+    g_RngProfileActive = TRUE;
+  }
+
+  if ((g_ReplayCurrentIndex == 4 ||
+       g_practice_test_case == REPLAY_FRIGATE) &&
+      timestamp >= 2400 && timestamp <= 2470 &&
+      g_RunwaySaveStatePhase != REPLAY_STATE_WAIT_LEVEL) {
+    emu_log("HOP_RNG_LIVE timestamp=%d phase=%d rng=%08x%08x chr=%08x%08x delta=%d",
+            timestamp, g_RunwaySaveStatePhase, (u32)(g_randomSeed >> 32),
+            (u32)g_randomSeed, (u32)(g_chrObjRandomSeed >> 32),
+            (u32)g_chrObjRandomSeed, g_TimeScaleDeltaFrames);
+  }
+  if (g_ReplayRngResumePending && g_TimeScaleDeltaFrames != 0) {
+    emu_log("HOP_RNG_RESUME index=%d timestamp=%d rng=%08x%08x chr=%08x%08x frozen=%08x%08x delta=%d",
+            g_ReplayCurrentIndex, practice_replay_get_timestamp(),
+            (u32)(g_randomSeed >> 32), (u32)g_randomSeed,
+            (u32)(g_chrObjRandomSeed >> 32), (u32)g_chrObjRandomSeed,
+            (u32)(g_FrozenFrameRngSeed >> 32), (u32)g_FrozenFrameRngSeed,
+            g_TimeScaleDeltaFrames);
+    g_ReplayRngResumePending = FALSE;
+  }
+}
 
 s32 practice_tests_should_skip_replay_frame_check(void) {
   return g_practice_test_case == REPLAY_RUNWAY_SAVE_STATES &&
@@ -2663,6 +3100,13 @@ void practice_tests_frame() {
     u32 replay_timestamp = practice_replay_get_timestamp();
     u32 replay_duration = practice_replay_get_duration();
 
+    if (g_ReplayIsPlaying && replay_timestamp < 10) {
+      emu_log("HOP_GATE timestamp=%d phase=%d active=%d pack=%d restart=%d index=%d pending=%d",
+              replay_timestamp, g_RunwaySaveStatePhase, replay_hop_active(),
+              g_ReplayPackCount, g_ReplayRestartSaveStateMode,
+              g_ReplayCurrentIndex, g_ReplayHopPendingStage);
+    }
+
     if (practice_replay_had_divergence()) {
       emu_log("REPLAY_DIVERGED timestamp=%d duration=%d",
               replay_timestamp, replay_duration);
@@ -2678,6 +3122,26 @@ void practice_tests_frame() {
          * paused. Menu screen switches require advancing frames, so keep the
          * test lifecycle live while it walks to the next fixture. */
         unpause();
+      }
+      /* Recognize a newly started destination replay before continuing the
+       * title-menu walker. The outgoing replay has already reached the first
+       * save spacing, while the destination begins below it; this avoids
+       * relying on pending lifecycle bookkeeping across the level transition. */
+      if (g_ReplayIsPlaying &&
+          replay_timestamp < (u32)replay_state_spacing_frames()) {
+        g_ReplayHopPendingStage = LEVELID_NONE;
+        if (replay_hop_started(g_ReplayCurrentIndex)) {
+          if (replay_timestamp >= (u32)replay_state_wait_frames()) {
+            replay_hop_restore_snapshot();
+            g_RunwaySaveStatePausedFrames = 0;
+            pause();
+            g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_LOAD;
+          }
+        } else {
+          g_RunwaySaveStatePausedFrames = 0;
+          g_RunwaySaveStatePhase = REPLAY_STATE_WAIT_TO_SAVE;
+        }
+        return;
       }
       if (g_ReplayHopPendingStage != LEVELID_NONE) {
         if (lvlGetCurrentStageToLoad() != LEVELID_TITLE) {
@@ -2805,6 +3269,7 @@ void practice_tests_frame() {
           if (replay_timestamp >= (u32)replay_state_wait_frames()) {
             replay_hop_restore_snapshot();
             g_RunwaySaveStatePausedFrames = 0;
+            pause();
             g_RunwaySaveStatePhase = REPLAY_STATE_HOLD_TO_LOAD;
           }
         } else {

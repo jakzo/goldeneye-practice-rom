@@ -5829,4 +5829,3 @@ void sub_GAME_7F0B31A4(s32 arg0, StandTile *arg1, f32 arg2, f32 arg3, f32 arg4, 
 }
 
 
-

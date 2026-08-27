@@ -36,6 +36,7 @@
 #include "file.h"
 #include "fog.h"
 #include "practice/practice_frigate_hostage_cam.h"
+#include "practice/practice_tests.h"
 
 
 
@@ -942,6 +943,13 @@ void ai(PropDefHeaderRecord *Entityp, PROP_TYPE EntityType)
         // loop forever (or until broken)
         for (;;)
         {
+#ifdef PRACTICE_TEST_ROM
+            if (ChrEntityp != NULL)
+            {
+                practice_tests_ai_command(ChrEntityp, Offset,
+                                          (AiListp + Offset)->cmd);
+            }
+#endif
             /*
              * GE uses long Switch/case while PD uses Bool functions and tests
              * for TRUE/FALSE if(funcpointer[ai]) break;

@@ -32,6 +32,7 @@
 #include "practice/practice_bunker1.h"
 #include "practice/practice_frigate_fast_guard_death.h"
 #include "practice/practice_render.h"
+#include "practice/practice_tests.h"
 
 
 
@@ -4307,6 +4308,7 @@ bool chrCanSeeBond(ChrRecord *self)
     PropRecord *myprop;
     PropRecord *bondprop;
     StandTile *mystan;
+    StandTile *startstan;
     f32 myheight;
 
     if (bondviewGetVisibleToGuardsFlag())
@@ -4319,12 +4321,16 @@ bool chrCanSeeBond(ChrRecord *self)
         bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 0);
 
         mystan = myprop->stan;
+        startstan = mystan;
 
         if (stanTestLineUnobstructed(&mystan, myprop->pos.x, myprop->pos.z, bondprop->pos.x, bondprop->pos.z, CDTYPE_OBJS | CDTYPE_DOORS | CDTYPE_CHRS | CDTYPE_PATHBLOCKER | CDTYPE_AIOPAQUE, myheight, myheight, 0.0f, 1.0f) && (mystan == bondprop->stan))
         {
             setSeenBondTimeToNow(self);
             pass = TRUE;
         }
+#ifdef PRACTICE_TEST_ROM
+        practice_tests_chr_sight(self, bondprop, startstan, mystan, pass);
+#endif
 
         chrSetMoving(self, TRUE);
         bondviewUpdateGuardTankFlagsRelated(g_CurrentPlayer->prop, 1);
@@ -9935,6 +9941,9 @@ void chrlvTickPatrol(ChrRecord *self)
 */
 void chrlvActionTick(ChrRecord *self)
 {
+#ifdef PRACTICE_TEST_ROM
+    practice_tests_chr_tick_enter(self);
+#endif
     if (g_ClockTimer > 0)
     {
         if (self->actiontype == ACT_INIT)
@@ -10032,6 +10041,9 @@ void chrlvActionTick(ChrRecord *self)
             self->chrseedie  = CHR_FREE;
         }
     }
+#ifdef PRACTICE_TEST_ROM
+    practice_tests_chr_tick_leave();
+#endif
 }
 
 

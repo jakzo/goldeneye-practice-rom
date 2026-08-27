@@ -909,7 +909,11 @@ static s32 practice_replay_playback_callback(struct contsample *samples,
     return last_idx;
   }
 
-  if (g_IsTimePaused || !g_PlaybackAdvanceFrame)
+  /* Pause hotkeys are processed after updateFrameCounters has committed this
+   * frame's replay delta. If pause becomes active later in that same frame,
+   * gameplay still advances and must consume the matching replay input. A
+   * frame which began paused never sets g_PlaybackAdvanceFrame. */
+  if (!g_PlaybackAdvanceFrame)
     return last_idx;
 
   if (!g_ReplayIsPlaying || !g_PlaybackFrameLoaded)

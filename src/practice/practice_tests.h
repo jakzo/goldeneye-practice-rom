@@ -7,6 +7,10 @@
 #define PRACTICE_TEST_STATE_RUNWAY_INTRO_DEATH_LOAD 30
 
 #ifdef PRACTICE_TEST_ROM
+struct ChrRecord;
+struct PropRecord;
+struct StandTile;
+struct coord3d;
 extern s32 g_practice_test_case;
 
 void practice_tests_set_restart_save_state_mode(s32 enabled);
@@ -18,6 +22,15 @@ s32 practice_tests_should_disable_intro(s32 test_case);
 void practice_tests_tick();
 void practice_tests_frame();
 void practice_tests_before_replay_frame_check(void);
+void practice_tests_gun_hit_prop(struct PropRecord *prop);
+void practice_tests_gun_hit_background(const struct coord3d *pos);
+void practice_tests_random_call(u32 caller);
+void practice_tests_chr_tick_enter(struct ChrRecord *chr);
+void practice_tests_chr_tick_leave(void);
+void practice_tests_ai_command(struct ChrRecord *chr, u16 offset, u8 command);
+void practice_tests_chr_sight(struct ChrRecord *chr, struct PropRecord *bond,
+                              struct StandTile *start,
+                              struct StandTile *finish, s32 pass);
 s32 practice_tests_should_skip_replay_frame_check(void);
 void practice_tests_before_hotkeys(s32 pending_gfx_tasks);
 void practice_tests_before_player_model_reconcile(void);
@@ -32,6 +45,13 @@ void practice_tests_before_player_model_reconcile(void);
 #define practice_tests_tick() ((void)0)
 #define practice_tests_frame() ((void)0)
 #define practice_tests_before_replay_frame_check() ((void)0)
+#define practice_tests_gun_hit_prop(prop) ((void)0)
+#define practice_tests_gun_hit_background(pos) ((void)0)
+#define practice_tests_random_call(caller) ((void)0)
+#define practice_tests_chr_tick_enter(chr) ((void)0)
+#define practice_tests_chr_tick_leave() ((void)0)
+#define practice_tests_ai_command(chr, offset, command) ((void)0)
+#define practice_tests_chr_sight(chr, bond, start, finish, pass) ((void)0)
 #define practice_tests_should_skip_replay_frame_check() FALSE
 #define practice_tests_before_hotkeys(pending_gfx_tasks) ((void)0)
 #define practice_tests_before_player_model_reconcile() ((void)0)
