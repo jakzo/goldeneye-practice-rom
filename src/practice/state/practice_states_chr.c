@@ -1900,8 +1900,9 @@ static void load_model_blood_patches(StateStream *stream, Model *model) {
   u16 patch_count = read_u16(stream);
   u16 patch;
 
-  clear_model_blood_patches(blood_nodes, blood_node_count);
-
+  /* The props loader releases all live clones and resets the shared pool
+   * before loading any CHR records. Clearing an individual recreated model
+   * here can free a stale vertex pointer into that freshly reset pool. */
   for (patch = 0; patch < patch_count; patch++) {
     u16 component_index = read_u16(stream);
     u16 rwdata_index = read_u16(stream);

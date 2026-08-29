@@ -1,6 +1,6 @@
 # Cross-level replay hop test status
 
-Updated 2026-08-27. This is the handoff for save-state replay tests that keep
+Updated 2026-08-29. This is the handoff for save-state replay tests that keep
 one emulator process alive while switching between replay fixtures and stages.
 
 ## Goal
@@ -12,9 +12,22 @@ behaviour belong in the normal practice save-state code.
 
 ## Current result
 
-The six-replay long-hop reproducer now gets through the former Runway crash and
-fails deterministically on Frigate. The full all-replay hop test and the later
-suite steps have not passed yet.
+The complete US save-state replay matrix passes with ordinary rendering and
+gameplay on the final serialization format:
+
+- Exact replay baselines: all six fixtures, 0 failures.
+- Default one-second hops: all six fixtures (5720.05 seconds).
+- Long hops (10-second spacing, four-frame wait, 30 seconds before load): all
+  six fixtures (1002.28 seconds).
+- Grenade and damaged-guard cameras: all six fixtures (5619.86 seconds).
+- Facility near-end load: passed (215.33 seconds).
+- Cold restart between every SRAM save and load: all six fixtures passed,
+  including Dam across 206 boots, Facility across 87 boots, Surface across 128
+  boots, Frigate across 133 boots, Runway across 45 boots, and Archives across
+  11 boots.
+
+The standard US practice ROM also builds successfully after the instrumented
+suite.
 
 The current tree is usable:
 
@@ -28,12 +41,16 @@ The current tree is usable:
   failure and has been removed.
 - The speculative first-person hand switch serialization has also been removed.
 
-## Latest reproduction
+## Latest verification environment
 
-Build:
+The final matrix was run with the native Windows Ares build at
+`ares/build_msvc/desktop-ui/rundir/ares.exe`, using normal Vulkan rendering on
+the NVIDIA GPU. ROM compilation remained inside Docker as required.
+
+Instrumented build:
 
 ```sh
-docker run --rm -v /Users/jfield/oss/007:/home/dev goldeneye \
+docker run --rm -v "$PWD:/home/dev" goldeneye \
   make -j8 VERSION=US PRACTICE_TEST_ROM=1 DEV=0
 ```
 
@@ -51,17 +68,12 @@ env ARES=/Applications/ares.app/Contents/MacOS/ares \
     --replay-fixture tests/replays/us/04-surface1.ram \
     --replay-fixture tests/replays/us/07-frigate.ram \
     --replay-fixture tests/replays/us/11-archives.ram \
-    --version US --build-mode release --test-param 1966858 \
+    --version US --build-mode release --test-param 1967114 \
     --timeout 1200 --skip-build
 ```
 
-It fails at Frigate replay timestamp 2459, after loading the state saved at
-timestamp 2415 through other stage lifecycles. Runtime is about 95 seconds.
-
-A focused Frigate-only run with the same parameter passes all four long hops
-and completes in about 132 seconds. The remaining bug therefore requires a
-cross-stage model/allocation lifecycle; it is not an ordinary same-stage load
-failure.
+This long-hop command passes all six fixtures with no replay divergence,
+crash, or disabled rendering.
 
 ## Confirmed fixes retained
 
@@ -81,16 +93,62 @@ attached heads. Object model switch visibility is restored. This fixes the
 missing-prop rendering class and the earlier Runway RSP/display-list hang while
 keeping normal prop rendering enabled.
 
+### Player hand-buffer equipment
+
+Bond's third-person weapon object lives in a first-person hand buffer rather
+than the stage model pool. Loading it as an ordinary `PitemZ` stage object made
+repeated Dam/Frigate hops exhaust the stage heap. Player-buffer objects are now
+deferred until `solo_char_load` regenerates the correct hand allocation; the
+saved gameplay fields, model switches, prop binding, viewer equipment pointer,
+attachments, and dual-weapon links are then restored onto that allocation.
+
 ### Mutable STAN data
 
-The packed mutable STAN payload is saved from the first real tile through
-`D_80040F60`, the actual final tile, and restored on load. `stanFillin` mutates
-point/topology data during play, so rebuilding a stage alone was insufficient.
-This fixed the earlier Runway guard line-of-sight divergence.
+The packed STAN is walked from the first real tile through its own eight-byte
+zero terminator. `D_80040F60` is relocation scratch and can describe another
+STAN processed later in stage loading; using it omitted Frigate's collision
+tile at offset `0x6610`.
 
-The payload is currently deliberately complete. Facility states can be about
-311 KB, which is acceptable for the in-memory tests but should be reviewed
-before relying on SRAM capacity. Compact only after correctness is established.
+Stage loading deterministically rebuilds the packed geometry and links. The
+runtime `stanFillin` traversal mutates the high visited bit in each tile ID, so
+save states store a validated one-bit-per-tile snapshot and restore those bits
+onto the freshly loaded STAN. The earlier complete-payload format made Archives
+cold-restart states exceed the 128 KiB SRAM boundary (offset 86130 plus a 54584
+byte write); the bitset retains the mutable traversal state without duplicating
+tens of kilobytes of immutable collision geometry.
+
+### Mutable pathfinder graph
+
+Waypoint and waygroup distances, group assignments, neighbour arrays, waypoint
+arrays, and their terminator positions are serialized after props. Surface AI
+destructively shortened one neighbour list from 11 entries to 5; restoring only
+the stage setup preserved that truncation and changed later AI/RNG behaviour.
+
+Pathfinder values use exact variable-length integer encoding. This is lossless,
+distinguishes null lists from empty lists, and keeps late Facility states inside
+the 128 KiB cold-restart SRAM budget.
+
+### Room render cache
+
+The visible-room list stores only its valid prefix, room status flags are packed
+at two bits each, mostly-negative room ownership/index arrays use exact signed
+variable-length encoding, and room matrices use exact sparse word masks. No
+render state is discarded or regenerated approximately. This removed the late
+Facility SRAM overflow while preserving normal prop and room rendering.
+
+### Cross-stage ownership and blood-pool lifecycle
+
+Cleanup that follows live prop convenience pointers is restricted to same-stage
+loads. After a hop, stale `ObjectRecord` pointers can alias the new stage setup;
+clearing a projectile field previously overwrote a Surface AI command byte.
+Stale CHR models are range/ownership-validated and destroyed as a complete pass
+before any saved CHR is recreated.
+
+The shared blood-vertex pool is reset only after that cross-stage destruction.
+Destroying old models can release old blood clones, so resetting first corrupts
+the new pool. Individual CHR loads no longer repeat the clone-clear pass after
+the global release/reset. This fixes the late Frigate blood-patch restoration
+failure without suppressing blood or prop rendering.
 
 ### Replay pause boundary
 
@@ -99,52 +157,8 @@ was already committed, even if a pause hotkey activates later in that frame.
 The hop harness also pauses a fresh destination before loading and recognizes
 that destination only in the test build.
 
-## Remaining Frigate divergence
+## Remaining verification
 
-At the saved timestamp 2415, guard literal ID 36 restores exactly apart from
-expected allocation addresses:
-
-- the `ChrRecord`, `Model`, `PropRecord`, animation controller, action union,
-  and model RW scalar data match;
-- the full root RW record matches (`3f3fca66` diagnostic hash);
-- the `ModelFileHeader`, root node/RO data, skeleton, and skeleton joints match;
-- the only raw differences are the recreated model allocation pointer, model
-  RW-data allocation pointer, and the attached-head RW-data allocation pointer.
-
-The same comparison immediately after `chrlvActionTick`, before animation
-movement, is still exact except for those three allocation pointers. The split
-therefore occurs inside the following animation-position update, not in AI
-action processing or the paused render:
-
-```text
-timestamp 2422 expected position x: 4336740a
-timestamp 2422 restored position x: 43248a3d
-```
-
-The restored run remains RNG-identical through timestamp 2453. At timestamp
-2459, the uninterrupted run's bullet hits prop slot 96 while the restored run
-hits the background. That changes three subsequent RNG calls and triggers the
-reported replay divergence (`20b259b4` versus `8b4c82b5`). The RNG mismatch is
-downstream, not the root cause.
-
-## Best next diagnostic
-
-Instrument guard 36 around `chrPositionRelated7F020E40` for timestamp 2422 in
-test builds only:
-
-1. Log/compare `getsuboffset` before animation advancement.
-2. Log the model controller and root immediately after
-   `modelTickAnimQuarterSpeed`.
-3. Log the root and returned offset immediately after `subcalcpos`.
-4. If the decoded offset first differs there, inspect address-sensitive
-   attached-head RW data and any global animation decode/cache state used by
-   `sub_GAME_7F06D490`; the body definition and skeleton have already been
-   ruled out.
-
-Do not reintroduce prop suppression or alter gameplay. Any address-lifecycle or
-serialization correction should be made in normal practice save-state code.
-
-After fixing Frigate, rerun the six-replay reproducer, then the complete hop
-test across all replays. If that passes, run `regular`, `default`, `long`,
-`cameras`, `near-end`, and `cold-restart` using the suite commands in
-`AGENTS.md`.
+Automated US replay verification is complete. Manually exercise ordinary
+save/load gameplay, especially a late guard-heavy Facility state, before the
+documentation is treated as release-final.

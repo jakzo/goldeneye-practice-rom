@@ -14,12 +14,12 @@ if [ "$DOALL" == "1" ] || [ $1 == 'files' ]; then
         if [ "$extract" == "$true" ]; then
             if [ "$compressed" == "$true" ]; then
                 echo "Extracting compressed $name, $size bytes..."
-                dd bs=1 skip=$offset count=$size if=baserom.e.z64 of="${name}.temp" status=none
+                dd if=baserom.e.z64 of="${name}.temp" iflag=skip_bytes,count_bytes skip="$offset" count="$size" status=none
     	        GZ=gzip tools/1172inflate.sh "${name}.temp" "${name}"
                 rm "${name}.temp"
             else
                 echo "Extracting uncompressed $name, $size bytes..."
-                dd bs=1 skip=$offset count=$size if=baserom.e.z64 of=$name status=none
+                dd if=baserom.e.z64 of="$name" iflag=skip_bytes,count_bytes skip="$offset" count="$size" status=none
                 echo "Successfully Extracted $name"
             fi
         else
@@ -31,4 +31,3 @@ if [ "$DOALL" == "1" ] || [ $1 == 'files' ]; then
     #formatting matters, no comments, no extra lines, unix line endings only
     #and always end with a newline
 fi
-

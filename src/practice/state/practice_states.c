@@ -173,6 +173,10 @@ static SaveSerializationResult serialize_game_state(StateStream *stream,
   }
   result.props_saved = TRUE;
 
+  /* Prop reconstruction can run navigation helpers. Preserve the mutable
+   * waypoint state after props so it can also be restored after them. */
+  save_pathfinder_state(stream);
+
   /* Flush the remaining bytes in the storage stream. */
   stream_flush(stream);
   result.size = stream->total_processed;
@@ -336,6 +340,8 @@ static s32 deserialize_game_state(StateStream *stream, bool *stream_error) {
   if (!load_global_state_post_props()) {
     return LOAD_SERIALIZATION_POST_PROPS_FAILED;
   }
+
+  load_pathfinder_state(stream);
 
   return LOAD_SERIALIZATION_OK;
 }

@@ -1477,11 +1477,16 @@ shared between character instances, so those links can point into another
 guard's body. Instead, traversal follows `Child`/`Next` and carries the correct
 writable-data base through each head placeholder.
 
-Loading first releases every current clone and restores the original vertex
-pointers, then allocates tracked replacements, copies the original vertices,
-and applies the saved alpha values. This also removes blood added after the
-save and works for recreated characters without retaining model or vertex
-pointers. A node counts as modified only when its writable vertex pointer is
-inside the tracked `0xCCCC` vertex pool; some attached-head writable slots are
-not initialized to the original vertex pointer, so pointer inequality alone
-produces false positives.
+Before any CHR records load, the props loader releases every current clone and
+restores the original vertex pointers. Same-stage loads can traverse the live
+models directly. Cross-stage loads first destroy every stale CHR model, because
+normal destruction can release its old clones, and only then reset the shared
+`0xCCCC` allocator. Resetting before teardown lets old frees corrupt the new
+pool. Individual CHR loads must not repeat the clear after that global pass.
+
+The loader then allocates tracked replacements, copies the original vertices,
+and applies the saved alpha values. This removes blood added after the save and
+works for recreated characters without retaining model or vertex pointers. A
+node counts as modified only when its writable vertex pointer is inside the
+tracked pool; some attached-head writable slots are not initialized to the
+original vertex pointer, so pointer inequality alone produces false positives.

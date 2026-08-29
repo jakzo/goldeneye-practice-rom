@@ -27,6 +27,28 @@ Add any general advice helpful for future agents working on this feature here. B
 
 - **Implement one feature at a time then manually test**: Since crashes and hangs are so common and can be unexpectedly caused by even seemingly innocuous changes, implement a small number of safe properties in the save/load code. After this, update this file and report back to the user what was added, what was learned and what they should now do in the game to test that the newly added properties are loaded correctly.
 - **Stale Pointers**: Any struct member ending in `*` (e.g., `ALSoundState *`, `ObjectRecord *`, `PropRecord *`) is an absolute memory address. If the game engine deallocates or reallocates the target object, loading a saved state that retains the old pointer will cause a crash. All such pointers must either be relocated (mapped back to correct indices) or it will not affect gameplay nullified (set to `NULL`).
+- **Cross-Stage Teardown Must Precede Allocator Reset**: After a replay/level
+  hop, prop convenience pointers can still name allocations from the previous
+  stage lifecycle even though the new stage pool is already in place. Validate
+  ownership and RDRAM range before following them, and destroy all stale CHR
+  models before resetting the shared `0xCCCC` blood-vertex allocator. Model
+  destruction normally releases blood clones; resetting first lets those old
+  frees corrupt the fresh allocator. The same rule applies to object cleanup:
+  never clear projectile/embedment fields through stale `ObjectRecord` pointers
+  after a stage hop, because their addresses can alias the new setup's AI data.
+- **Packed STAN Ends at Its Own Terminator**: `D_80040F60` is relocation
+  scratch and can point at a different STAN processed later during stage load.
+  Derive the mutable packed collision payload by walking from
+  `standTileStart + 0x80` with `list_of_tilesizes` until the eight-byte zero
+  terminator. Ignore the mutable visited bit when testing the first terminator
+  word. Saving only through the scratch pointer omitted valid Frigate tiles and
+  changed guard collision/line walks after a hop.
+- **Pathfinder Lists Are Mutable State**: AI path searches mutate waypoint and
+  waygroup distances, group assignments, neighbour lists, and waypoint lists.
+  Some searches destructively move a `-1` terminator earlier, so restoring only
+  the surviving entries leaves a permanently truncated graph. Serialize every
+  list's values and saved terminator position, then restore this state after
+  props because CHR reconstruction can invoke navigation helpers.
 - **EU Player Layout Differs After the Hand Headers**: `struct player` embeds
   two `ModelFileHeader` values before `hands`. The EU header omits the
   non-EU `isLoaded` field, so `hands` and every later player field start eight

@@ -70,7 +70,6 @@ extern struct s_darkened_light darkened_light_table[];
 extern s32 cur_entry_darkened_light_table;
 extern bg_portal_data_entry *g_BgPortals;
 extern u8 list_of_tilesizes[];
-extern StandTile *D_80040F60;
 #if !defined(VERSION_EU)
 extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 #endif
@@ -81,6 +80,7 @@ extern u8 dword_CODE_bss_8007A4E0[0xBB8];
 #define CASING_MODEL_COUNT 4
 #define DARKENED_LIGHT_TABLE_MAX 0x200
 #define BG_PORTAL_MAX 200
+#define STAN_STATE_MAX_SIZE 0x20000
 
 static ModelNode *get_model_node_by_index(ModelFileHeader *header,
                                           s16 targetIndex);
@@ -1892,6 +1892,16 @@ static void restore_player_child_object(PropRecord *prop,
       ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
   prop->obj->projectile = NULL;
 
+  /* solo_char_load records the generated hand-buffer prop in the viewer CHR.
+   * If restoration moves that allocation to the saved prop slot, keep the
+   * gameplay-facing equipment pointer in sync with the child graph. */
+  if (player_prop->chr != NULL &&
+      prop->obj->type == PROPDEF_COLLECTABLE) {
+    s32 hand =
+        (prop->obj->flags & PROPFLAG_WEAPON_LEFTHANDED) ? GUNLEFT : GUNRIGHT;
+    player_prop->chr->weapons_held[hand] = prop;
+  }
+
   if (prop->obj->model != NULL && player_prop->chr != NULL &&
       player_prop->chr->model != NULL && attachment_node_index >= 0) {
     attachment_node = get_model_node_by_index(player_prop->chr->model->obj,
@@ -2571,7 +2581,8 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
 }
 
 static bool load_object_base(StateStream *stream, ObjectRecord *obj,
-                             PropRecord *prop, s16 *attachmentNodeIdx) {
+                             PropRecord *prop, s16 *attachmentNodeIdx,
+                             u32 *switchStatesOut) {
   PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
   bool liveWasDestroyed = prop != NULL && objGetDestroyedLevel(obj) > 0;
   s16 projectileIdx;
@@ -2607,6 +2618,9 @@ static bool load_object_base(StateStream *stream, ObjectRecord *obj,
     read_u16(stream);
   }
   switchStates = read_u32(stream);
+  if (switchStatesOut != NULL) {
+    *switchStatesOut = switchStates;
+  }
 
   // Projectile and embedment occupy the same union slot. Restore only the
   // member selected by the runtime flags; writing both would overwrite the
@@ -2689,7 +2703,8 @@ static void save_compact_contained_object_base(StateStream *stream,
 
 static void load_compact_contained_object_base(StateStream *stream,
                                                ObjectRecord *obj,
-                                               PropRecord *prop) {
+                                               PropRecord *prop,
+                                               u32 *switchStatesOut) {
   PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
   u32 switchStates;
   s32 i;
@@ -2708,6 +2723,9 @@ static void load_compact_contained_object_base(StateStream *stream,
   *(u32 *)&obj->shadecol = read_u32(stream);
   *(u32 *)&obj->nextcol = read_u32(stream);
   switchStates = read_u32(stream);
+  if (switchStatesOut != NULL) {
+    *switchStatesOut = switchStates;
+  }
   obj->projectile = NULL;
 
   if (prop != NULL && obj->model != NULL && obj->model->obj != NULL) {
@@ -3474,11 +3492,96 @@ static void load_darkened_lights_state(StateStream *stream) {
  * freeing later-timeline allocations that may still be referenced by a render
  * task. bgCheckIfRoomModelNeedsLoad reuses such cached allocations, while the
  * normal room-aging pass frees unrequested ones at its safe point. */
+static u16 count_packed_stan_tiles(StandTile *first_tile) {
+  StandTile *tile = first_tile;
+  u32 size = 0;
+  u16 count = 0;
+
+  while (tile != NULL &&
+         (((*(u32 *)tile & 0x7fffffffu) != 0) || ((u32 *)tile)[1] != 0) &&
+         size < STAN_STATE_MAX_SIZE) {
+    u8 point_count = (tile->tail.half >> 12) & 0xf;
+    u8 tile_size = point_count < 12 ? list_of_tilesizes[point_count] : 0;
+
+    if (tile_size == 0 || tile_size > STAN_STATE_MAX_SIZE - size) {
+      practiceLogError("Invalid packed STAN tile at offset %x", size + 0x80);
+      assert(FALSE);
+      return 0;
+    }
+    size += tile_size;
+    if (count == 0xffff) {
+      practiceLogError("Packed STAN has too many tiles");
+      assert(FALSE);
+      return 0;
+    }
+    count++;
+    tile = (StandTile *)((u8 *)first_tile + size);
+  }
+  if (tile == NULL || size >= STAN_STATE_MAX_SIZE) {
+    practiceLogError("Packed STAN has no terminator within %x bytes",
+                     STAN_STATE_MAX_SIZE);
+    assert(FALSE);
+    return 0;
+  }
+  return count;
+}
+
+static StandTile *next_packed_stan_tile(StandTile *tile) {
+  u8 point_count = (tile->tail.half >> 12) & 0xf;
+
+  return (StandTile *)((u8 *)tile + list_of_tilesizes[point_count]);
+}
+
+static void save_stan_visited_state(StateStream *stream, StandTile *first_tile) {
+  u16 tile_count = first_tile != NULL ? count_packed_stan_tiles(first_tile) : 0;
+  StandTile *tile = first_tile;
+  u16 i;
+
+  write_u16(stream, tile_count);
+  for (i = 0; i < tile_count; i += 8) {
+    u8 visited = 0;
+    u8 bit;
+
+    for (bit = 0; bit < 8 && i + bit < tile_count; bit++) {
+      if ((*(u16 *)tile & 0x8000) != 0) {
+        visited |= 1 << bit;
+      }
+      tile = next_packed_stan_tile(tile);
+    }
+    write_u8(stream, visited);
+  }
+}
+
+static void load_stan_visited_state(StateStream *stream, StandTile *first_tile) {
+  u16 saved_tile_count = read_u16(stream);
+  u16 tile_count =
+      first_tile != NULL ? count_packed_stan_tiles(first_tile) : 0;
+  StandTile *tile = first_tile;
+  u16 i;
+
+  if (saved_tile_count != tile_count) {
+    practiceLogError("Saved STAN tile count %d does not match level (%d)",
+                     saved_tile_count, tile_count);
+    assert(FALSE);
+  }
+  for (i = 0; i < saved_tile_count; i += 8) {
+    u8 visited = read_u8(stream);
+    u8 bit;
+
+    for (bit = 0; bit < 8 && i + bit < saved_tile_count; bit++) {
+      if (i + bit < tile_count) {
+        *(u16 *)tile = (*(u16 *)tile & 0x7fff) |
+                       ((visited & (1 << bit)) != 0 ? 0x8000 : 0);
+        tile = next_packed_stan_tile(tile);
+      }
+    }
+  }
+}
+
 static void save_bg_room_cache_state(StateStream *stream) {
   StandTile *tile;
   s32 room;
   u16 portal_count = 0;
-  u32 stan_size = 0;
 
   write_u16(stream, (u16)g_MaxNumRooms);
   for (room = 0; room < g_MaxNumRooms; room++) {
@@ -3505,24 +3608,15 @@ static void save_bg_room_cache_state(StateStream *stream) {
     write_u8(stream, g_BgPortals[room].controlbytes2);
   }
 
-  /* stanFillin's point records are persistent region/topology state. Some
-   * coordinates begin as zero placeholders and are completed during gameplay;
-   * they can differ after a later stage lifecycle and affect line walks.
-   * D_80040F60 is the last packed tile found when the STAN file is relocated.
-   * Do not use a zero tile header as the terminator here: stanFillin mutates its
-   * high visited bit, so that sentinel is not stable during gameplay. */
+  /* stanFillin toggles the high visited bit in each tile ID. The remaining
+   * packed geometry and links are rebuilt deterministically by stage loading,
+   * so save the mutable bitset instead of duplicating the entire STAN. Walk
+   * the list itself because D_80040F60 is only relocation scratch and can
+   * describe another STAN processed later in the stage load. */
   tile = standTileStart != NULL
              ? (StandTile *)((u8 *)standTileStart + 0x80)
              : NULL;
-  if (tile != NULL && D_80040F60 != NULL &&
-      (u8 *)tile <= (u8 *)D_80040F60) {
-    u8 last_point_count = (D_80040F60->tail.half >> 12) & 0xf;
-
-    stan_size = (u32)((u8 *)D_80040F60 - (u8 *)tile) +
-                list_of_tilesizes[last_point_count];
-  }
-  write_u32(stream, stan_size);
-  write_bytes(stream, tile, stan_size);
+  save_stan_visited_state(stream, tile);
 }
 
 static bool bg_room_has_allocation(s32 room) {
@@ -3610,7 +3704,6 @@ static void load_bg_room_cache_state(StateStream *stream) {
   u8 field_35[MAXROOMCOUNT];
   u16 count = read_u16(stream);
   u16 bg_portal_count;
-  u32 saved_stan_size;
   s32 room;
   s32 failed_room;
 
@@ -3649,21 +3742,10 @@ static void load_bg_room_cache_state(StateStream *stream) {
     g_BgPortals[room].controlbytes2 = control2;
   }
 
-  saved_stan_size = read_u32(stream);
   tile = standTileStart != NULL
              ? (StandTile *)((u8 *)standTileStart + 0x80)
              : NULL;
-  if (saved_stan_size != 0 &&
-      (tile == NULL || D_80040F60 == NULL ||
-       (u8 *)tile > (u8 *)D_80040F60 ||
-       saved_stan_size !=
-           (u32)((u8 *)D_80040F60 - (u8 *)tile) +
-               list_of_tilesizes[(D_80040F60->tail.half >> 12) & 0xf])) {
-    practiceLogError("Saved STAN size %d does not match level", saved_stan_size);
-    assert(FALSE);
-    return;
-  }
-  read_bytes(stream, tile, saved_stan_size);
+  load_stan_visited_state(stream, tile);
 
   if (count != g_MaxNumRooms || count > MAXROOMCOUNT) {
     return;
@@ -4112,16 +4194,16 @@ static void skip_prop_data(StateStream *stream, u8 type,
     DoorRecord temp_door;
     bzero(&temp_obj, sizeof(temp_obj));
     bzero(&temp_door, sizeof(temp_door));
-    load_object_base(stream, &temp_obj, NULL, NULL);
+    load_object_base(stream, &temp_obj, NULL, NULL, NULL);
     load_door_record(stream, &temp_door);
     load_object_collision_coefficients(stream, NULL);
   } else if (type == PROP_TYPE_OBJ || type == PROP_TYPE_WEAPON) {
     TempObjectRecord temp_obj;
     bzero(&temp_obj, sizeof(temp_obj));
     if (compactContainedObject) {
-      load_compact_contained_object_base(stream, &temp_obj.base, NULL);
+      load_compact_contained_object_base(stream, &temp_obj.base, NULL, NULL);
       load_object_subtype(stream, &temp_obj.base);
-    } else if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
+    } else if (load_object_base(stream, &temp_obj.base, NULL, NULL, NULL)) {
       load_object_subtype(stream, &temp_obj.base);
     }
     load_object_collision_coefficients(stream, NULL);
@@ -4575,6 +4657,16 @@ typedef struct PendingChrAttachments {
   ChrAttachmentIndices attachments;
 } PendingChrAttachments;
 
+#define MAX_PENDING_PLAYER_OBJECTS 2
+
+typedef struct PendingPlayerObject {
+  u16 prop_index;
+  WeaponObjRecord object;
+  u32 switch_states;
+  s16 dual_prop_index;
+  u8 transferred;
+} PendingPlayerObject;
+
 static void cleanup_live_chr_children(PropRecord *chr_prop,
                                       const SavedPropLinks *savedLinks,
                                       s32 recordCount) {
@@ -4710,7 +4802,9 @@ saved_state_requires_player_model_rebuild(const SavedPropLinks *savedLinks,
 static PropRecord *find_saved_player_child(PropRecord *player_prop,
                                            PropRecord *generated_child,
                                            const SavedPropLinks *savedLinks,
-                                           s32 recordCount) {
+                                           s32 recordCount,
+                                           PendingPlayerObject *pendingObjects,
+                                           s32 pendingObjectCount) {
   s32 i;
   u16 playerIndex = get_prop_index(player_prop);
 
@@ -4719,46 +4813,86 @@ static PropRecord *find_saved_player_child(PropRecord *player_prop,
   }
 
   for (i = 0; i < recordCount; i++) {
-    PropRecord *saved_child;
+    s32 pendingIndex;
 
     if (savedLinks[i].parent != playerIndex ||
         savedLinks[i].index == get_prop_index(generated_child)) {
       continue;
     }
-    saved_child = get_prop_by_index(savedLinks[i].index);
-    if (saved_child != NULL && saved_child->obj != NULL &&
-        saved_child->obj->type == generated_child->obj->type &&
-        saved_child->obj->obj == generated_child->obj->obj) {
-      return saved_child;
+    for (pendingIndex = 0; pendingIndex < pendingObjectCount; pendingIndex++) {
+      if (pendingObjects[pendingIndex].prop_index == savedLinks[i].index &&
+          !pendingObjects[pendingIndex].transferred &&
+          ((ObjectRecord *)&pendingObjects[pendingIndex].object)->type ==
+              generated_child->obj->type &&
+          ((ObjectRecord *)&pendingObjects[pendingIndex].object)->obj ==
+              generated_child->obj->obj) {
+        return get_prop_by_index(savedLinks[i].index);
+      }
     }
   }
 
   return NULL;
 }
 
-static bool discard_generated_player_weapon(PropRecord *saved_prop,
-                                            PropRecord *generated_prop) {
-  if (saved_prop == NULL || generated_prop == NULL || saved_prop->obj == NULL ||
+static PendingPlayerObject *find_pending_player_object(
+    PendingPlayerObject *pendingObjects, s32 pendingObjectCount,
+    PropRecord *saved_prop) {
+  s32 i;
+  u16 savedIndex = get_prop_index(saved_prop);
+
+  for (i = 0; i < pendingObjectCount; i++) {
+    if (pendingObjects[i].prop_index == savedIndex) {
+      return &pendingObjects[i];
+    }
+  }
+  return NULL;
+}
+
+static bool transfer_generated_player_weapon(
+    PropRecord *saved_prop, PropRecord *generated_prop,
+    PendingPlayerObject *pendingObjects, s32 pendingObjectCount) {
+  PendingPlayerObject *pending = find_pending_player_object(
+      pendingObjects, pendingObjectCount, saved_prop);
+  ObjectRecord *generated_obj;
+  Model *generated_model;
+
+  if (saved_prop == NULL || generated_prop == NULL || pending == NULL ||
       generated_prop->obj == NULL ||
-      saved_prop->obj->type != PROPDEF_COLLECTABLE ||
+      ((ObjectRecord *)&pending->object)->type != PROPDEF_COLLECTABLE ||
       generated_prop->obj->type != PROPDEF_COLLECTABLE) {
     practiceLogError("Player child replacement is not a collectable weapon");
     assert(FALSE);
     return FALSE;
   }
 
-  /* The saved child has already been migrated out of the transient player
-   * hand buffer. solo_char_load creates a replacement child while rebuilding
-   * Bond; discard that duplicate and attach the saved pool-backed object in
-   * the final pass. Transferring the generated allocation would put the saved
-   * object back in memory which first-person weapon loading later overwrites. */
-  objFreePermanently(generated_prop->obj, TRUE);
+  /* solo_char_load has now populated the current hand buffer, so this is the
+   * same allocation the original timeline used for Bond's third-person gun.
+   * Install the serialized gameplay fields into it, then move its binding to
+   * the saved prop slot. Loading PitemZ here would create a stage-pool model
+   * which normal gameplay never allocates and can exhaust the level heap. */
+  generated_obj = generated_prop->obj;
+  generated_model = generated_obj->model;
+  *(WeaponObjRecord *)generated_obj = pending->object;
+  generated_obj->model = generated_model;
+  generated_obj->prop = saved_prop;
+
+  if (generated_prop->parent != NULL) {
+    chrpropDetach(generated_prop);
+  }
+  generated_prop->voidp = NULL;
+  clear_plain_prop(generated_prop, TRUE);
+
+  saved_prop->obj = generated_obj;
+  restore_object_model_switch_states(generated_model, pending->switch_states);
+  pending->transferred = TRUE;
   return TRUE;
 }
 
 static bool cleanup_live_player_children(PropRecord *player_prop,
                                          const SavedPropLinks *savedLinks,
-                                         s32 recordCount) {
+                                         s32 recordCount,
+                                         PendingPlayerObject *pendingObjects,
+                                         s32 pendingObjectCount) {
   PropRecord *child;
   u16 playerIndex;
 
@@ -4779,9 +4913,11 @@ static bool cleanup_live_player_children(PropRecord *player_prop,
                 child->type == PROP_TYPE_WEAPON) &&
                child->obj != NULL) {
       PropRecord *saved_child =
-          find_saved_player_child(player_prop, child, savedLinks, recordCount);
+          find_saved_player_child(player_prop, child, savedLinks, recordCount,
+                                  pendingObjects, pendingObjectCount);
       if (saved_child != NULL) {
-        if (!discard_generated_player_weapon(saved_child, child)) {
+        if (!transfer_generated_player_weapon(
+                saved_child, child, pendingObjects, pendingObjectCount)) {
           return FALSE;
         }
       } else {
@@ -4799,7 +4935,9 @@ static bool cleanup_live_player_children(PropRecord *player_prop,
 }
 
 static bool restore_saved_player_children(const SavedPropLinks *savedLinks,
-                                          s32 recordCount) {
+                                          s32 recordCount,
+                                          PendingPlayerObject *pendingObjects,
+                                          s32 pendingObjectCount) {
   s32 i;
 
   for (i = 0; i < recordCount; i++) {
@@ -4811,8 +4949,33 @@ static bool restore_saved_player_children(const SavedPropLinks *savedLinks,
 
     parent = get_prop_by_index(savedLinks[i].index);
     if (prop_is_player_or_viewer(parent)) {
-      if (!cleanup_live_player_children(parent, savedLinks, recordCount)) {
+      if (!cleanup_live_player_children(parent, savedLinks, recordCount,
+                                        pendingObjects,
+                                        pendingObjectCount)) {
         return FALSE;
+      }
+    }
+  }
+
+  for (i = 0; i < pendingObjectCount; i++) {
+    PropRecord *prop;
+    PropRecord *dual_prop;
+
+    if (!pendingObjects[i].transferred) {
+      practiceLogError("Player-buffer object %d was not regenerated",
+                       pendingObjects[i].prop_index);
+      return FALSE;
+    }
+    prop = get_prop_by_index(pendingObjects[i].prop_index);
+    dual_prop = get_prop_by_index(pendingObjects[i].dual_prop_index);
+    if (prop != NULL && prop->weapon != NULL) {
+      if (dual_prop != NULL &&
+          (dual_prop->type == PROP_TYPE_OBJ ||
+           dual_prop->type == PROP_TYPE_WEAPON) &&
+          dual_prop->weapon != NULL) {
+        prop->weapon->dualweapon = dual_prop->weapon;
+      } else {
+        prop->weapon->dualweapon = NULL;
       }
     }
   }
@@ -4892,24 +5055,31 @@ static bool load_props_state_with_scratch(
   s16 projectileObjPropIndices[PROJECTILES_ARR_MAX];
   s32 previousSavedPropIndex = -1;
   s32 pendingChrCount = 0;
+  PendingPlayerObject pendingPlayerObjects[MAX_PENDING_PLAYER_OBJECTS];
+  s32 pendingPlayerObjectCount = 0;
 
   dataStart = stream->base_address + stream->total_processed;
 
   /* Release every live blood clone before recreating or loading any CHR.
    * Loading one CHR at a time can otherwise temporarily require both the
-   * post-save and saved allocations, exhausting the shared vertex pool. */
-  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
-    PropRecord *live_prop = get_prop_by_index(i);
+   * post-save and saved allocations, exhausting the shared vertex pool.
+   * After a level hop, prop/CHR convenience pointers can still describe the
+   * previous stage's model lifecycle. Defer the pool reset until those stale
+   * models have been destroyed below. */
+  if (practice_states_save_is_from_current_stage()) {
+    for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+      PropRecord *live_prop = get_prop_by_index(i);
 
-    if (live_prop != NULL && live_prop->type == PROP_TYPE_CHR &&
-        live_prop->chr != NULL && live_prop->chr->prop == live_prop) {
-      clear_chr_model_blood_patches(live_prop->chr);
+      if (live_prop != NULL && live_prop->type == PROP_TYPE_CHR &&
+          live_prop->chr != NULL && live_prop->chr->prop == live_prop) {
+        clear_chr_model_blood_patches(live_prop->chr);
+      }
     }
+    /* The 0xCCCC vertex pool is dedicated to CHR blood patches. Reinitialize
+     * its allocation metadata after releasing every live patch so repeated
+     * state loads cannot accumulate fragmentation or duplicated allocations. */
+    reset_chr_blood_vertex_pool();
   }
-  /* The 0xCCCC vertex pool is dedicated to CHR blood patches. Reinitialize
-   * its allocation metadata after releasing every live patch so repeated
-   * state loads cannot accumulate fragmentation or duplicated allocations. */
-  reset_chr_blood_vertex_pool();
   g_NumExplosionEntries = read_u32(stream);
   g_NumSmokeEntries = read_u32(stream);
 
@@ -4935,19 +5105,27 @@ static bool load_props_state_with_scratch(
     }
   }
 
-  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
-    PropRecord *live_prop = get_prop_by_index(i);
+  /* The current level's setup records can occupy the same stage-pool
+   * addresses as ObjectRecords from the saved level. Only walk live object
+   * pointers when restoring within the same level lifecycle; after a level
+   * hop the freshly initialized projectile/embedment pools are already free,
+   * and interpreting stale convenience pointers can overwrite unrelated setup
+   * data such as AI scripts. */
+  if (practice_states_save_is_from_current_stage()) {
+    for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+      PropRecord *live_prop = get_prop_by_index(i);
 
-    if (live_prop != NULL &&
-        (live_prop->type == PROP_TYPE_OBJ ||
-         live_prop->type == PROP_TYPE_DOOR ||
-         live_prop->type == PROP_TYPE_WEAPON) &&
-        live_prop->obj != NULL &&
-        (live_prop->obj->runtime_bitflags &
-         (RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED))) {
-      live_prop->obj->projectile = NULL;
-      live_prop->obj->runtime_bitflags &=
-          ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
+      if (live_prop != NULL &&
+          (live_prop->type == PROP_TYPE_OBJ ||
+           live_prop->type == PROP_TYPE_DOOR ||
+           live_prop->type == PROP_TYPE_WEAPON) &&
+          live_prop->obj != NULL &&
+          (live_prop->obj->runtime_bitflags &
+           (RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED))) {
+        live_prop->obj->projectile = NULL;
+        live_prop->obj->runtime_bitflags &=
+            ~(RUNTIMEBITFLAG_DEPOSIT | RUNTIMEBITFLAG_EMBEDDED);
+      }
     }
   }
 
@@ -4982,7 +5160,8 @@ static bool load_props_state_with_scratch(
 
       if (live_prop != NULL && live_prop->type == PROP_TYPE_CHR &&
           live_prop->chr != NULL && live_prop->chr->prop == live_prop) {
-        if (live_prop->chr->model != NULL &&
+        if (is_rdram_range(live_prop->chr->model,
+                           sizeof(*live_prop->chr->model)) &&
             live_prop->chr->model->chr == live_prop->chr &&
             live_prop->chr->model->datas != NULL &&
             live_prop->chr->model->Type > 0 &&
@@ -4993,6 +5172,10 @@ static bool load_props_state_with_scratch(
         destroy_chr_prop(live_prop, FALSE);
       }
     }
+    /* Model destruction can release old blood clones. Reset only after every
+     * stale model is gone, otherwise those frees corrupt the new stage's pool
+     * before saved patches are allocated into it. */
+    reset_chr_blood_vertex_pool();
   }
 
   for (i = 0; i < recordCount; i++) {
@@ -5006,7 +5189,6 @@ static bool load_props_state_with_scratch(
     u8 savedPropTypeAndFlags = read_u8(stream);
     bool compactContainedObject = (savedPropTypeAndFlags & 0x80) != 0;
     u8 savedPropType = savedPropTypeAndFlags & 0x7f;
-
     u8 savedPropFlags = read_u8(stream);
     s16 savedPropTimetoregen = read_u16(stream);
     coord3d savedPropPos = {0};
@@ -5154,12 +5336,26 @@ static bool load_props_state_with_scratch(
 
     case PROP_TYPE_OBJ:
     case PROP_TYPE_WEAPON:
-      /* Third-person Bond equipment is originally allocated inside the
-       * first-person hand buffers. Always migrate it to an ordinary runtime
-       * weapon/hat record: restoring it in place leaves ObjectRecord and Model
-       * pointers in memory that the next first-person model load overwrites. */
-      if ((savedObjAllocation.setupCmdIndex == OBJ_ALLOC_PLAYER_BUFFER ||
-           !slot_matches_object(prop, savedPropType, &savedObjAllocation)) &&
+      /* Bond's third-person gun is allocated inside a first-person hand
+       * buffer, not from the stage model cache. Defer its ObjectRecord until
+       * player reconstruction has generated the current buffer allocation. */
+      if (savedObjAllocation.setupCmdIndex == OBJ_ALLOC_PLAYER_BUFFER) {
+        if (!clear_prop_for_replacement(prop)) {
+          practiceLogWarn("Cannot retain player object prop slot %d",
+                          savedPropIndex);
+          skip_prop_data(stream, savedPropType, compactContainedObject);
+          return FALSE;
+        }
+        retain_prop_from_free_list(prop);
+        prop->flags = 0;
+        prop->voidp = NULL;
+        prop->parent = NULL;
+        prop->child = NULL;
+        prop->prev = NULL;
+        prop->next = NULL;
+        prop->rooms[0] = 0xff;
+      } else if (!slot_matches_object(prop, savedPropType,
+                                      &savedObjAllocation) &&
           can_recreate_object(&savedObjAllocation)) {
         if (!clear_prop_for_replacement(prop)) {
           practiceLogWarn(
@@ -5308,7 +5504,8 @@ static bool load_props_state_with_scratch(
         return FALSE;
       }
 
-      if (!load_object_base(stream, obj, prop, &savedLinks[i].attachmentNode)) {
+      if (!load_object_base(stream, obj, prop, &savedLinks[i].attachmentNode,
+                            NULL)) {
         return FALSE;
       }
 
@@ -5359,14 +5556,48 @@ static bool load_props_state_with_scratch(
     case PROP_TYPE_WEAPON: {
       ObjectRecord *obj = prop->obj;
       if (obj == NULL) {
-        // Just skip the rest
-        TempObjectRecord temp_obj;
-        bzero(&temp_obj, sizeof(temp_obj));
-        if (compactContainedObject) {
-          load_compact_contained_object_base(stream, &temp_obj.base, NULL);
-          load_object_subtype(stream, &temp_obj.base);
-        } else if (load_object_base(stream, &temp_obj.base, NULL, NULL)) {
-          load_object_subtype(stream, &temp_obj.base);
+        if (savedLinks[i].objectWasInPlayerBuffer) {
+          PendingPlayerObject *pending;
+
+          if (pendingPlayerObjectCount >= MAX_PENDING_PLAYER_OBJECTS) {
+            practiceLogError("Too many player-buffer objects in save state");
+            return FALSE;
+          }
+          pending = &pendingPlayerObjects[pendingPlayerObjectCount++];
+          bzero(pending, sizeof(*pending));
+          pending->prop_index = savedPropIndex;
+          pending->dual_prop_index = -1;
+          if (compactContainedObject) {
+            load_compact_contained_object_base(
+                stream, (ObjectRecord *)&pending->object, NULL,
+                &pending->switch_states);
+          } else if (!load_object_base(
+                         stream, (ObjectRecord *)&pending->object, NULL,
+                         &savedLinks[i].attachmentNode,
+                         &pending->switch_states)) {
+            return FALSE;
+          }
+          if (((ObjectRecord *)&pending->object)->type !=
+              PROPDEF_COLLECTABLE) {
+            practiceLogError("Player-buffer object is not a weapon");
+            return FALSE;
+          }
+          pending->object.weaponnum = read_u8(stream);
+          pending->object.LinkedWeaponType = read_u8(stream);
+          pending->object.timer = read_u16(stream);
+          pending->dual_prop_index = (s16)read_u16(stream);
+        } else {
+          TempObjectRecord temp_obj;
+
+          bzero(&temp_obj, sizeof(temp_obj));
+          if (compactContainedObject) {
+            load_compact_contained_object_base(stream, &temp_obj.base, NULL,
+                                               NULL);
+            load_object_subtype(stream, &temp_obj.base);
+          } else if (load_object_base(stream, &temp_obj.base, NULL, NULL,
+                                      NULL)) {
+            load_object_subtype(stream, &temp_obj.base);
+          }
         }
         load_object_collision_coefficients(stream, NULL);
         break;
@@ -5388,10 +5619,10 @@ static bool load_props_state_with_scratch(
         sub_GAME_7F050DE8(obj->model);
       }
       if (compactContainedObject) {
-        load_compact_contained_object_base(stream, obj, prop);
+        load_compact_contained_object_base(stream, obj, prop, NULL);
       } else {
         if (!load_object_base(stream, obj, prop,
-                              &savedLinks[i].attachmentNode)) {
+                              &savedLinks[i].attachmentNode, NULL)) {
           return FALSE;
         }
       }
@@ -5655,7 +5886,9 @@ static bool load_props_state_with_scratch(
                                                         recordCount))) {
     return FALSE;
   }
-  if (!restore_saved_player_children(savedLinks, recordCount)) {
+  if (!restore_saved_player_children(
+          savedLinks, recordCount, pendingPlayerObjects,
+          pendingPlayerObjectCount)) {
     return FALSE;
   }
 

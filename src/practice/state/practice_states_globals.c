@@ -154,6 +154,234 @@ static u64 saved_random_seed;
 static u64 saved_chr_obj_random_seed;
 static s32 saved_player1_guard_id;
 
+static u16 count_path_waypoints(void) {
+  u16 count = 0;
+
+  if (g_CurrentSetup.pathwaypoints != NULL) {
+    while (g_CurrentSetup.pathwaypoints[count].padID >= 0) {
+      if (count == 0xffff) {
+        practiceLogError("Waypoint table is too large to save");
+        assert(FALSE);
+        return 0;
+      }
+      count++;
+    }
+  }
+  return count;
+}
+
+static u16 count_path_waygroups(void) {
+  u16 count = 0;
+
+  if (g_CurrentSetup.waypointgroups != NULL) {
+    while (g_CurrentSetup.waypointgroups[count].neighbours != NULL) {
+      if (count == 0xffff) {
+        practiceLogError("Waypoint group table is too large to save");
+        assert(FALSE);
+        return 0;
+      }
+      count++;
+    }
+  }
+  return count;
+}
+
+static u16 count_pathfinder_link_entries(s32 *entries) {
+  u16 count = 0;
+
+  if (entries == NULL) {
+    return 0xffff;
+  }
+  while (entries[count] >= 0) {
+    if (count == 0xfffe) {
+      practiceLogError("Pathfinder link list is too large to save");
+      assert(FALSE);
+      return 0xffff;
+    }
+    count++;
+  }
+  return count;
+}
+
+static void write_var_u32(StateStream *stream, u32 value) {
+  while (value >= 0x80) {
+    write_u8(stream, (u8)(value | 0x80));
+    value >>= 7;
+  }
+  write_u8(stream, (u8)value);
+}
+
+static u32 read_var_u32(StateStream *stream) {
+  u32 value = 0;
+  u32 shift;
+
+  for (shift = 0; shift < 35; shift += 7) {
+    u8 byte = read_u8(stream);
+    if (shift == 28 && (byte & 0xf0) != 0) {
+      practiceLogError("Saved variable-length integer is invalid");
+      assert(FALSE);
+      return 0;
+    }
+    value |= (u32)(byte & 0x7f) << shift;
+    if ((byte & 0x80) == 0) {
+      return value;
+    }
+  }
+
+  practiceLogError("Saved variable-length integer is too long");
+  assert(FALSE);
+  return 0;
+}
+
+static void write_var_s32(StateStream *stream, s32 value) {
+  u32 encoded = ((u32)value << 1) ^ (u32)-(value < 0);
+  write_var_u32(stream, encoded);
+}
+
+static s32 read_var_s32(StateStream *stream) {
+  u32 encoded = read_var_u32(stream);
+  return (s32)((encoded >> 1) ^ (u32)-(s32)(encoded & 1));
+}
+
+static void save_sparse_room_matrix(StateStream *stream, const Mtx *matrix) {
+  const u32 *words = (const u32 *)matrix;
+  u16 present = 0;
+  s32 word;
+
+  for (word = 0; word < 16; word++) {
+    if (words[word] != 0) {
+      present |= 1 << word;
+    }
+  }
+  write_u16(stream, present);
+  for (word = 0; word < 16; word++) {
+    if (present & (1 << word)) {
+      write_u32(stream, words[word]);
+    }
+  }
+}
+
+static void load_sparse_room_matrix(StateStream *stream, Mtx *matrix) {
+  u32 *words = (u32 *)matrix;
+  u16 present = read_u16(stream);
+  s32 word;
+
+  bzero(matrix, sizeof(*matrix));
+  for (word = 0; word < 16; word++) {
+    if (present & (1 << word)) {
+      words[word] = read_u32(stream);
+    }
+  }
+}
+
+static void save_pathfinder_links(StateStream *stream, s32 *entries) {
+  u16 count = count_pathfinder_link_entries(entries);
+  u16 i;
+
+  write_var_u32(stream, count == 0xffff ? 0 : (u32)count + 1);
+  if (count != 0xffff) {
+    for (i = 0; i < count; i++) {
+      write_var_u32(stream, (u32)entries[i]);
+    }
+  }
+}
+
+static void load_pathfinder_links(StateStream *stream, s32 *entries) {
+  u32 encoded_count = read_var_u32(stream);
+  u16 saved_count = encoded_count == 0 ? 0xffff : encoded_count - 1;
+  u16 i;
+
+  if (encoded_count > 0xffff) {
+    practiceLogError("Saved pathfinder link count is invalid (%u)",
+                     encoded_count);
+    assert(FALSE);
+    saved_count = 0;
+  }
+
+  if ((saved_count == 0xffff) != (entries == NULL)) {
+    practiceLogError("Saved pathfinder link presence does not match level");
+    assert(FALSE);
+  }
+  if (saved_count != 0xffff && entries != NULL) {
+    for (i = 0; i < saved_count; i++) {
+      entries[i] = (s32)read_var_u32(stream);
+    }
+    entries[saved_count] = -1;
+  }
+}
+
+void save_pathfinder_state(StateStream *stream) {
+  u16 waypoint_count = count_path_waypoints();
+  u16 group_count = count_path_waygroups();
+  u16 i;
+
+  write_u16(stream, waypoint_count);
+  for (i = 0; i < waypoint_count; i++) {
+    write_var_s32(stream, g_CurrentSetup.pathwaypoints[i].groupNum);
+    write_var_s32(stream, g_CurrentSetup.pathwaypoints[i].dist);
+    save_pathfinder_links(stream,
+                          g_CurrentSetup.pathwaypoints[i].neighbours);
+  }
+  write_u16(stream, group_count);
+  for (i = 0; i < group_count; i++) {
+    write_var_s32(stream, g_CurrentSetup.waypointgroups[i].dist);
+    save_pathfinder_links(stream,
+                          g_CurrentSetup.waypointgroups[i].neighbours);
+    save_pathfinder_links(stream,
+                          g_CurrentSetup.waypointgroups[i].waypoints);
+  }
+}
+
+void load_pathfinder_state(StateStream *stream) {
+  u16 saved_waypoint_count = read_u16(stream);
+  u16 waypoint_count = count_path_waypoints();
+  u16 saved_group_count;
+  u16 group_count;
+  u16 i;
+
+  if (saved_waypoint_count != waypoint_count) {
+    practiceLogError("Saved waypoint count %d does not match level (%d)",
+                     saved_waypoint_count, waypoint_count);
+    assert(FALSE);
+  }
+  for (i = 0; i < saved_waypoint_count; i++) {
+    s32 group_num = read_var_s32(stream);
+    s32 dist = read_var_s32(stream);
+
+    if (i < waypoint_count) {
+      g_CurrentSetup.pathwaypoints[i].groupNum = group_num;
+      g_CurrentSetup.pathwaypoints[i].dist = dist;
+    }
+    load_pathfinder_links(
+        stream, i < waypoint_count
+                    ? g_CurrentSetup.pathwaypoints[i].neighbours
+                    : NULL);
+  }
+
+  saved_group_count = read_u16(stream);
+  group_count = count_path_waygroups();
+  if (saved_group_count != group_count) {
+    practiceLogError("Saved waypoint group count %d does not match level (%d)",
+                     saved_group_count, group_count);
+    assert(FALSE);
+  }
+  for (i = 0; i < saved_group_count; i++) {
+    s32 dist = read_var_s32(stream);
+
+    if (i < group_count) {
+      g_CurrentSetup.waypointgroups[i].dist = dist;
+    }
+    load_pathfinder_links(
+        stream, i < group_count
+                    ? g_CurrentSetup.waypointgroups[i].neighbours
+                    : NULL);
+    load_pathfinder_links(
+        stream, i < group_count
+                    ? g_CurrentSetup.waypointgroups[i].waypoints
+                    : NULL);
+  }
+}
+
 static s32 get_camera_pad_id(PadRecord *saved_pad) {
   s32 i;
 
@@ -697,10 +925,16 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, g_ForcedDeltaFrames);
   write_u32(stream, get_cur_playernum());
   write_u32(stream, g_BgCurrentRoom);
+  if (num_visible_rooms_in_cur_global_vis_packet < 0 ||
+      num_visible_rooms_in_cur_global_vis_packet >
+          BG_VISIBLE_ROOM_LIST_LENGTH) {
+    practiceLogError("Live visible room count is invalid (%d)",
+                     num_visible_rooms_in_cur_global_vis_packet);
+    assert(FALSE);
+  }
   write_u32(stream, num_visible_rooms_in_cur_global_vis_packet);
   write_bytes(stream, list_visible_rooms_in_cur_global_vis_packet,
-              sizeof(list_visible_rooms_in_cur_global_vis_packet));
-  write_bytes(stream, roomStatusFlags, sizeof(roomStatusFlags));
+              num_visible_rooms_in_cur_global_vis_packet);
   {
     s32 matrix;
 
@@ -711,10 +945,34 @@ void save_global_state(StateStream *stream) {
                          matrix, roomIndices[matrix]);
         assert(FALSE);
       }
+      if (roomOwners[matrix] < -1 || roomOwners[matrix] > 0x7fff) {
+        practiceLogError("Live room transform owner is invalid (%d -> %d)",
+                         matrix, roomOwners[matrix]);
+        assert(FALSE);
+      }
+      if (roomStatusFlags[matrix] > 2) {
+        practiceLogError("Live room transform age is invalid (%d -> %d)",
+                         matrix, roomStatusFlags[matrix]);
+        assert(FALSE);
+      }
+    }
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix += 4) {
+      u8 packed = roomStatusFlags[matrix];
+      s32 slot;
+
+      for (slot = 1; slot < 4 && matrix + slot < ROOM_TRANSFORM_CACHE_LENGTH;
+           slot++) {
+        packed |= roomStatusFlags[matrix + slot] << (slot * 2);
+      }
+      write_u8(stream, packed);
+    }
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
+      write_var_s32(stream, roomIndices[matrix]);
+    }
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
+      write_var_s32(stream, roomOwners[matrix]);
     }
   }
-  write_bytes(stream, roomIndices, sizeof(roomIndices));
-  write_bytes(stream, roomOwners, sizeof(roomOwners));
   {
     u16 matrix_count = 0;
     s32 matrix;
@@ -728,7 +986,7 @@ void save_global_state(StateStream *stream) {
     for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
       if (roomIndices[matrix] >= 0) {
         write_u16(stream, matrix);
-        write_bytes(stream, &roomMatrices[matrix], sizeof(Mtx));
+        save_sparse_room_matrix(stream, &roomMatrices[matrix]);
       }
     }
   }
@@ -940,11 +1198,43 @@ void load_global_state_pre_props(StateStream *stream) {
   saved_current_player_index = read_u32(stream);
   g_BgCurrentRoom = read_u32(stream);
   num_visible_rooms_in_cur_global_vis_packet = read_u32(stream);
+  if (num_visible_rooms_in_cur_global_vis_packet < 0 ||
+      num_visible_rooms_in_cur_global_vis_packet >
+          BG_VISIBLE_ROOM_LIST_LENGTH) {
+    practiceLogError("Saved visible room count is invalid (%d)",
+                     num_visible_rooms_in_cur_global_vis_packet);
+    assert(FALSE);
+    return;
+  }
+  bzero(list_visible_rooms_in_cur_global_vis_packet,
+        sizeof(list_visible_rooms_in_cur_global_vis_packet));
   read_bytes(stream, list_visible_rooms_in_cur_global_vis_packet,
-             sizeof(list_visible_rooms_in_cur_global_vis_packet));
-  read_bytes(stream, roomStatusFlags, sizeof(roomStatusFlags));
-  read_bytes(stream, roomIndices, sizeof(roomIndices));
-  read_bytes(stream, roomOwners, sizeof(roomOwners));
+             num_visible_rooms_in_cur_global_vis_packet);
+  {
+    s32 matrix;
+
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix += 4) {
+      u8 packed = read_u8(stream);
+      s32 slot;
+
+      for (slot = 0; slot < 4 && matrix + slot < ROOM_TRANSFORM_CACHE_LENGTH;
+           slot++) {
+        roomStatusFlags[matrix + slot] = (packed >> (slot * 2)) & 3;
+        if (roomStatusFlags[matrix + slot] > 2) {
+          practiceLogError("Saved room transform age is invalid (%d -> %d)",
+                           matrix + slot,
+                           roomStatusFlags[matrix + slot]);
+          assert(FALSE);
+        }
+      }
+    }
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
+      roomIndices[matrix] = read_var_s32(stream);
+    }
+    for (matrix = 0; matrix < ROOM_TRANSFORM_CACHE_LENGTH; matrix++) {
+      roomOwners[matrix] = read_var_s32(stream);
+    }
+  }
   {
     s32 matrix;
     s32 room;
@@ -989,17 +1279,9 @@ void load_global_state_pre_props(StateStream *stream) {
         assert(FALSE);
         return;
       }
-      read_bytes(stream, &roomMatrices[index], sizeof(Mtx));
+      load_sparse_room_matrix(stream, &roomMatrices[index]);
     }
   }
-  if (num_visible_rooms_in_cur_global_vis_packet < 0 ||
-      num_visible_rooms_in_cur_global_vis_packet >
-          BG_VISIBLE_ROOM_LIST_LENGTH) {
-    practiceLogError("Saved visible room count is invalid (%d)",
-                     num_visible_rooms_in_cur_global_vis_packet);
-    assert(FALSE);
-  }
-
   // Alarm
   alarm_timer = read_u32(stream);
   objectiveregisters1 = read_u32(stream);

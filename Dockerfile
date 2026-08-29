@@ -29,6 +29,7 @@ CMD ["/bin/bash"]
 FROM ubuntu:22.04 AS test
 
 ARG ARES_VERSION=v148
+ARG CMAKE_VERSION=3.31.8
 ARG MIPS_BINUTILS_VERSION=2.38-1ubuntu1cross2
 ARG MIPS_GCC_META_VERSION=4:10.2.0-1
 ARG MIPS_GCC_VERSION=10.3.0-1ubuntu1cross2
@@ -58,6 +59,13 @@ RUN apt update && DEBIAN_FRONTEND=noninteractive apt -y install \
     python3 \
     xauth \
     xvfb
+
+RUN curl --fail --location --retry 3 \
+      "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz" \
+      | tar --extract --gzip --directory /opt && \
+    mv "/opt/cmake-${CMAKE_VERSION}-linux-x86_64" /opt/cmake
+
+ENV PATH="/opt/cmake/bin:${PATH}"
 
 RUN curl --fail --location --retry 3 \
       "https://github.com/ares-emulator/ares/archive/refs/tags/${ARES_VERSION}.tar.gz" \
