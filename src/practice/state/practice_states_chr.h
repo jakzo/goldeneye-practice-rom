@@ -20,6 +20,7 @@ typedef struct ChrAllocationState {
   s8 headnum;
   s8 bodynum;
   f32 heading;
+  u16 model_type;
   u16 head_record_index;
   u16 head_data_offset;
 } ChrAllocationState;
@@ -28,10 +29,16 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr);
 void load_chr_allocation_state(StateStream *stream,
                                ChrAllocationState *allocation);
 void load_chr_record(StateStream *stream, ChrRecord *chr,
-                     ChrAttachmentIndices *attachments);
+                     ChrAttachmentIndices *attachments,
+                     u32 *saved_root_data_offset);
+bool practice_states_reload_model_root_data(StateStream *stream, Model *model,
+                                            u32 saved_root_data_offset);
 void practice_states_save_model_animation(StateStream *stream,
                                           const Model *model);
 void practice_states_load_model_animation(StateStream *stream, Model *model);
+void practice_states_save_chr_model_definitions(StateStream *stream);
+bool practice_states_canonicalize_chr_model_definitions(void);
+bool practice_states_load_chr_model_definitions(StateStream *stream);
 bool practice_states_restore_model_parent_links(Model *model);
 bool practice_states_rebuild_chr_model_allocation(ChrRecord *chr);
 bool practice_states_restore_chr_model_allocation(

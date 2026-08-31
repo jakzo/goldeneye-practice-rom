@@ -1388,7 +1388,7 @@ bool load_viewer_players_state(StateStream *stream, bool force_model_rebuild) {
         assert(FALSE);
         return FALSE;
       }
-      load_chr_record(stream, viewer_chr, &attachments);
+      load_chr_record(stream, viewer_chr, &attachments, NULL);
     }
   }
 

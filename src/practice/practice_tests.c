@@ -2255,10 +2255,11 @@ void practice_tests_tick() {
 
   case STATE_TRAIN_HATCH: {
     static s32 saved_hatch_part_count;
-    static ChrRecord *test_chr;
     static WeaponObjRecord *post_save_weapon;
     static PropRecord *alias_chr_prop;
     static PropRecord *owner_chr_prop;
+    static s32 loaded_weapon_model;
+    static s32 loaded_weapon_item;
     s32 hatch_part_count = 0;
     s32 i;
 
@@ -2275,30 +2276,22 @@ void practice_tests_tick() {
     if (after_frames(30)) {
       PropRecord *prop;
 
-      test_chr = NULL;
       post_save_weapon = NULL;
       alias_chr_prop = NULL;
       owner_chr_prop = NULL;
-      for (prop = ptr_obj_pos_list_first_entry; prop != NULL;
-           prop = prop->next) {
-        if (prop->type == PROP_TYPE_CHR && prop->chr != NULL &&
-            prop->chr->weapons_held[GUNLEFT] == NULL) {
-          test_chr = prop->chr;
-          break;
-        }
-      }
-
+      loaded_weapon_model = -1;
+      loaded_weapon_item = -1;
       for (prop = ptr_obj_pos_list_first_entry;
            prop != NULL && alias_chr_prop == NULL; prop = prop->next) {
         PropRecord *other;
 
         if (prop->type != PROP_TYPE_CHR || prop->chr == NULL ||
-            prop->chr == test_chr || prop->chr->prop != prop) {
+            prop->chr->prop != prop) {
           continue;
         }
         for (other = prop->next; other != NULL; other = other->next) {
           if (other->type == PROP_TYPE_CHR && other->chr != NULL &&
-              other->chr != test_chr && other->chr->prop == other &&
+              other->chr->prop == other &&
               other->chr->bodynum == prop->chr->bodynum &&
               other->chr->headnum == prop->chr->headnum) {
             if (prop < other) {
@@ -2313,10 +2306,23 @@ void practice_tests_tick() {
         }
       }
 
+      for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+        PropRecord *weapon_prop = &pos_data_entry[i];
+
+        if (weapon_prop->type == PROP_TYPE_WEAPON &&
+            weapon_prop->weapon != NULL &&
+            weapon_prop->weapon->prop == weapon_prop &&
+            weapon_prop->weapon->model != NULL) {
+          loaded_weapon_model = weapon_prop->weapon->obj;
+          loaded_weapon_item = weapon_prop->weapon->weaponnum;
+          break;
+        }
+      }
+
       saved_hatch_part_count = hatch_part_count;
       emu_log("HATCH_PARTS_BEFORE=%d", saved_hatch_part_count);
-      if (saved_hatch_part_count == 0 || test_chr == NULL ||
-          alias_chr_prop == NULL) {
+      if (saved_hatch_part_count == 0 || alias_chr_prop == NULL ||
+          loaded_weapon_model < 0 || loaded_weapon_item < 0) {
         emu_log("TEST_FAILED");
       } else {
         emu_log("TRIGGER_SAVE");
@@ -2324,14 +2330,12 @@ void practice_tests_tick() {
         emu_log("SAVE_DONE");
       }
     } else if (after_frames(2)) {
-      PropRecord *post_save_prop = chrGiveWeapon(
-          test_chr, PROP_CHRKALASH, ITEM_AK47, PROPFLAG_WEAPON_LEFTHANDED);
+      post_save_weapon = (WeaponObjRecord *)create_new_item_instance_of_model(
+          loaded_weapon_model, loaded_weapon_item);
 
-      if (post_save_prop == NULL) {
+      if (post_save_weapon == NULL) {
         emu_log("POST_SAVE_WEAPON_NOT_CREATED");
         emu_log("TEST_FAILED");
-      } else {
-        post_save_weapon = post_save_prop->weapon;
       }
 
       // Simulate a freed prop slot retaining a stale pointer to a same-model
@@ -2358,8 +2362,7 @@ void practice_tests_tick() {
       if (hatch_part_count != saved_hatch_part_count) {
         emu_log("TEST_FAILED");
       }
-      if (test_chr->weapons_held[GUNLEFT] != NULL || post_save_weapon == NULL ||
-          post_save_weapon->prop != NULL) {
+      if (post_save_weapon == NULL || post_save_weapon->prop != NULL) {
         emu_log("POST_SAVE_WEAPON_NOT_REMOVED");
         emu_log("TEST_FAILED");
       }

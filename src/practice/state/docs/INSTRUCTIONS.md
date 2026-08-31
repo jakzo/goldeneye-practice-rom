@@ -289,6 +289,19 @@ Add any general advice helpful for future agents working on this feature here. B
   would also destroy the legitimate owner. Reusing it separates collision
   (`prop->pos`) from rendering (`model` root position), creating an invisible
   blocking guard.
+- **Character Model Definitions Are Shared Mutable State**: Body and head
+  `ModelFileHeader`/`ModelNode` definitions are shared across all CHR instances.
+  `modelAttachPart` mutates their parent/head links, RW-data indices, and
+  `numRecords`, so rebuilding guards in a different order can change the global
+  definition graph even when each instance appears valid. Serialize the exact
+  definition state and restore it only after every CHR has been allocated.
+  `Model::Type`, the `datas` allocation, attached-head record/offset, root RW
+  data, and collision bounds remain per-instance state. Never validate a saved
+  `Model::Type` against the final shared header count or re-run per-instance
+  parent-link restoration after installing the saved global indices. The model
+  pool slot must have at least the saved `Type` capacity. Finally rebuild all
+  display-list base addresses and writable pointers from the current loaded
+  body/head definitions, including hidden switch branches.
 - **Never Restore the Prop Free List From Saved Indices — Rebuild It**: Free-list entries have no saved record, so their `prev` links — which chain the free list together — are never written. Restoring `ptr_obj_pos_list_final_entry` from the saved head index therefore points the free list into stale pre-load links. `chrpropAllocate` can then hand out slots that are actually in use, corrupting the prop graph and eventually crashing. Rebuild the free list after props and attachments are restored, but do not equate disabled with free: respawning pickups are disabled while remaining on the active list, and inactive setup objects can remain bound through `obj->prop`. Serialize every active-list prop regardless of `PROPFLAG_ENABLED`; a slot is free only when it was not saved active, has no parent, and has no live CHR/object/explosion/smoke owner. The `prev`-chain integer round-trip through `get_prop_index`/`get_prop_by_index` cannot preserve a misaligned pointer, so any misalignment seen in memory is live corruption rather than saved data.
 - **Active Records Must Clear Live Parents**: Every serialized prop is reached
   through the active list and therefore had `parent == NULL` at save time. If

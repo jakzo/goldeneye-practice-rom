@@ -70,6 +70,9 @@ struct PropRecord {
 // 3D model instance representation in stage memory.
 struct Model {
   s16 unk00;
+  // Per-instance writable-data record capacity. This can differ between live
+  // instances sharing obj and must not be inferred from obj->numRecords after
+  // another character attaches a head to that shared definition.
   s16 Type;
 
   // Pointer to the character entity record.

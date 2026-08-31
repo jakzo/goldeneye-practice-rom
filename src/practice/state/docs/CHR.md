@@ -11,9 +11,13 @@ supporting structs stored in or referenced by that record.
 Every CHR payload starts with allocation metadata:
 
 ```c
-ChrAllocationState::headnum; /* Signed head model index; -1 means body-owned head. */
-ChrAllocationState::bodynum; /* Signed body model index. */
-ChrAllocationState::heading; /* Initial model Y heading in radians. */
+ChrAllocationState::slot_index;       /* Exact g_ChrSlots entry. */
+ChrAllocationState::headnum;          /* Signed head model index; -1 means body-owned head. */
+ChrAllocationState::bodynum;          /* Signed body model index. */
+ChrAllocationState::heading;          /* Initial model Y heading in radians. */
+ChrAllocationState::model_type;       /* Exact Model::Type/RW allocation capacity. */
+ChrAllocationState::head_record_index;/* Attached-head record in model->datas. */
+ChrAllocationState::head_data_offset; /* Attached head's RW-data offset. */
 ```
 
 This header is consumed before the destination `ChrRecord` exists. The current
@@ -24,6 +28,63 @@ payload fields are applied. CHRs in enabled prop slots absent from the save are
 cleaned up and released. Add/remove of props on load is now enabled for every
 prop type (see `INSTRUCTIONS.md` → Key Learnings → "Adding/Removing Props on
 Load").
+
+`slot_index` preserves identities referenced through `g_ChrSlots`; accepting
+whichever free slot the normal allocator chooses changes pointer-based CHR
+relationships even when the prop index is correct. `model_type` is the logical
+size of this particular model's writable-data allocation. It is not equivalent
+to the current shared body header's `numRecords`: attaching different heads can
+change that header, and two live instances of the same body can legitimately
+have different `Type` values. During reconstruction, free model-pool entries
+whose capacity is smaller than the saved `model_type` are temporarily excluded
+from the normal first-fit allocator. The loader then restores the exact saved
+`Type`; using a smaller allocation and merely lowering `Type` would hide an
+out-of-bounds write rather than restore the model.
+
+The head record index and offset identify the attached head inside the model
+instance's own `datas` allocation. They must be preserved independently of the
+body definition's HEAD-node `RwDataIndex`, because that index belongs to shared
+definition state and can be rewritten while another guard is reconstructed.
+The saved pair is also used to find the correct head during the final
+display-list repair without trusting whichever shared index was written last.
+
+### Shared character model definitions
+
+Character `ModelFileHeader` and `ModelNode` definitions in `c_item_entries` are
+shared by every instance of a body or head. They are not immutable after load:
+`modelAttachPart` writes the attached head into the body's HEAD placeholder,
+writes the body placeholder into the head root's `Parent`, changes definition
+RW-data indices, and affects `ModelFileHeader::numRecords`. Recreating the same
+characters in a different allocation order can therefore produce correct
+individual `Model` objects but a different global definition graph. In late
+regional replays this changed a guard from saved `Model::Type == 103` to `106`,
+then redirected display-list restoration through another guard's RW data.
+
+The save-state definition payload records every loaded character model entry's
+exact `numRecords`, root parent entry, attached child entry, and all definition
+RW-data indices in a stable traversal order. Loading follows this order:
+
+1. Recreate every CHR and allow the normal constructors to mutate definitions.
+2. Canonicalize each loaded definition once after all prop allocation settles.
+3. Reapply deferred per-instance root RW data.
+4. Restore the saved shared definition links, counts, and RW-data indices.
+5. Repair each live model's display-list RW pointers and base addresses.
+
+Do not run a per-instance parent-link traversal after step 4. Definition links
+and indices are global shared state, whereas `Model::Type`, `model->datas`, the
+head record/offset, root RW data, and `ChrRecord::collision_bounds` are
+per-instance state. Treating the saved definition count as a validity bound for
+every instance rejects valid smaller models; treating an instance's saved
+indices as definition state makes the last reconstructed guard overwrite all
+earlier guards.
+
+Display-list repair walks immutable definition relations, including hidden
+switch controls, and follows an attached head only after resolving its expected
+header in the owning model's saved RW allocation. It rebuilds every render
+node's `BaseAddr` from the currently loaded file and restores writable display
+list/collision pointers from that definition. This is required for ordinary
+prop rendering after a replay hop; suppressing prop rendering is not a valid
+substitute.
 
 The first CHR serialization slice is implemented. It restores only the
 following scalar behavior parameters:

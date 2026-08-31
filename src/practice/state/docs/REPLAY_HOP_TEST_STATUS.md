@@ -1,6 +1,6 @@
 # Cross-level replay hop test status
 
-Updated 2026-08-29. This is the handoff for save-state replay tests that keep
+Updated 2026-08-31. This is the handoff for save-state replay tests that keep
 one emulator process alive while switching between replay fixtures and stages.
 
 ## Goal
@@ -28,6 +28,27 @@ gameplay on the final serialization format:
 
 The standard US practice ROM also builds successfully after the instrumented
 suite.
+
+Regional verification after the GitHub CI failure also passes:
+
+- JP development and release test suites passed (23/23 each during the fix
+  cycle); EU release passed 24/24.
+- The final JP and EU development ROMs both build and pass
+  `STATE_TRAIN_HATCH`, restoring all 20 hatch props with normal rendering.
+- Final JP and EU release ROMs pass the focused Train hatch and Caverns
+  attachment regressions.
+- The final JP long-hop Dam replay completed all 10,650 frames with 10-second
+  save spacing, a four-frame wait, and 30 seconds of play before each load.
+- The repository's 24 Python unit tests pass.
+
+The regional Train failure was partly a test-fixture bug: it selected an
+arbitrary guard and tried to give it an AK-47 even when that weapon model was
+not resident in JP. The regression now creates a detached post-save weapon from
+an already loaded model, so prop cleanup and hatch restoration are tested
+without depending on a region-specific model set or a stale CHR alias. The
+replay failure itself was real save-state state loss in the shared character
+model definitions and per-instance model allocation; those are restored rather
+than hidden by disabling props.
 
 The current tree is usable:
 

@@ -13,6 +13,7 @@
 #include "emu_log.h"
 #include "game/lvl.h"
 #include "player.h"
+#include "practice_states_chr.h"
 #include "practice_ui.h"
 #include <snd.h>
 #include <ultra64.h>
@@ -176,6 +177,7 @@ static SaveSerializationResult serialize_game_state(StateStream *stream,
   /* Prop reconstruction can run navigation helpers. Preserve the mutable
    * waypoint state after props so it can also be restored after them. */
   save_pathfinder_state(stream);
+  practice_states_save_chr_model_definitions(stream);
 
   /* Flush the remaining bytes in the storage stream. */
   stream_flush(stream);
@@ -342,6 +344,12 @@ static s32 deserialize_game_state(StateStream *stream, bool *stream_error) {
   }
 
   load_pathfinder_state(stream);
+  if (!practice_states_load_chr_model_definitions(stream)) {
+    return LOAD_SERIALIZATION_POST_PROPS_FAILED;
+  }
+  if (!practice_states_restore_chr_model_display_lists()) {
+    return LOAD_SERIALIZATION_POST_PROPS_FAILED;
+  }
 
   return LOAD_SERIALIZATION_OK;
 }

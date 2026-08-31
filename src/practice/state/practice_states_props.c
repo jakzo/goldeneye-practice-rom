@@ -68,6 +68,7 @@ extern s32 dword_CODE_bss_80075DB0;
 extern u32 num_obj_position_data_entries;
 extern struct s_darkened_light darkened_light_table[];
 extern s32 cur_entry_darkened_light_table;
+extern s32 D_80036070;
 extern bg_portal_data_entry *g_BgPortals;
 extern u8 list_of_tilesizes[];
 #if !defined(VERSION_EU)
@@ -822,6 +823,7 @@ static PropRecord *create_chr_prop(PropRecord *prop,
   Model *model;
   PropRecord *result;
   ChrRecord *target_chr;
+  s32 allocation_index;
 
   if (prop == NULL || allocation->bodynum < 0 || allocation->slot_index < 0 ||
       allocation->slot_index >= g_NumChrSlots) {
@@ -836,8 +838,26 @@ static PropRecord *create_chr_prop(PropRecord *prop,
     return NULL;
   }
 
+  /* The normal allocator only requires enough RW data for the current model
+   * definition. Save-state reconstruction also needs the original slot's
+   * logical capacity: using a smaller pool slot would make restoring Type
+   * unsafe. Temporarily hide undersized free slots from its first-fit scan. */
+  for (allocation_index = 0; allocation_index < D_80036070;
+       allocation_index++) {
+    if (ptr_allocation_0[allocation_index].unk08 == 0 &&
+        ptr_allocation_0[allocation_index].unk10 != NULL &&
+        ptr_allocation_0[allocation_index].unk02 < allocation->model_type) {
+      ptr_allocation_0[allocation_index].unk08 = -1;
+    }
+  }
   model = retrieve_header_for_body_and_head(allocation->bodynum,
                                             allocation->headnum, 0);
+  for (allocation_index = 0; allocation_index < D_80036070;
+       allocation_index++) {
+    if (ptr_allocation_0[allocation_index].unk08 == -1) {
+      ptr_allocation_0[allocation_index].unk08 = 0;
+    }
+  }
   if (model == NULL) {
     return NULL;
   }
@@ -958,7 +978,10 @@ static bool restore_model_display_list_branch(ModelNode *node,
                                               union ModelRwData **datas,
                                               s32 rwdata_count, s32 depth,
                                               s32 *nodes_seen,
-                                              ModelFileHeader *definition) {
+                                              ModelFileHeader *definition,
+                                              ModelFileHeader *expected_head,
+                                              s32 prop_index, s32 model_id,
+                                              bool attached_head) {
   if (depth >= 64) {
     practiceLogError("Model display-list traversal is too deep");
     assert(FALSE);
@@ -1018,9 +1041,25 @@ static bool restore_model_display_list_branch(ModelNode *node,
       struct ModelRoData_DisplayList_CollisionRecord *rodata =
           &node->Data->DisplayListCollisions;
       struct ModelRwData_DisplayList_CollisionRecord *rwdata;
+      s32 first_non_root_index =
+          definition->RootNode != NULL &&
+                  (definition->RootNode->Opcode & 0xff) ==
+                      MODELNODE_OPCODE_HEADER
+              ? sizeof(ModelRwData_HeaderRecord) / sizeof(*datas)
+              : 0;
 
-      if (rodata->RwDataIndex < 0 || rodata->RwDataIndex + 1 >= rwdata_count) {
-        practiceLogError("Model display-list RW index is invalid");
+      if (rodata->RwDataIndex < first_non_root_index ||
+          rodata->RwDataIndex + 1 >= rwdata_count) {
+        if (attached_head) {
+          /* Head definitions are shared between CHRs and their mutable links
+           * can cross into another body's graph. The owning model's allocated
+           * RW block is the authoritative boundary. */
+          return TRUE;
+        }
+        practiceLogError("Model display-list RW index %d is invalid for %d "
+                         "records: prop=%d model=%d header=%08x",
+                         rodata->RwDataIndex, rwdata_count, prop_index,
+                         model_id, definition);
         assert(FALSE);
         return FALSE;
       }
@@ -1045,11 +1084,38 @@ static bool restore_model_display_list_branch(ModelNode *node,
       child = node->Data->Switch.Controls;
     } else if (opcode == MODELNODE_OPCODE_HEAD) {
       u16 index = node->Data->HeadPlaceholder.RwDataIndex;
+      ModelRwData_HeadPlaceholderRecord *head_data = NULL;
 
       child = NULL;
-      if (index + 1 < rwdata_count) {
-        ModelRwData_HeadPlaceholderRecord *head_data =
-            (ModelRwData_HeadPlaceholderRecord *)&datas[index];
+      if (expected_head != NULL) {
+        /* RwDataIndex belongs to the shared body definition, but attached-head
+         * allocation is instance state. Rebuilding another CHR can rewrite
+         * that shared index before this final display-list pass. Locate this
+         * model's saved head record by its resolved header/pointer pair so a
+         * different CHR's index cannot redirect writes into the body root. */
+        u16 candidate_index;
+
+        for (candidate_index = 0; candidate_index + 1 < rwdata_count;
+             candidate_index++) {
+          ModelRwData_HeadPlaceholderRecord *candidate =
+              (ModelRwData_HeadPlaceholderRecord *)&datas[candidate_index];
+          u32 data_start = (u32)datas;
+          u32 child_start = (u32)candidate->RwDatas;
+
+          if (candidate->ModelFileHeader == expected_head &&
+              candidate->RwDatas != NULL && child_start >= data_start &&
+              (child_start - data_start) % sizeof(*datas) == 0 &&
+              (child_start - data_start) / sizeof(*datas) <
+                  (u32)rwdata_count) {
+            index = candidate_index;
+            head_data = candidate;
+            break;
+          }
+        }
+      } else if (index + 1 < rwdata_count) {
+        head_data = (ModelRwData_HeadPlaceholderRecord *)&datas[index];
+      }
+      if (head_data != NULL) {
         u32 data_start = (u32)datas;
         u32 child_start = (u32)head_data->RwDatas;
 
@@ -1071,7 +1137,10 @@ static bool restore_model_display_list_branch(ModelNode *node,
     if (child != NULL &&
         !restore_model_display_list_branch(child, child_datas,
                                            child_rwdata_count, depth + 1,
-                                           nodes_seen, child_definition)) {
+                                           nodes_seen, child_definition, NULL,
+                                           prop_index, model_id,
+                                           attached_head ||
+                                               opcode == MODELNODE_OPCODE_HEAD)) {
       return FALSE;
     }
     node = node->Next;
@@ -1080,19 +1149,55 @@ static bool restore_model_display_list_branch(ModelNode *node,
   return TRUE;
 }
 
-static bool restore_model_display_lists(Model *model) {
+static bool restore_model_display_lists(Model *model, s32 prop_index,
+                                        s32 model_id) {
   s32 nodes_seen = 0;
   s32 rwdata_count;
+  ModelFileHeader *expected_head = NULL;
+  bool restored;
 
   if (model == NULL || model->obj == NULL || model->datas == NULL ||
       model->obj->RootNode == NULL) {
     return FALSE;
   }
 
+  if (model->chr != NULL && model->chr->headnum >= 0 &&
+      !c_item_entries[model->chr->bodynum].hasHead) {
+    expected_head = c_item_entries[model->chr->headnum].header;
+  }
+
   rwdata_count = model->Type > 0 ? model->Type : model->obj->numRecords;
-  return restore_model_display_list_branch(model->obj->RootNode, model->datas,
-                                           rwdata_count, 0, &nodes_seen,
-                                           model->obj);
+  restored = restore_model_display_list_branch(
+      model->obj->RootNode, model->datas, rwdata_count, 0, &nodes_seen,
+      model->obj, expected_head, prop_index, model_id, FALSE);
+  if (!restored) {
+    practiceLogError("Model display-list restore failed: prop=%d model=%d "
+                     "rw_count=%d header=%08x",
+                     prop_index, model_id, rwdata_count, model->obj);
+    assert(FALSE);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+bool practice_states_restore_chr_model_display_lists(void) {
+  s32 i;
+  for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+    PropRecord *prop = get_prop_by_index(i);
+    Model *model = NULL;
+
+    if (prop != NULL &&
+        (prop->type == PROP_TYPE_CHR || prop->type == PROP_TYPE_PLAYER ||
+         prop->type == PROP_TYPE_VIEWER) &&
+        prop->chr != NULL && prop->chr->prop == prop) {
+      model = prop->chr->model;
+    }
+    if (model != NULL && model->obj != NULL && model->datas != NULL &&
+        !restore_model_display_lists(model, i, -1)) {
+      return FALSE;
+    }
+  }
+  return TRUE;
 }
 
 // Recreate an object/weapon prop in its exact saved slot. Level-defined objects
@@ -4218,7 +4323,7 @@ static void skip_prop_data(StateStream *stream, u8 type,
   } else if (type == PROP_TYPE_CHR) {
     ChrRecord temp_chr;
     bzero(&temp_chr, sizeof(temp_chr));
-    load_chr_record(stream, &temp_chr, NULL);
+    load_chr_record(stream, &temp_chr, NULL, NULL);
   }
 }
 
@@ -4655,6 +4760,7 @@ bool save_props_state(StateStream *stream) {
 typedef struct PendingChrAttachments {
   u16 prop_index;
   ChrAttachmentIndices attachments;
+  u32 root_data_offset;
 } PendingChrAttachments;
 
 #define MAX_PENDING_PLAYER_OBJECTS 2
@@ -5218,7 +5324,6 @@ static bool load_props_state_with_scratch(
                             savedPropType == PROP_TYPE_OBJ ||
                             savedPropType == PROP_TYPE_WEAPON;
     bool createdObjProp = FALSE;
-    bool createdChrProp = FALSE;
     bool shouldRegisterObjectRooms = FALSE;
     u8 savedEffectBufferIndex = 0xff;
 
@@ -5331,7 +5436,6 @@ static bool load_props_state_with_scratch(
         skip_prop_data(stream, savedPropType, compactContainedObject);
         return FALSE;
       }
-      createdChrProp = TRUE;
       break;
 
     case PROP_TYPE_OBJ:
@@ -5684,17 +5788,17 @@ static bool load_props_state_with_scratch(
         }
         prop->chr->headnum = savedChrAllocation.headnum;
         prop->chr->bodynum = savedChrAllocation.bodynum;
-        if (!(createdChrProp
-                  ? TRUE
-                  : practice_states_restore_chr_model_allocation(
-                        prop->chr, &savedChrAllocation))) {
+        if (!practice_states_restore_chr_model_allocation(
+                prop->chr, &savedChrAllocation)) {
           return FALSE;
         }
         load_chr_prop_spatial_state(prop, &savedPropPos, savedPropStanOffset,
                                     savedPropRooms);
         pendingChrAttachments[pendingChrCount].prop_index = savedPropIndex;
-        load_chr_record(stream, prop->chr,
-                        &pendingChrAttachments[pendingChrCount].attachments);
+        load_chr_record(
+            stream, prop->chr,
+            &pendingChrAttachments[pendingChrCount].attachments,
+            &pendingChrAttachments[pendingChrCount].root_data_offset);
         pendingChrCount++;
       }
       break;
@@ -5923,8 +6027,17 @@ static bool load_props_state_with_scratch(
       model = prop->chr->model;
     }
 
-    if (model != NULL && model->obj != NULL && model->datas != NULL &&
-        !restore_model_display_lists(model)) {
+    if (model != NULL && model->chr == NULL && model->obj != NULL &&
+        model->datas != NULL &&
+        !restore_model_display_lists(
+            model, savedLinks[i].index,
+            prop != NULL &&
+                    (prop->type == PROP_TYPE_OBJ ||
+                     prop->type == PROP_TYPE_DOOR ||
+                     prop->type == PROP_TYPE_WEAPON) &&
+                    prop->obj != NULL
+                ? prop->obj->obj
+                : -1)) {
       practiceLogWarn("Could not restore model display lists at prop slot %d",
                       savedLinks[i].index);
       return FALSE;
@@ -6066,6 +6179,27 @@ static bool load_props_state_with_scratch(
       }
       command += sizepropdef(pdef);
       setup_index++;
+    }
+  }
+
+  /* Later CHR/model reconstruction can initialize a display-list RW record
+   * through a temporarily stale shared index, overwriting the already-loaded
+   * root header. Reapply the exact saved root only after every prop and model
+   * allocation has settled; shared definitions and display lists are repaired
+   * immediately after this function returns. */
+  if (!practice_states_canonicalize_chr_model_definitions()) {
+    return FALSE;
+  }
+  for (i = 0; i < pendingChrCount; i++) {
+    PropRecord *prop =
+        get_prop_by_index(pendingChrAttachments[i].prop_index);
+
+    if (pendingChrAttachments[i].root_data_offset != 0 && prop != NULL &&
+        prop->chr != NULL &&
+        !practice_states_reload_model_root_data(
+            stream, prop->chr->model,
+            pendingChrAttachments[i].root_data_offset)) {
+      return FALSE;
     }
   }
 

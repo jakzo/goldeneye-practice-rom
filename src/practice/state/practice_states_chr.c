@@ -1328,6 +1328,323 @@ static bool restore_model_file_definition(ModelFileHeader *header) {
                                         &nodes_seen);
 }
 
+static s32 chr_model_entry_count(void) {
+  s32 count = 0;
+
+  while (count < 255 && c_item_entries[count].header != NULL) {
+    count++;
+  }
+  if (count >= 255) {
+    practiceLogError("Character model table is too large");
+    assert(FALSE);
+    return 0;
+  }
+  return count;
+}
+
+static s32 find_chr_model_parent_entry(ModelNode *parent, s32 count) {
+  s32 i;
+
+  if (parent == NULL) {
+    return -1;
+  }
+  for (i = 0; i < count; i++) {
+    ModelFileHeader *header = c_item_entries[i].header;
+
+    if (header->RootNode != NULL && header->Switches != NULL &&
+        header->numSwitches > 4 && header->Switches[4] != NULL &&
+        (header->Switches[4]->Opcode & 0xff) == MODELNODE_OPCODE_HEAD &&
+        header->Switches[4] == parent) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static u16 *model_definition_rw_index(ModelNode *node) {
+  switch (node->Opcode & 0xff) {
+  case MODELNODE_OPCODE_HEADER:
+    return &node->Data->Header.RwDataIndex;
+  case MODELNODE_OPCODE_OP07:
+    return &node->Data->Op07.RwDataIndex;
+  case MODELNODE_OPCODE_LOD:
+    return &node->Data->LOD.RwDataIndex;
+  case MODELNODE_OPCODE_SWITCH:
+    return &node->Data->Switch.RwDataIndex;
+  case MODELNODE_OPCODE_BSP:
+    return &node->Data->BSP.RwDataIndex;
+  case MODELNODE_OPCODE_OP11:
+    return &node->Data->Op11.RwDataIndex;
+  case MODELNODE_OPCODE_GUNFIRE:
+    return &node->Data->Gunfire.RwDataIndex;
+  case MODELNODE_OPCODE_HEAD:
+    return &node->Data->HeadPlaceholder.RwDataIndex;
+  case MODELNODE_OPCODE_DLCOLLISION:
+    return &node->Data->DisplayListCollisions.RwDataIndex;
+  default:
+    return NULL;
+  }
+}
+
+/* Visit a definition's own nodes in a stable order. Rendering can reorder BSP
+ * child chains and can attach another definition below a HEAD node, so neither
+ * the live Child pointers nor the live sibling order are sufficient here. */
+static bool visit_model_definition_rw_indices(
+    ModelNode *node, ModelNode *stop, StateStream *stream, bool save,
+    u16 *index_count, s32 depth, s32 *nodes_seen) {
+  if (depth >= 64) {
+    practiceLogError("Model RW-index traversal exceeded depth limit");
+    assert(FALSE);
+    return FALSE;
+  }
+
+  while (node != NULL && node != stop) {
+    ModelNode *child = node->Child;
+    u16 *rw_index;
+    u8 opcode;
+
+    if (++(*nodes_seen) > MAX_MODEL_TRAVERSAL_NODES || node->Data == NULL) {
+      practiceLogError("Model RW-index traversal found an invalid graph");
+      assert(FALSE);
+      return FALSE;
+    }
+
+    opcode = node->Opcode & 0xff;
+    rw_index = model_definition_rw_index(node);
+    if (rw_index != NULL) {
+      if (stream != NULL) {
+        if (save) {
+          write_u16(stream, *rw_index);
+        } else {
+          *rw_index = read_u16(stream);
+        }
+      }
+      (*index_count)++;
+    }
+
+    if (opcode == MODELNODE_OPCODE_BSP) {
+      ModelNode *left = node->Data->BSP.leftChild;
+      ModelNode *right = node->Data->BSP.rightChild;
+
+      if (!visit_model_definition_rw_indices(
+              right, left, stream, save, index_count, depth + 1,
+              nodes_seen) ||
+          !visit_model_definition_rw_indices(
+              left, right, stream, save, index_count, depth + 1,
+              nodes_seen)) {
+        return FALSE;
+      }
+      child = NULL;
+    } else if (opcode == MODELNODE_OPCODE_LOD) {
+      child = node->Data->LOD.Affects;
+    } else if (opcode == MODELNODE_OPCODE_SWITCH) {
+      child = node->Data->Switch.Controls;
+    } else if (opcode == MODELNODE_OPCODE_HEAD) {
+      child = NULL;
+    }
+
+    if (child != NULL &&
+        !visit_model_definition_rw_indices(
+            child, NULL, stream, save, index_count, depth + 1, nodes_seen)) {
+      return FALSE;
+    }
+    node = node->Next;
+  }
+  return TRUE;
+}
+
+static bool count_model_definition_rw_indices(ModelFileHeader *header,
+                                              u16 *index_count) {
+  s32 nodes_seen = 0;
+
+  *index_count = 0;
+  return header != NULL && header->RootNode != NULL &&
+         visit_model_definition_rw_indices(
+             header->RootNode, NULL, NULL, FALSE, index_count, 0,
+             &nodes_seen);
+}
+
+static bool stream_model_definition_rw_indices(ModelFileHeader *header,
+                                               StateStream *stream,
+                                               bool save,
+                                               u16 expected_count) {
+  s32 nodes_seen = 0;
+  u16 actual_count = 0;
+
+  if (!count_model_definition_rw_indices(header, &actual_count) ||
+      actual_count != expected_count) {
+    practiceLogError("Character model RW-index count changed (%d != %d)",
+                     actual_count, expected_count);
+    assert(FALSE);
+    return FALSE;
+  }
+
+  actual_count = 0;
+  return visit_model_definition_rw_indices(
+      header->RootNode, NULL, stream, save, &actual_count, 0, &nodes_seen);
+}
+
+/* modelAttachPart writes the attached head into shared body definitions and
+ * writes the body placeholder back into shared head definitions. Recreating
+ * the same CHRs in another allocation order can therefore leave a different
+ * global graph even when every Model instance is correct. Preserve the final
+ * owner links and record counts that ordinary gameplay had at save time. */
+void practice_states_save_chr_model_definitions(StateStream *stream) {
+  s32 count = chr_model_entry_count();
+  s32 loaded_count = 0;
+  s32 i;
+
+  for (i = 0; i < count; i++) {
+    if (c_item_entries[i].header->RootNode != NULL) {
+      loaded_count++;
+    }
+  }
+  write_u8(stream, loaded_count);
+  for (i = 0; i < count; i++) {
+    ModelFileHeader *header = c_item_entries[i].header;
+    ModelNode *head_node;
+    s32 parent_entry;
+    s32 child_entry = -1;
+    u16 rw_index_count;
+
+    if (header->RootNode == NULL) {
+      continue;
+    }
+    parent_entry =
+        find_chr_model_parent_entry(header->RootNode->Parent, count);
+    if (header->RootNode->Parent != NULL && parent_entry < 0) {
+      practiceLogError("Character model %d has an unknown definition parent",
+                       i);
+      assert(FALSE);
+    }
+    head_node = header->Switches != NULL && header->numSwitches > 4
+                    ? header->Switches[4]
+                    : NULL;
+    if (head_node != NULL && head_node->Data != NULL &&
+        (head_node->Opcode & 0xff) == MODELNODE_OPCODE_HEAD) {
+      if (head_node->Child != NULL) {
+        s32 j;
+
+        child_entry = -1;
+        for (j = 0; j < count; j++) {
+          if (c_item_entries[j].header->RootNode == head_node->Child) {
+            child_entry = j;
+            break;
+          }
+        }
+        if (child_entry < 0) {
+          practiceLogError("Character model %d has an unknown attached head",
+                           i);
+          assert(FALSE);
+        }
+      }
+    }
+    write_u8(stream, i);
+    write_u16(stream, header->numRecords);
+    write_u8(stream, parent_entry >= 0 ? parent_entry : 0xff);
+    write_u8(stream, child_entry >= 0 ? child_entry : 0xff);
+    if (!count_model_definition_rw_indices(header, &rw_index_count)) {
+      rw_index_count = 0;
+    }
+    write_u16(stream, rw_index_count);
+    stream_model_definition_rw_indices(header, stream, TRUE,
+                                       rw_index_count);
+  }
+}
+
+bool practice_states_canonicalize_chr_model_definitions(void) {
+  s32 count = chr_model_entry_count();
+  s32 i;
+
+  if (count == 0) {
+    return FALSE;
+  }
+  /* Character reconstruction mutates the shared node graph and its RW-data
+   * indices once per allocated model. Rebuild every loaded definition once,
+   * after all props exist, so the final shared indices are canonical before
+   * any CHR display-list RW data is repaired. */
+  for (i = 0; i < count; i++) {
+    ModelFileHeader *header = c_item_entries[i].header;
+
+    if (header->RootNode != NULL) {
+      if (!restore_model_file_definition(header)) {
+        practiceLogError("Could not rebuild character model definition %d", i);
+        assert(FALSE);
+        return FALSE;
+      }
+      modelCalculateRwDataLen(header);
+    }
+  }
+  return TRUE;
+}
+
+bool practice_states_load_chr_model_definitions(StateStream *stream) {
+  s32 count = chr_model_entry_count();
+  u8 saved_count = read_u8(stream);
+  s32 i;
+
+  if (!practice_states_canonicalize_chr_model_definitions()) {
+    return FALSE;
+  }
+  for (i = 0; i < saved_count; i++) {
+    u8 entry = read_u8(stream);
+    u16 num_records = read_u16(stream);
+    u8 parent_entry = read_u8(stream);
+    u8 child_entry = read_u8(stream);
+    u16 rw_index_count = read_u16(stream);
+    ModelFileHeader *header;
+    ModelNode *node;
+    ModelNode *parent = NULL;
+
+    if (entry >= count || (parent_entry != 0xff && parent_entry >= count) ||
+        (child_entry != 0xff && child_entry >= count)) {
+      practiceLogError("Saved character model definition index is invalid");
+      assert(FALSE);
+      return FALSE;
+    }
+    header = c_item_entries[entry].header;
+    if (header->RootNode == NULL) {
+      practiceLogError("Saved character model %d is not loaded", entry);
+      assert(FALSE);
+      return FALSE;
+    }
+    if (parent_entry != 0xff) {
+      ModelFileHeader *parent_header = c_item_entries[parent_entry].header;
+
+      if (parent_header->RootNode == NULL || parent_header->Switches == NULL ||
+          parent_header->numSwitches <= 4 ||
+          parent_header->Switches[4] == NULL) {
+        practiceLogError("Saved character model parent %d is invalid",
+                         parent_entry);
+        assert(FALSE);
+        return FALSE;
+      }
+      parent = parent_header->Switches[4];
+    }
+    header->numRecords = num_records;
+    for (node = header->RootNode; node != NULL; node = node->Next) {
+      node->Parent = parent;
+    }
+    if (header->Switches != NULL && header->numSwitches > 4 &&
+        header->Switches[4] != NULL && header->Switches[4]->Data != NULL &&
+        (header->Switches[4]->Opcode & 0xff) == MODELNODE_OPCODE_HEAD) {
+      header->Switches[4]->Child =
+          child_entry != 0xff ? c_item_entries[child_entry].header->RootNode
+                              : NULL;
+    } else if (child_entry != 0xff) {
+      practiceLogError("Saved character model child %d has no placeholder",
+                       entry);
+      assert(FALSE);
+      return FALSE;
+    }
+    if (!stream_model_definition_rw_indices(header, stream, FALSE,
+                                            rw_index_count)) {
+      return FALSE;
+    }
+  }
+  return TRUE;
+}
+
 bool practice_states_rebuild_chr_model_allocation(ChrRecord *chr) {
   Model *model;
   ModelFileHeader *body_header;
@@ -1373,7 +1690,9 @@ bool practice_states_rebuild_chr_model_allocation(ChrRecord *chr) {
 
 bool practice_states_restore_chr_model_allocation(
     ChrRecord *chr, const ChrAllocationState *allocation) {
+  ModelFileHeader *body_header;
   Model *model;
+  s32 allocated_type;
 
   if (chr == NULL || allocation == NULL || allocation->bodynum < 0 ||
       chr->bodynum != allocation->bodynum ||
@@ -1387,16 +1706,44 @@ bool practice_states_restore_chr_model_allocation(
       model->datas == NULL || model->Type <= 0) {
     return FALSE;
   }
+  body_header = model->obj;
+  allocated_type = model->Type;
+  /* ModelFileHeader::numRecords is shared definition state. Attaching a head
+   * for another CHR can change it to that other instance's combined size, so
+   * it is not a valid bound for this model. The saved Type and explicit head
+   * offsets below describe this instance's actual allocation. */
+  if (allocation->model_type == 0 || allocation->model_type > allocated_type) {
+    return FALSE;
+  }
+
+  /* Each model definition is global and modelAttachHead rewrites its RW-data
+   * indices for the most recently attached instance. Rebuild the body alone,
+   * and the selected head alone below, before interpreting this model's saved
+   * data. Their canonical indices are relative to the corresponding instance
+   * data blocks and do not inherit another guard's head size. */
+  if (!restore_model_file_definition(body_header)) {
+    return FALSE;
+  }
+  modelCalculateRwDataLen(body_header);
+  if (body_header->numRecords > allocation->model_type) {
+    return FALSE;
+  }
 
   if (allocation->headnum >= 0 &&
       !c_item_entries[allocation->bodynum].hasHead) {
+    ModelFileHeader *head_header = c_item_entries[allocation->headnum].header;
     ModelNode *head_node;
     ModelRwData_HeadPlaceholderRecord *head_data;
 
+    if (!restore_model_file_definition(head_header)) {
+      return FALSE;
+    }
+    modelCalculateRwDataLen(head_header);
+
     if (allocation->head_record_index == 0xffff ||
         allocation->head_data_offset == 0xffff ||
-        allocation->head_record_index + 1 >= model->Type ||
-        allocation->head_data_offset >= model->Type ||
+        allocation->head_record_index + 1 >= allocation->model_type ||
+        allocation->head_data_offset >= allocation->model_type ||
         model->obj->Switches == NULL || model->obj->numSwitches <= 4 ||
         model->obj->Switches[4] == NULL ||
         model->obj->Switches[4]->Data == NULL) {
@@ -1411,11 +1758,23 @@ bool practice_states_restore_chr_model_allocation(
         allocation->head_record_index;
     head_data = (ModelRwData_HeadPlaceholderRecord *)&model
                     ->datas[allocation->head_record_index];
-    head_data->ModelFileHeader = c_item_entries[allocation->headnum].header;
+    /* The shared head definition's freshly calculated numRecords can be
+     * larger than this instance's saved head span. Its exact saved RW indices
+     * are restored after all CHRs have been rebuilt, so the saved model Type
+     * and head offset are the authoritative per-instance bounds here. */
+    head_data->ModelFileHeader = head_header;
     head_data->RwDatas = &model->datas[allocation->head_data_offset];
   }
 
-  return practice_states_restore_model_parent_links(model);
+  /* Pool slots can be larger than the allocation which existed when the state
+   * was saved. Model traversal treats Type as the authoritative end of the
+   * instance graph, so retain that exact logical bound after reconstruction. */
+  model->Type = allocation->model_type;
+  /* Shared definition RW indices are still canonical reconstruction values
+   * here and can exceed this instance's saved head span. Their links and exact
+   * indices are restored globally after every CHR has been reconstructed; do
+   * not traverse them as though they were private to this instance. */
+  return TRUE;
 }
 
 static s32 count_model_rw_scalars(ModelNode *node, s32 depth) {
@@ -1575,12 +1934,17 @@ void practice_states_save_model_animation(StateStream *stream,
   }
 }
 
-void practice_states_load_model_animation(StateStream *stream, Model *model) {
+static void practice_states_load_model_animation_internal(
+    StateStream *stream, Model *model, u32 *saved_root_data_offset) {
   SavedModelAnimation saved;
   ModelRwData_HeaderRecord root_data;
 
   read_animation_zero_rle(stream, (u8 *)&saved, sizeof(saved));
   if (saved.has_root_data) {
+    if (saved_root_data_offset != NULL) {
+      *saved_root_data_offset =
+          stream->base_address + stream->total_processed;
+    }
     read_animation_zero_rle(stream, (u8 *)&root_data, sizeof(root_data));
   }
 
@@ -1666,6 +2030,31 @@ void practice_states_load_model_animation(StateStream *stream, Model *model) {
                                                        model->obj->RootNode);
     *dst = root_data;
   }
+}
+
+void practice_states_load_model_animation(StateStream *stream, Model *model) {
+  practice_states_load_model_animation_internal(stream, model, NULL);
+}
+
+bool practice_states_reload_model_root_data(StateStream *stream, Model *model,
+                                            u32 saved_root_data_offset) {
+  ModelRwData_HeaderRecord root_data;
+  u32 resume_offset;
+
+  if (stream == NULL || model == NULL || model->obj == NULL ||
+      model->datas == NULL || model->obj->RootNode == NULL ||
+      (model->obj->RootNode->Opcode & 0xff) != MODELNODE_OPCODE_HEADER ||
+      saved_root_data_offset == 0) {
+    return FALSE;
+  }
+
+  resume_offset = stream->base_address + stream->total_processed;
+  stream_seek(stream, saved_root_data_offset);
+  read_animation_zero_rle(stream, (u8 *)&root_data, sizeof(root_data));
+  stream_seek(stream, resume_offset);
+  *(ModelRwData_HeaderRecord *)modelGetNodeRwData(
+      model, model->obj->RootNode) = root_data;
+  return TRUE;
 }
 
 typedef struct ModelBloodNode {
@@ -2019,6 +2408,9 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_u8(stream, (u8)chr->headnum);
   write_u8(stream, (u8)chr->bodynum);
   write_f32(stream, model_heading);
+  write_u16(stream, chr->model != NULL && chr->model->Type > 0
+                        ? (u16)chr->model->Type
+                        : 0);
   write_u16(stream, head_record_index);
   write_u16(stream, head_data_offset);
 
@@ -2067,6 +2459,7 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   write_u8(stream, chr->firecount[0]);
   write_u8(stream, chr->firecount[1]);
   write_u8(stream, (u8)chr->aimendcount);
+  write_bytes(stream, &chr->collision_bounds, sizeof(chr->collision_bounds));
   write_f32(stream, chr->aimuplshoulder);
   write_f32(stream, chr->aimuprshoulder);
   write_f32(stream, chr->aimupback);
@@ -2166,12 +2559,14 @@ void load_chr_allocation_state(StateStream *stream,
   allocation->headnum = (s8)read_u8(stream);
   allocation->bodynum = (s8)read_u8(stream);
   allocation->heading = normalize_chr_heading(read_f32(stream));
+  allocation->model_type = read_u16(stream);
   allocation->head_record_index = read_u16(stream);
   allocation->head_data_offset = read_u16(stream);
 }
 
 void load_chr_record(StateStream *stream, ChrRecord *chr,
-                     ChrAttachmentIndices *attachments) {
+                     ChrAttachmentIndices *attachments,
+                     u32 *saved_root_data_offset) {
   StateStream *storage_stream = stream;
   ChrCommonStream common_stream;
   s32 ailist_reference;
@@ -2182,6 +2577,10 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   s16 weapon_indices[3];
   s16 hat_index;
   s32 hand;
+
+  if (saved_root_data_offset != NULL) {
+    *saved_root_data_offset = 0;
+  }
 
   clear_chr_transient_joint_list(chr);
 
@@ -2238,6 +2637,7 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   chr->firecount[0] = read_u8(stream);
   chr->firecount[1] = read_u8(stream);
   chr->aimendcount = (s8)read_u8(stream);
+  read_bytes(stream, &chr->collision_bounds, sizeof(chr->collision_bounds));
   chr->aimuplshoulder = read_f32(stream);
   chr->aimuprshoulder = read_f32(stream);
   chr->aimupback = read_f32(stream);
@@ -2292,8 +2692,8 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
   if (read_u8(stream)) {
     load_supported_action(stream, chr);
     if (read_u8(stream)) {
-      practice_states_load_model_animation(stream,
-                                           chr != NULL ? chr->model : NULL);
+      practice_states_load_model_animation_internal(
+          stream, chr != NULL ? chr->model : NULL, saved_root_data_offset);
       loaded_model_animation = TRUE;
     }
   }

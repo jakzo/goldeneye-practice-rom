@@ -14,8 +14,10 @@ class SelectProfileCaptureTest(unittest.TestCase):
             newer = Path(f"{output_prefix}-001-game-frames.csv")
             older.write_text("frame\n", encoding="utf-8")
             newer.write_text("frame\n", encoding="utf-8")
-            os.utime(older, ns=(1, 1))
-            os.utime(newer, ns=(2, 2))
+            # Use whole-second timestamps: Windows filesystems may round
+            # nanosecond values closely enough that 1ns and 2ns compare equal.
+            os.utime(older, ns=(1_000_000_000, 1_000_000_000))
+            os.utime(newer, ns=(2_000_000_000, 2_000_000_000))
 
             self.assertEqual(
                 select_profile_capture(output_prefix),
