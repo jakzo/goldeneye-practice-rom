@@ -23,10 +23,10 @@ WARNING_PREFIX = "WARN: "
 ERROR_PREFIX = "ERROR: "
 DEFAULT_TEST_TIMEOUT_SECONDS = 90
 # Headed ares may spend several minutes compiling a new level's Metal/Vulkan
-# pipelines before the ROM emits another replay marker. Keep the fast default
-# for CI while allowing headed runs to account for that driver work.
+# pipelines before the ROM emits another replay marker. Native Windows stage
+# transitions can also exceed two minutes while Ares remains responsive.
 REPLAY_STATUS_TIMEOUT_SECONDS = int(
-    os.environ.get("PRACTICE_REPLAY_STATUS_TIMEOUT", "30")
+    os.environ.get("PRACTICE_REPLAY_STATUS_TIMEOUT", "300")
 )
 MINIMUM_TEST_TIMEOUT_SECONDS = {
     "FIRE_SLOWMO": 180,
@@ -746,6 +746,12 @@ def run_test(
                 "REPLAY_STARTED" in line or "REPLAY_STATUS" in line
             ):
                 replay_started = True
+                deadline = time.monotonic() + REPLAY_STATUS_TIMEOUT_SECONDS
+            elif replay_test and line.startswith("RUNWAY_STATE_DATA "):
+                # Cold-restart tests emit the complete state through the debug
+                # channel before the next replay status marker. Large states can
+                # take longer than the gameplay watchdog while still making
+                # steady progress, especially with a native Windows emulator.
                 deadline = time.monotonic() + REPLAY_STATUS_TIMEOUT_SECONDS
             if line.startswith(WARNING_PREFIX) or line.startswith(ERROR_PREFIX):
                 return False, line.strip(), "".join(output)

@@ -36,6 +36,8 @@ bool practice_states_reload_model_root_data(StateStream *stream, Model *model,
 void practice_states_save_model_animation(StateStream *stream,
                                           const Model *model);
 void practice_states_load_model_animation(StateStream *stream, Model *model);
+void practice_states_save_animation_frame_buffer(StateStream *stream);
+void practice_states_load_animation_frame_buffer(StateStream *stream);
 void practice_states_save_chr_model_definitions(StateStream *stream);
 bool practice_states_canonicalize_chr_model_definitions(void);
 bool practice_states_load_chr_model_definitions(StateStream *stream);

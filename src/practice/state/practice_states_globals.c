@@ -859,6 +859,7 @@ void save_global_state(StateStream *stream) {
   write_u32(stream, g_GlobalTimer);
   write_u32(stream, g_ClockTimer);
   write_f32(stream, g_GlobalTimerDelta);
+  write_f32(stream, g_FractionalClockTimerAcc);
 #if defined(BUGFIX_R1)
   write_f32(stream, g_JP_GlobalTimerDelta);
 #endif
@@ -1130,6 +1131,7 @@ void load_global_state_pre_props(StateStream *stream) {
   g_GlobalTimer = read_u32(stream);
   g_ClockTimer = read_u32(stream);
   g_GlobalTimerDelta = read_f32(stream);
+  g_FractionalClockTimerAcc = read_f32(stream);
 #if defined(BUGFIX_R1)
   g_JP_GlobalTimerDelta = read_f32(stream);
 #endif

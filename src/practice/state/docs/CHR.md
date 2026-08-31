@@ -68,7 +68,8 @@ RW-data indices in a stable traversal order. Loading follows this order:
 2. Canonicalize each loaded definition once after all prop allocation settles.
 3. Reapply deferred per-instance root RW data.
 4. Restore the saved shared definition links, counts, and RW-data indices.
-5. Repair each live model's display-list RW pointers and base addresses.
+5. Move each per-instance attached-head record to the shared definition's
+   restored HEAD index, then repair display-list RW pointers and base addresses.
 
 Do not run a per-instance parent-link traversal after step 4. Definition links
 and indices are global shared state, whereas `Model::Type`, `model->datas`, the
@@ -80,11 +81,14 @@ earlier guards.
 
 Display-list repair walks immutable definition relations, including hidden
 switch controls, and follows an attached head only after resolving its expected
-header in the owning model's saved RW allocation. It rebuilds every render
-node's `BaseAddr` from the currently loaded file and restores writable display
-list/collision pointers from that definition. This is required for ordinary
-prop rendering after a replay hop; suppressing prop rendering is not a valid
-substitute.
+header in the owning model's saved RW allocation. Reconstruction can place that
+record at a temporary index before the loader restores the exact shared
+definition. The repair pass copies the resolved header and child-RW pointer to
+the final HEAD index so normal character ticks and rendering use the same
+record. It then rebuilds every render node's `BaseAddr` from the currently
+loaded file and restores writable display-list/collision pointers from that
+definition. This is required for ordinary prop rendering after a replay hop;
+suppressing prop rendering is not a valid substitute.
 
 The first CHR serialization slice is implemented. It restores only the
 following scalar behavior parameters:
@@ -402,6 +406,15 @@ belong to the same saved CHR, so `prev` remains the newest-to-oldest traversal
 link and `next` remains the reverse link without splicing active-list records
 into the child chain.
 
+Player and viewer children are deferred one step further. Their object and
+model allocations can live in the first-person hand buffers and do not exist
+until `load_viewer_players_state` runs. The ordinary-prop graph pass skips
+these parents; the player reconciliation pass transfers the regenerated
+allocation to the saved prop and then installs and validates the saved child
+links. Linking the placeholder prop earlier gives the viewer a child whose
+`parent` and `obj` are still `NULL`, which later makes normal teardown reach
+`objFree(NULL)`.
+
 The equipment model's `attachedto` points to the live CHR model.
 `attachedto_objinst` selects model switch `3` for the right hand, `5` for the
 left hand, and `6` for the head/hat. Attached objects also receive
@@ -475,9 +488,14 @@ within the selected animation. `endframe` and `unk6c` are end-frame overrides;
 transition. The equivalent secondary-animation values, loop controls,
 merge weights/clocks, `playspeed`, and play-speed transition fields are
 restored together because advancing only part of this controller can select
-different frames after loading. Cached decoded-frame slots are not serialized;
-matrix calculation regenerates them from the restored animation and frame
-indices. `animflipfunc` is cleared rather than treated as data because it is a
+different frames after loading. The decoded-frame slots `unk34`, `unk38`,
+`unk64`, and `unk68` are pointers into the shared 720-byte
+`animations_frame_buffer`. Save states restore both the pointers and the
+buffer, after all models have been rebuilt. Offscreen CHRs can advance root
+motion before matrix calculation regenerates these slots; clearing them shifts
+the guard's movement trajectory, while restoring only the pointers exposes
+unrelated bytes decoded during destination-stage setup. `animflipfunc` is
+cleared rather than treated as data because it is a
 function pointer and no GoldenEye caller installs one for these CHR actions.
 
 Character models use a `MODELNODE_OPCODE_HEADER` root whose
@@ -932,8 +950,11 @@ restored together. `nextstep` is an index from `0` through `path->len - 1`;
 to decide when an off-screen patrol may enter cheap travel. `speed` is the
 current turn/speed interpolation value updated by `chrlvApplySpeed`.
 
-The nine trailing `unk80` through `unka0` words have no readers or writers in
-GoldenEye. They are inactive union storage and are not serialized.
+The final word (`unka0`) overlaps the four-byte action-union tail shared by all
+actions. The preceding eight words (`unk80` through `unk9c`) are preserved with
+a one-byte nonzero bitmap. They are usually zero, but action transitions reuse
+the union without clearing every byte, so replacement must not silently
+normalize them.
 
 ### `waypoint`
 

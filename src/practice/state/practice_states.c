@@ -178,6 +178,9 @@ static SaveSerializationResult serialize_game_state(StateStream *stream,
    * waypoint state after props so it can also be restored after them. */
   save_pathfinder_state(stream);
   practice_states_save_chr_model_definitions(stream);
+  /* Model animation cache pointers refer into this shared buffer. Save its
+   * final contents after every model payload has been inspected. */
+  practice_states_save_animation_frame_buffer(stream);
 
   /* Flush the remaining bytes in the storage stream. */
   stream_flush(stream);
@@ -343,6 +346,11 @@ static s32 deserialize_game_state(StateStream *stream, bool *stream_error) {
     return LOAD_SERIALIZATION_POST_PROPS_FAILED;
   }
 
+  /* Recreate the derived grenade-camera Bond model while character model
+   * definitions are still canonical. Its normal constructor attaches a head
+   * and mutates those shared definitions; the exact saved definitions and
+   * per-instance head links below must be the final writers. */
+  practice_bond_model_ensure();
   load_pathfinder_state(stream);
   if (!practice_states_load_chr_model_definitions(stream)) {
     return LOAD_SERIALIZATION_POST_PROPS_FAILED;
@@ -350,6 +358,14 @@ static s32 deserialize_game_state(StateStream *stream, bool *stream_error) {
   if (!practice_states_restore_chr_model_display_lists()) {
     return LOAD_SERIALIZATION_POST_PROPS_FAILED;
   }
+  /* Prop/model reconstruction decodes animations into the shared scratch
+   * buffer. Restore the saved bytes last so cached frame pointers observe the
+   * same data as they did at the save boundary. */
+  practice_states_load_animation_frame_buffer(stream);
+  /* This render-only model may not have existed at the save boundary. Rebuild
+   * its unique body/head definition after restoring all saved gameplay model
+   * definitions, using the normal model allocator and full rendering path. */
+  practice_bond_model_finish_state_load();
 
   return LOAD_SERIALIZATION_OK;
 }

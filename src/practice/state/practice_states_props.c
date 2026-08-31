@@ -606,6 +606,29 @@ static void forget_prop_rooms(PropRecord *prop) {
 }
 
 static void clear_plain_prop(PropRecord *prop, bool release_prop) {
+  if (prop->parent != NULL) {
+    PropRecord *parent = prop->parent;
+
+    /* Invalid or already-released object records cannot go through objDetach,
+     * but their PropRecord must still leave the parent's child chain. Leaving
+     * the cleared slot linked makes normal CHR teardown call objFree with the
+     * NULL object pointer on the next level/replay transition. */
+    if (parent->type == PROP_TYPE_CHR && parent->chr != NULL) {
+      ChrRecord *chr = parent->chr;
+
+      if (chr->weapons_held[GUNRIGHT] == prop) {
+        chr->weapons_held[GUNRIGHT] = NULL;
+      }
+      if (chr->weapons_held[GUNLEFT] == prop) {
+        chr->weapons_held[GUNLEFT] = NULL;
+      }
+      if (chr->handle_positiondata_hat == prop) {
+        chr->handle_positiondata_hat = NULL;
+      }
+    }
+    chrpropDetach(prop);
+  }
+
   if (prop->flags & PROPFLAG_ENABLED) {
     forget_prop_rooms(prop);
     chrpropDelist(prop);
@@ -1107,10 +1130,36 @@ static bool restore_model_display_list_branch(ModelNode *node,
               (child_start - data_start) % sizeof(*datas) == 0 &&
               (child_start - data_start) / sizeof(*datas) <
                   (u32)rwdata_count) {
-            index = candidate_index;
-            head_data = candidate;
+            /* The exact shared definition indices are restored after each
+             * model instance is reconstructed. If reconstruction used a
+             * different temporary index, move the instance's head links to
+             * the final definition slot before normal character ticking uses
+             * that slot directly. */
+            if (index + 1 < rwdata_count && candidate_index != index) {
+              head_data =
+                  (ModelRwData_HeadPlaceholderRecord *)&datas[index];
+              *head_data = *candidate;
+            } else {
+              head_data = candidate;
+            }
             break;
           }
+        }
+        if (head_data == NULL && index + 1 < rwdata_count &&
+            expected_head->RootNode != NULL &&
+            expected_head->RootNode->Data != NULL &&
+            (expected_head->RootNode->Opcode & 0xff) ==
+                MODELNODE_OPCODE_HEADER &&
+            expected_head->RootNode->Data->Header.RwDataIndex <
+                rwdata_count) {
+          /* A scalar restored through a temporary shared index can overwrite
+           * the old record before this pass finds it. The attached head's
+           * restored root index is its exact start in this instance's RW
+           * allocation, so the final links can still be reconstructed. */
+          head_data = (ModelRwData_HeadPlaceholderRecord *)&datas[index];
+          head_data->ModelFileHeader = expected_head;
+          head_data->RwDatas =
+              &datas[expected_head->RootNode->Data->Header.RwDataIndex];
         }
       } else if (index + 1 < rwdata_count) {
         head_data = (ModelRwData_HeadPlaceholderRecord *)&datas[index];
@@ -1161,12 +1210,12 @@ static bool restore_model_display_lists(Model *model, s32 prop_index,
     return FALSE;
   }
 
+  rwdata_count = model->Type > 0 ? model->Type : model->obj->numRecords;
   if (model->chr != NULL && model->chr->headnum >= 0 &&
       !c_item_entries[model->chr->bodynum].hasHead) {
     expected_head = c_item_entries[model->chr->headnum].header;
   }
 
-  rwdata_count = model->Type > 0 ? model->Type : model->obj->numRecords;
   restored = restore_model_display_list_branch(
       model->obj->RootNode, model->datas, rwdata_count, 0, &nodes_seen,
       model->obj, expected_head, prop_index, model_id, FALSE);
@@ -1594,13 +1643,50 @@ static void rebuild_room_prop_lists_from_active_props(void) {
   }
 }
 
+static void write_room_var_s16(StateStream *stream, s16 value) {
+  u32 encoded = ((u32)(s32)value << 1) ^ (u32)-(value < 0);
+
+  while (encoded >= 0x80) {
+    write_u8(stream, (u8)(encoded | 0x80));
+    encoded >>= 7;
+  }
+  write_u8(stream, (u8)encoded);
+}
+
+static s16 read_room_var_s16(StateStream *stream) {
+  u32 encoded = 0;
+  u32 shift;
+
+  for (shift = 0; shift < 21; shift += 7) {
+    u8 byte = read_u8(stream);
+    encoded |= (u32)(byte & 0x7f) << shift;
+    if ((byte & 0x80) == 0) {
+      s32 value = (s32)((encoded >> 1) ^ (u32)-(s32)(encoded & 1));
+
+      if (encoded > 0xffff || value < -0x8000 || value > 0x7fff) {
+        practiceLogError("Saved room prop list value is invalid (%u)",
+                         encoded);
+        assert(FALSE);
+        return -1;
+      }
+      return (s16)value;
+    }
+  }
+
+  practiceLogError("Saved room prop list value is too long");
+  assert(FALSE);
+  return -1;
+}
+
 static void save_room_prop_lists(StateStream *stream) {
   u16 occupied_count = 0;
   s32 i;
+  s32 j;
 
   write_u16(stream, g_MaxNumRooms);
-  write_bytes(stream, RoomPropListChunkIndexes,
-              g_MaxNumRooms * sizeof(*RoomPropListChunkIndexes));
+  for (i = 0; i < g_MaxNumRooms; i++) {
+    write_room_var_s16(stream, RoomPropListChunkIndexes[i]);
+  }
 
   for (i = 0; i < BSS_8007161C_LEN; i++) {
     if (RoomPropListChunks[i].propnums[0] != -2) {
@@ -1612,8 +1698,9 @@ static void save_room_prop_lists(StateStream *stream) {
   for (i = 0; i < BSS_8007161C_LEN; i++) {
     if (RoomPropListChunks[i].propnums[0] != -2) {
       write_u8(stream, i);
-      write_bytes(stream, &RoomPropListChunks[i],
-                  sizeof(RoomPropListChunks[i]));
+      for (j = 0; j < BSS_8007161C_DATA_LEN; j++) {
+        write_room_var_s16(stream, RoomPropListChunks[i].propnums[j]);
+      }
     }
   }
 }
@@ -1622,6 +1709,7 @@ static bool load_room_prop_lists(StateStream *stream) {
   u16 room_count = read_u16(stream);
   u16 occupied_count;
   s32 i;
+  s32 j;
 
   if (room_count != g_MaxNumRooms || RoomPropListChunkIndexes == NULL ||
       RoomPropListChunks == NULL) {
@@ -1631,8 +1719,9 @@ static bool load_room_prop_lists(StateStream *stream) {
     return FALSE;
   }
 
-  read_bytes(stream, RoomPropListChunkIndexes,
-             g_MaxNumRooms * sizeof(*RoomPropListChunkIndexes));
+  for (i = 0; i < g_MaxNumRooms; i++) {
+    RoomPropListChunkIndexes[i] = read_room_var_s16(stream);
+  }
 
   for (i = 0; i < BSS_8007161C_LEN; i++) {
     RoomPropListChunks[i].propnums[0] = -2;
@@ -1655,8 +1744,10 @@ static bool load_room_prop_lists(StateStream *stream) {
       assert(FALSE);
       return FALSE;
     }
-    read_bytes(stream, &RoomPropListChunks[chunk_index],
-               sizeof(RoomPropListChunks[chunk_index]));
+    for (j = 0; j < BSS_8007161C_DATA_LEN; j++) {
+      RoomPropListChunks[chunk_index].propnums[j] =
+          read_room_var_s16(stream);
+    }
   }
   return TRUE;
 }
@@ -3026,11 +3117,85 @@ static void read_effect_zero_rle(StateStream *stream, u8 *dst, u32 size) {
   }
 }
 
+/* Particle slots have the same layout and tend to retain similar floating
+ * point exponents and inactive-field values. XOR each slot with the previous
+ * slot before zero-RLE so the complete stale contents remain deterministic
+ * without consuming most of SRAM. */
+static u8 effect_delta_byte(const u8 *src, u32 offset, u32 stride) {
+  return src[offset] ^ (offset >= stride ? src[offset - stride] : 0);
+}
+
+static void write_effect_delta_rle(StateStream *stream, const u8 *src,
+                                   u32 size, u32 stride) {
+  u32 offset = 0;
+
+  while (offset < size) {
+    u32 zero_count = 0;
+    u32 literal_start;
+    u32 literal_count;
+
+    while (offset + zero_count < size &&
+           effect_delta_byte(src, offset + zero_count, stride) == 0 &&
+           zero_count < 128) {
+      zero_count++;
+    }
+    if (zero_count >= 2) {
+      write_u8(stream, 0x80 | (zero_count - 1));
+      offset += zero_count;
+      continue;
+    }
+    literal_start = offset;
+    literal_count = 0;
+    while (offset < size && literal_count < 128) {
+      zero_count = 0;
+      while (offset + zero_count < size &&
+             effect_delta_byte(src, offset + zero_count, stride) == 0 &&
+             zero_count < 2) {
+        zero_count++;
+      }
+      if (zero_count >= 2) {
+        break;
+      }
+      offset++;
+      literal_count++;
+    }
+    write_u8(stream, literal_count - 1);
+    while (literal_count-- > 0) {
+      write_u8(stream, effect_delta_byte(src, literal_start++, stride));
+    }
+  }
+}
+
+static void read_effect_delta_rle(StateStream *stream, u8 *dst, u32 size,
+                                  u32 stride) {
+  u32 offset = 0;
+
+  while (offset < size) {
+    u8 control = read_u8(stream);
+    u32 count = (control & 0x7f) + 1;
+
+    if (count > size - offset) {
+      practiceLogError("Effect delta RLE exceeds destination size");
+      assert(FALSE);
+      count = size - offset;
+    }
+    while (count-- > 0) {
+      u8 value = (control & 0x80) ? 0 : read_u8(stream);
+
+      if (offset >= stride) {
+        value ^= dst[offset - stride];
+      }
+      dst[offset++] = value;
+    }
+  }
+}
+
 static void save_explosion_record(StateStream *stream,
                                   struct Explosion *explosion) {
   write_u16(stream, get_prop_index(explosion->source));
-  write_effect_zero_rle(stream, (u8 *)explosion->parts,
-                        sizeof(explosion->parts));
+  write_effect_delta_rle(stream, (u8 *)explosion->parts,
+                         sizeof(explosion->parts),
+                         sizeof(explosion->parts[0]));
   write_u16(stream, explosion->age);
   write_u16(stream, explosion->unk3CA);
   write_u8(stream, explosion->explosion_type);
@@ -3047,8 +3212,9 @@ static void load_explosion_record(StateStream *stream,
   s16 source_index = read_u16(stream);
 
   explosion->source = get_enabled_prop_by_index(source_index);
-  read_effect_zero_rle(stream, (u8 *)explosion->parts,
-                       sizeof(explosion->parts));
+  read_effect_delta_rle(stream, (u8 *)explosion->parts,
+                        sizeof(explosion->parts),
+                        sizeof(explosion->parts[0]));
   explosion->age = read_u16(stream);
   explosion->unk3CA = read_u16(stream);
   explosion->explosion_type = read_u8(stream);
@@ -3063,13 +3229,15 @@ static void load_explosion_record(StateStream *stream,
 static void save_smoke_record(StateStream *stream, struct Smoke *smoke) {
   write_u16(stream, smoke->duration);
   write_u16(stream, smoke->smoke_type);
-  write_effect_zero_rle(stream, (u8 *)smoke->parts, sizeof(smoke->parts));
+  write_effect_delta_rle(stream, (u8 *)smoke->parts, sizeof(smoke->parts),
+                         sizeof(smoke->parts[0]));
 }
 
 static void load_smoke_record(StateStream *stream, struct Smoke *smoke) {
   smoke->duration = read_u16(stream);
   smoke->smoke_type = read_u16(stream);
-  read_effect_zero_rle(stream, (u8 *)smoke->parts, sizeof(smoke->parts));
+  read_effect_delta_rle(stream, (u8 *)smoke->parts, sizeof(smoke->parts),
+                        sizeof(smoke->parts[0]));
 }
 
 /* Free effect-buffer entries retain particle data in the original engine.
@@ -3083,8 +3251,12 @@ static void save_free_effect_entries(StateStream *stream) {
     bool is_free = explosion->prop == NULL;
     write_u8(stream, is_free);
     if (is_free) {
-      write_effect_zero_rle(stream, (u8 *)explosion->parts,
-                            sizeof(*explosion) - 2 * sizeof(void *));
+      u8 *tail = (u8 *)&explosion->age;
+      write_effect_delta_rle(stream, (u8 *)explosion->parts,
+                             sizeof(explosion->parts),
+                             sizeof(explosion->parts[0]));
+      write_effect_zero_rle(stream, tail,
+                            sizeof(*explosion) - (tail - (u8 *)explosion));
     }
   }
   for (i = 0; i < SMOKE_BUFFER_LEN; i++) {
@@ -3093,7 +3265,9 @@ static void save_free_effect_entries(StateStream *stream) {
     write_u8(stream, is_free);
     if (is_free) {
       write_effect_zero_rle(stream, (u8 *)&smoke->duration,
-                            sizeof(*smoke) - sizeof(void *));
+                            sizeof(smoke->duration) + sizeof(smoke->smoke_type));
+      write_effect_delta_rle(stream, (u8 *)smoke->parts,
+                             sizeof(smoke->parts), sizeof(smoke->parts[0]));
     }
   }
 }
@@ -3109,8 +3283,15 @@ static void load_free_effect_entries(StateStream *stream) {
         assert(FALSE);
       }
       explosion->source = NULL;
-      read_effect_zero_rle(stream, (u8 *)explosion->parts,
-                           sizeof(*explosion) - 2 * sizeof(void *));
+      {
+        u8 *tail = (u8 *)&explosion->age;
+        read_effect_delta_rle(stream, (u8 *)explosion->parts,
+                              sizeof(explosion->parts),
+                              sizeof(explosion->parts[0]));
+        read_effect_zero_rle(
+            stream, tail,
+            sizeof(*explosion) - (tail - (u8 *)explosion));
+      }
     }
   }
   for (i = 0; i < SMOKE_BUFFER_LEN; i++) {
@@ -3121,7 +3302,9 @@ static void load_free_effect_entries(StateStream *stream) {
         assert(FALSE);
       }
       read_effect_zero_rle(stream, (u8 *)&smoke->duration,
-                           sizeof(*smoke) - sizeof(void *));
+                           sizeof(smoke->duration) + sizeof(smoke->smoke_type));
+      read_effect_delta_rle(stream, (u8 *)smoke->parts,
+                            sizeof(smoke->parts), sizeof(smoke->parts[0]));
     }
   }
 }
@@ -3264,33 +3447,100 @@ static void load_decals_state(StateStream *stream) {
   }
 }
 
-// Airborne explosion debris is visual, but its age and vertical position
-// determine which live entries consume RNG while expiring. Preserve those
-// gameplay-relevant values, the ring slots, and motion. Rotation and angular
-// velocity are needed to rebuild the same particle matrices after loading, but
-// the local quad appearance is immutable after spawn and can be replaced with
-// a small generic quad instead of spending scarce SRAM on it.
+// Airborne explosion debris consumes RNG while expiring and renders a randomly
+// shaped/textured quad. Preserve its ring slots, motion, and exact visible quad
+// parameters. Fixed vertex fields are validated and reconstructed rather than
+// stored four times, keeping the complete state small enough for SRAM.
 #define FLYING_PARTICLE_MOTION_SIZE (sizeof(coord3d) * 4)
 #define FLYING_PARTICLE_OCCUPANCY_SIZE ((MAX_FLYING_PARTICLES + 7) / 8)
+#define FLYING_PARTICLE_VISUAL_SIZE 21
 
-static void
-initialize_saved_flying_particle_vertices(struct FlyingParticles *particle) {
+static void initialize_saved_flying_particle_vertices(
+    struct FlyingParticles *particle) {
   s32 vertex;
 
   for (vertex = 0; vertex < 4; vertex++) {
-    particle->vertex_list[vertex].v.ob[0] = vertex >= 2 ? -5 : 5;
     particle->vertex_list[vertex].v.ob[1] = 0;
-    particle->vertex_list[vertex].v.ob[2] = vertex == 1 || vertex == 2 ? -5 : 5;
     particle->vertex_list[vertex].v.flag = 0;
-    particle->vertex_list[vertex].v.cn[0] = 0x30;
-    particle->vertex_list[vertex].v.cn[1] = 0x30;
-    particle->vertex_list[vertex].v.cn[2] = 0x30;
     particle->vertex_list[vertex].v.cn[3] = 0xdc;
   }
-  particle->vertex_list[0].v.tc[0] = 0xe0;
-  particle->vertex_list[0].v.tc[1] = 0xe0;
-  particle->vertex_list[1].v.tc[0] = 0xe0;
-  particle->vertex_list[3].v.tc[1] = 0xe0;
+}
+
+static bool validate_flying_particle_vertices(
+    const struct FlyingParticles *particle, s32 index) {
+  s16 base_u = particle->vertex_list[2].v.tc[0];
+  s16 base_v = particle->vertex_list[2].v.tc[1];
+  s32 vertex;
+
+  if (base_u < 0 || base_u > 0x300 || (base_u & 0xff) != 0 || base_v < 0 ||
+      base_v > 0x300 || (base_v & 0xff) != 0 ||
+      particle->vertex_list[0].v.tc[0] != base_u + 0xe0 ||
+      particle->vertex_list[0].v.tc[1] != base_v + 0xe0 ||
+      particle->vertex_list[1].v.tc[0] != base_u + 0xe0 ||
+      particle->vertex_list[1].v.tc[1] != base_v ||
+      particle->vertex_list[3].v.tc[0] != base_u ||
+      particle->vertex_list[3].v.tc[1] != base_v + 0xe0) {
+    practiceLogError("Flying particle %d texture coordinates are invalid",
+                     index);
+    assert(FALSE);
+    return FALSE;
+  }
+  for (vertex = 0; vertex < 4; vertex++) {
+    const Vtx *vtx = &particle->vertex_list[vertex];
+
+    if (vtx->v.ob[1] != 0 || vtx->v.flag != 0 ||
+        vtx->v.cn[0] != vtx->v.cn[1] || vtx->v.cn[0] != vtx->v.cn[2] ||
+        vtx->v.cn[3] != 0xdc) {
+      practiceLogError("Flying particle %d vertex %d is invalid", index,
+                       vertex);
+      assert(FALSE);
+      return FALSE;
+    }
+  }
+  return TRUE;
+}
+
+static u8 flying_particle_visual_byte(const struct FlyingParticles *particle,
+                                      s32 byte) {
+  if (byte < 16) {
+    s32 coordinate = byte / 2;
+    s32 vertex = coordinate / 2;
+    s32 axis = coordinate & 1 ? 2 : 0;
+    return ((const u8 *)&particle->vertex_list[vertex].v.ob[axis])[byte & 1];
+  }
+  if (byte == 16) {
+    return (particle->vertex_list[2].v.tc[0] >> 8) |
+           ((particle->vertex_list[2].v.tc[1] >> 8) << 2);
+  }
+  return particle->vertex_list[byte - 17].v.cn[0];
+}
+
+static void set_flying_particle_visual_byte(struct FlyingParticles *particle,
+                                            s32 byte, u8 value) {
+  if (byte < 16) {
+    s32 coordinate = byte / 2;
+    s32 vertex = coordinate / 2;
+    s32 axis = coordinate & 1 ? 2 : 0;
+    ((u8 *)&particle->vertex_list[vertex].v.ob[axis])[byte & 1] = value;
+  } else if (byte == 16) {
+    s16 base_u = (value & 3) << 8;
+    s16 base_v = ((value >> 2) & 3) << 8;
+
+    particle->vertex_list[0].v.tc[0] = base_u + 0xe0;
+    particle->vertex_list[0].v.tc[1] = base_v + 0xe0;
+    particle->vertex_list[1].v.tc[0] = base_u + 0xe0;
+    particle->vertex_list[1].v.tc[1] = base_v;
+    particle->vertex_list[2].v.tc[0] = base_u;
+    particle->vertex_list[2].v.tc[1] = base_v;
+    particle->vertex_list[3].v.tc[0] = base_u;
+    particle->vertex_list[3].v.tc[1] = base_v + 0xe0;
+  } else {
+    Vtx *vtx = &particle->vertex_list[byte - 17];
+
+    vtx->v.cn[0] = value;
+    vtx->v.cn[1] = value;
+    vtx->v.cn[2] = value;
+  }
 }
 
 static void save_flying_particles_state(StateStream *stream) {
@@ -3321,6 +3571,7 @@ static void save_flying_particles_state(StateStream *stream) {
         assert(FALSE);
       }
       write_u16(stream, g_FlyingParticlesBuffer[i].unk00);
+      validate_flying_particle_vertices(&g_FlyingParticlesBuffer[i], i);
     }
   }
 
@@ -3334,6 +3585,21 @@ static void save_flying_particles_state(StateStream *stream) {
     for (i = 0; i < max_particles; i++) {
       if (occupied[i / 8] & (1 << (i % 8))) {
         u8 value = ((u8 *)&g_FlyingParticlesBuffer[i].position)[byte];
+        plane[entry++] = value ^ previous;
+        previous = value;
+      }
+    }
+    write_effect_zero_rle(stream, plane, live_count);
+  }
+
+  for (byte = 0; byte < FLYING_PARTICLE_VISUAL_SIZE; byte++) {
+    u8 previous = 0;
+    s32 entry = 0;
+
+    for (i = 0; i < max_particles; i++) {
+      if (occupied[i / 8] & (1 << (i % 8))) {
+        u8 value =
+            flying_particle_visual_byte(&g_FlyingParticlesBuffer[i], byte);
         plane[entry++] = value ^ previous;
         previous = value;
       }
@@ -3382,6 +3648,23 @@ static void load_flying_particles_state(StateStream *stream) {
         previous = value;
         if (g_FlyingParticlesBuffer != NULL) {
           ((u8 *)&g_FlyingParticlesBuffer[i].position)[byte] = value;
+        }
+      }
+    }
+  }
+
+  for (byte = 0; byte < FLYING_PARTICLE_VISUAL_SIZE; byte++) {
+    u8 previous = 0;
+    s32 entry = 0;
+
+    read_effect_zero_rle(stream, plane, live_count);
+    for (i = 0; i < max_particles; i++) {
+      if (occupied[i / 8] & (1 << (i % 8))) {
+        u8 value = plane[entry++] ^ previous;
+        previous = value;
+        if (g_FlyingParticlesBuffer != NULL) {
+          set_flying_particle_visual_byte(&g_FlyingParticlesBuffer[i], byte,
+                                          value);
         }
       }
     }
@@ -4856,8 +5139,9 @@ static bool prop_is_player_or_viewer(PropRecord *prop) {
          (prop->type == PROP_TYPE_PLAYER || prop->type == PROP_TYPE_VIEWER);
 }
 
-static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
-                                      s32 recordCount);
+static bool rebuild_saved_child_links(const SavedPropLinks *savedLinks,
+                                      s32 recordCount,
+                                      bool include_player_children);
 
 // Viewer model reconciliation may tear down and recreate Bond's model and its
 // held-weapon child. Keep the saved child objects out of that teardown, then
@@ -5103,12 +5387,12 @@ static bool restore_saved_player_children(const SavedPropLinks *savedLinks,
     restore_player_child_object(prop, parent, savedLinks[i].attachmentNode);
   }
 
-  rebuild_saved_child_links(savedLinks, recordCount);
-  return TRUE;
+  return rebuild_saved_child_links(savedLinks, recordCount, TRUE);
 }
 
-static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
-                                      s32 recordCount) {
+static bool rebuild_saved_child_links(const SavedPropLinks *savedLinks,
+                                      s32 recordCount,
+                                      bool include_player_children) {
   s32 i;
 
   for (i = 0; i < recordCount; i++) {
@@ -5119,9 +5403,20 @@ static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
     }
 
     parent = get_prop_by_index(savedLinks[i].index);
+    if (!include_player_children && prop_is_player_or_viewer(parent)) {
+      continue;
+    }
     if (prop_can_own_saved_children(parent)) {
-      parent->child = get_saved_child_link(
+      PropRecord *child = get_saved_child_link(
           savedLinks, recordCount, savedLinks[i].child, savedLinks[i].index);
+
+      if (child != NULL && child->parent != parent) {
+        practiceLogError("Saved child %d was not restored to parent %d",
+                         get_prop_index(child), savedLinks[i].index);
+        assert(FALSE);
+        return FALSE;
+      }
+      parent->child = child;
     }
   }
 
@@ -5135,9 +5430,17 @@ static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
 
     prop = get_prop_by_index(savedLinks[i].index);
     parent = get_prop_by_index(savedLinks[i].parent);
-    if (prop == NULL || !prop_can_own_saved_children(parent) ||
-        prop->parent != parent) {
+    if (!include_player_children && prop_is_player_or_viewer(parent)) {
       continue;
+    }
+    if (prop == NULL || !prop_can_own_saved_children(parent)) {
+      continue;
+    }
+    if (prop->parent != parent) {
+      practiceLogError("Saved prop %d was not restored to parent %d",
+                       savedLinks[i].index, savedLinks[i].parent);
+      assert(FALSE);
+      return FALSE;
     }
 
     prop->prev = get_saved_child_link(savedLinks, recordCount,
@@ -5145,6 +5448,7 @@ static void rebuild_saved_child_links(const SavedPropLinks *savedLinks,
     prop->next = get_saved_child_link(savedLinks, recordCount,
                                       savedLinks[i].next, savedLinks[i].parent);
   }
+  return TRUE;
 }
 
 static bool load_props_state_with_scratch(
@@ -5875,7 +6179,13 @@ static bool load_props_state_with_scratch(
   // while moving objects between active-list and child-list states. Reinstall
   // the saved CHR child graph afterward so prev remains the child-walk link and
   // next remains its reverse link for drop/teardown code.
-  rebuild_saved_child_links(savedLinks, recordCount);
+  /* Player/viewer child objects can live in the first-person hand buffers.
+   * Their ObjectRecords do not exist until load_viewer_players_state rebuilds
+   * those buffers below, so do not splice their placeholder props into a
+   * child chain during this earlier ordinary-prop pass. */
+  if (!rebuild_saved_child_links(savedLinks, recordCount, FALSE)) {
+    return FALSE;
+  }
 
   /* Reparenting helpers normalize ownership flags. Preserve transitional
    * states too, such as a held item already queued to drop with a projectile.
@@ -6135,21 +6445,29 @@ static bool load_props_state_with_scratch(
   load_onscreen_prop_list(stream);
 
   /* Replacing characters by exact prop and ChrRecord slots can leave an old,
-   * now-unowned ChrRecord pointing at a model-pool entry that another teardown
-   * already released (model->obj is NULL). Normal level unload scans every
-   * non-NULL chr->model, so normalize those orphaned slots now. */
+   * now-unowned ChrRecord pointing at a model-pool entry. That entry may have
+   * been released or already reused by another character. Normal level unload
+   * scans every non-NULL chr->model, so require exact two-way prop ownership
+   * before retaining a slot. */
   for (i = 0; i < g_NumChrSlots; i++) {
     ChrRecord *chr = &g_ChrSlots[i];
+    bool owns_prop =
+        is_rdram_range(chr->prop, sizeof(*chr->prop)) &&
+        (chr->prop->type == PROP_TYPE_CHR ||
+         chr->prop->type == PROP_TYPE_PLAYER ||
+         chr->prop->type == PROP_TYPE_VIEWER) &&
+        chr->prop->chr == chr;
 
-    if (chr->model != NULL && chr->model->obj == NULL) {
-      if (chr->prop != NULL && chr->prop->type == PROP_TYPE_CHR &&
-          (chr->prop->flags & PROPFLAG_ENABLED) && chr->prop->chr == chr) {
+    if (chr->model != NULL && !owns_prop) {
+      chr->model = NULL;
+      chr->prop = NULL;
+      chr->chrnum = -1;
+    } else if (chr->model != NULL && chr->model->obj == NULL) {
+      if (owns_prop) {
         practiceLogError("Active CHR %d has a released model", i);
         assert(FALSE);
         return FALSE;
       }
-      chr->model = NULL;
-      chr->chrnum = -1;
     }
   }
 

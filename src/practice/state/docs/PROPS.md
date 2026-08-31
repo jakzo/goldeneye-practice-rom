@@ -23,13 +23,12 @@ In GoldenEye 007, everything in the level that is not static level geometry (the
   its `timetoregen` continues to tick. Inactive setup objects may also retain a
   live `obj->prop` binding. Save/free-list code must account for both cases.
 - Room membership is also indexed separately through
-  `RoomPropListChunkIndexes` and `RoomPropListChunks`. These tables are derived
-  from root props' `rooms[]` lists by `chrpropRegisterRooms`; they are not
-  serialized as authoritative state. Save-state loading clears them before prop
-  replacement and rebuilds them after props, attachments, and the player/viewer
-  prop are restored. This prevents loading gameplay from a level-end cutscene
-  from leaving stale room chunk data that makes `roomGetProps` return garbage
-  prop indices.
+  `RoomPropListChunkIndexes` and `RoomPropListChunks`. The engine derives these
+  tables from root props' `rooms[]` lists, but their exact chunk allocation and
+  ordering can affect the order returned by `roomGetProps`. Save states
+  therefore rebuild a safe intermediate table while props are replaced, then
+  restore the saved table exactly. Signed variable-length encoding keeps the
+  many `-1` sentinels and small prop/chunk indices compact.
 
 ---
 
@@ -556,7 +555,7 @@ struct Explosion
 
 `explosion_type` indexes `g_ExplosionTypes`, which defines damage and visual ranges, growth rates, lifetime, flare animation speed, shrapnel, smoke type, sound, and damage. Named values include `EXPLOSION_DEF_DRONE` (12), `EXPLOSION_DEF_STANDARD` (13, grenades and mines), `EXPLOSION_DEF_MASSIVE` (17), `EXPLOSION_DEF_PLAYER` (18), and `EXPLOSION_DEF_FACILITY_REMOTE` (19).
 
-The serializer restores every non-pointer field and all 40 `ExplosionPart` records. `Explosion::prop` is preserved because the fixed buffer entry and live prop already point to each other. `Explosion::source` is serialized as a stable prop-array index and restored only if that prop is still enabled; otherwise it becomes `NULL`, which safely uses the explosion prop as the fallback location when follow-up smoke is created.
+The serializer restores every non-pointer field and all 40 `ExplosionPart` records. Particle bytes are XOR-delta encoded against the previous fixed-size slot and then zero-run encoded; this is lossless and preserves inactive/stale slot contents that later reuse can expose. `Explosion::prop` is preserved because the fixed buffer entry and live prop already point to each other. `Explosion::source` is serialized as a stable prop-array index and restored only if that prop is still enabled; otherwise it becomes `NULL`, which safely uses the explosion prop as the fallback location when follow-up smoke is created.
 
 The associated `g_NumExplosionEntries` and `g_NumSmokeEntries` counters are also restored. Both normally range from 0 to 6 and control the short camera-shake sequence triggered by an explosion.
 
@@ -592,7 +591,20 @@ struct Smoke
 
 `smoke_type` selects the duration, spawn/dissolve rates, size, rotation rates, colour, and cloud propagation duration from `g_SmokeTypes`. Values 0-7 are selected by explosion definitions; 8 and 9 are short-lived effects produced by damaged objects; 10 is the large cloud created while the tank fires. `duration` normally runs from 0 through the selected type's configured lifetime. Each part's `size` is the active marker, while `alpha` and `count` control its fade.
 
-The serializer restores `duration`, `smoke_type`, and all ten `SmokePart` values. It deliberately preserves `Smoke::prop` rather than serializing its address: the live smoke prop and its fixed buffer slot already point to each other, and restoring an address is unnecessary and unsafe. A smoke cloud present in the save but missing from the current world is recreated in its saved slot using a free `g_SmokeBuffer` entry (`create_smoke_prop`); one present in the world but absent from the save is removed.
+The serializer restores `duration`, `smoke_type`, and all ten `SmokePart` values. As with explosion parts, the complete particle array is losslessly XOR-delta and zero-run encoded, including inactive slot contents. It deliberately preserves `Smoke::prop` rather than serializing its address: the live smoke prop and its fixed buffer slot already point to each other, and restoring an address is unnecessary and unsafe. A smoke cloud present in the save but missing from the current world is recreated in its saved slot using a free `g_SmokeBuffer` entry (`create_smoke_prop`); one present in the world but absent from the save is removed.
+
+When replacement encounters an attachment whose object/model allocation is
+already invalid, it cannot use `objDetach`. The fallback cleanup still unlinks
+the `PropRecord` with `chrpropDetach` and clears matching CHR weapon/hat
+pointers before releasing the slot. Merely nulling the prop leaves it in the
+parent's child chain and makes normal CHR teardown call `objFree(NULL)`.
+
+After replacement, every live character-pool slot must have two-way ownership:
+`chr->prop->chr == chr`. Valid owners include ordinary CHR, player, and viewer
+props. Slots without that relationship are stale aliases and have their model,
+prop, and character number cleared. Player/viewer ownership must not be treated
+as orphaned; clearing a live viewer marks its still-referenced slot free, and a
+later character allocation can overwrite Bond's `chr->prop` pointer.
 
 ## Save/Load Guidelines
 

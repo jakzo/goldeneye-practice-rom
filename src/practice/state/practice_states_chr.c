@@ -405,6 +405,36 @@ static void load_waydata(StateStream *stream, struct waydata *waydata) {
   waydata->segdisttotal = read_f32(stream);
 }
 
+static void save_patrol_action_tail(StateStream *stream,
+                                    const struct act_patrol *patrol) {
+  const u32 *words = (const u32 *)&patrol->unk80;
+  u8 present = 0;
+  s32 i;
+
+  for (i = 0; i < 8; i++) {
+    if (words[i] != 0) {
+      present |= 1 << i;
+    }
+  }
+  write_u8(stream, present);
+  for (i = 0; i < 8; i++) {
+    if (present & (1 << i)) {
+      write_u32(stream, words[i]);
+    }
+  }
+}
+
+static void load_patrol_action_tail(StateStream *stream,
+                                    struct act_patrol *patrol) {
+  u32 *words = (u32 *)&patrol->unk80;
+  u8 present = read_u8(stream);
+  s32 i;
+
+  for (i = 0; i < 8; i++) {
+    words[i] = present & (1 << i) ? read_u32(stream) : 0;
+  }
+}
+
 static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
   s32 i;
 
@@ -541,6 +571,7 @@ static void save_supported_action(StateStream *stream, const ChrRecord *chr) {
     save_waydata(stream, &chr->act_patrol.waydata);
     write_u32(stream, chr->act_patrol.lastvisible60);
     write_f32(stream, chr->act_patrol.speed);
+    save_patrol_action_tail(stream, &chr->act_patrol);
     break;
   case ACT_GOPOS:
     write_bytes(stream, &chr->act_gopos.targetpos, sizeof(coord3d));
@@ -871,10 +902,13 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
     struct waydata waydata;
     s32 lastvisible60;
     f32 speed;
+    struct act_patrol tail;
 
     load_waydata(stream, &waydata);
     lastvisible60 = read_u32(stream);
     speed = read_f32(stream);
+    bzero(&tail, sizeof(tail));
+    load_patrol_action_tail(stream, &tail);
 
     if (chr != NULL) {
       chr->act_patrol.path = get_patrol_path_by_id(path_id);
@@ -883,6 +917,14 @@ static void load_supported_action(StateStream *stream, ChrRecord *chr) {
       chr->act_patrol.waydata = waydata;
       chr->act_patrol.lastvisible60 = lastvisible60;
       chr->act_patrol.speed = speed;
+      chr->act_patrol.unk80 = tail.unk80;
+      chr->act_patrol.unk84 = tail.unk84;
+      chr->act_patrol.unk88 = tail.unk88;
+      chr->act_patrol.unk8c = tail.unk8c;
+      chr->act_patrol.unk90 = tail.unk90;
+      chr->act_patrol.unk94 = tail.unk94;
+      chr->act_patrol.unk98 = tail.unk98;
+      chr->act_patrol.unk9c = tail.unk9c;
     }
     break;
   }
@@ -1361,6 +1403,56 @@ static s32 find_chr_model_parent_entry(ModelNode *parent, s32 count) {
   return -1;
 }
 
+static s32 find_chr_model_header_entry(ModelFileHeader *target, s32 count) {
+  s32 i;
+
+  for (i = 0; i < count; i++) {
+    if (c_item_entries[i].header == target) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+static bool get_model_head_instance_links(Model *model, s32 entry_count,
+                                          u16 *record_index, u16 *data_offset,
+                                          u8 *header_entry) {
+  ModelNode *head_node;
+  ModelRwData_HeadPlaceholderRecord *head_data;
+  s32 entry;
+  u32 data_start;
+  u32 child_start;
+
+  if (model == NULL || model->obj == NULL || model->datas == NULL ||
+      model->Type <= 0 || model->obj->Switches == NULL ||
+      model->obj->numSwitches <= 4 || model->obj->Switches[4] == NULL ||
+      model->obj->Switches[4]->Data == NULL) {
+    return FALSE;
+  }
+  head_node = model->obj->Switches[4];
+  if ((head_node->Opcode & 0xff) != MODELNODE_OPCODE_HEAD) {
+    return FALSE;
+  }
+  *record_index = head_node->Data->HeadPlaceholder.RwDataIndex;
+  if (*record_index + 1 >= model->Type) {
+    return FALSE;
+  }
+  head_data =
+      (ModelRwData_HeadPlaceholderRecord *)&model->datas[*record_index];
+  entry = find_chr_model_header_entry(head_data->ModelFileHeader, entry_count);
+  data_start = (u32)model->datas;
+  child_start = (u32)head_data->RwDatas;
+  if (entry < 0 || child_start < data_start ||
+      (child_start - data_start) % sizeof(*model->datas) != 0 ||
+      (child_start - data_start) / sizeof(*model->datas) >=
+          (u32)model->Type) {
+    return FALSE;
+  }
+  *data_offset = (child_start - data_start) / sizeof(*model->datas);
+  *header_entry = entry;
+  return TRUE;
+}
+
 static u16 *model_definition_rw_index(ModelNode *node) {
   switch (node->Opcode & 0xff) {
   case MODELNODE_OPCODE_HEADER:
@@ -1550,6 +1642,53 @@ void practice_states_save_chr_model_definitions(StateStream *stream) {
     stream_model_definition_rw_indices(header, stream, TRUE,
                                        rw_index_count);
   }
+
+  {
+    u16 instance_count = 0;
+
+    for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+      PropRecord *prop = get_prop_by_index(i);
+      Model *model =
+          prop != NULL &&
+                  (prop->type == PROP_TYPE_CHR ||
+                   prop->type == PROP_TYPE_PLAYER ||
+                   prop->type == PROP_TYPE_VIEWER) &&
+                  prop->chr != NULL && prop->chr->prop == prop
+              ? prop->chr->model
+              : NULL;
+      u16 record_index;
+      u16 data_offset;
+      u8 header_entry;
+
+      if (get_model_head_instance_links(model, count, &record_index,
+                                        &data_offset, &header_entry)) {
+        instance_count++;
+      }
+    }
+    write_u16(stream, instance_count);
+    for (i = 0; i < POS_DATA_ENTRY_LEN; i++) {
+      PropRecord *prop = get_prop_by_index(i);
+      Model *model =
+          prop != NULL &&
+                  (prop->type == PROP_TYPE_CHR ||
+                   prop->type == PROP_TYPE_PLAYER ||
+                   prop->type == PROP_TYPE_VIEWER) &&
+                  prop->chr != NULL && prop->chr->prop == prop
+              ? prop->chr->model
+              : NULL;
+      u16 record_index;
+      u16 data_offset;
+      u8 header_entry;
+
+      if (get_model_head_instance_links(model, count, &record_index,
+                                        &data_offset, &header_entry)) {
+        write_u16(stream, i);
+        write_u16(stream, record_index);
+        write_u16(stream, data_offset);
+        write_u8(stream, header_entry);
+      }
+    }
+  }
 }
 
 bool practice_states_canonicalize_chr_model_definitions(void) {
@@ -1640,6 +1779,41 @@ bool practice_states_load_chr_model_definitions(StateStream *stream) {
     if (!stream_model_definition_rw_indices(header, stream, FALSE,
                                             rw_index_count)) {
       return FALSE;
+    }
+  }
+  {
+    u16 instance_count = read_u16(stream);
+
+    for (i = 0; i < instance_count; i++) {
+      u16 prop_index = read_u16(stream);
+      u16 record_index = read_u16(stream);
+      u16 data_offset = read_u16(stream);
+      u8 header_entry = read_u8(stream);
+      PropRecord *prop;
+      Model *model;
+      ModelRwData_HeadPlaceholderRecord *head_data;
+
+      if (prop_index >= POS_DATA_ENTRY_LEN || header_entry >= count) {
+        practiceLogError("Saved model head-link prop %d is invalid",
+                         prop_index);
+        assert(FALSE);
+        return FALSE;
+      }
+      prop = get_prop_by_index(prop_index);
+      model = prop != NULL && prop->chr != NULL && prop->chr->prop == prop
+                  ? prop->chr->model
+                  : NULL;
+      if (model == NULL || model->datas == NULL || model->Type <= 0 ||
+          record_index + 1 >= model->Type || data_offset >= model->Type) {
+        practiceLogError("Saved model head links for prop %d are invalid",
+                         prop_index);
+        assert(FALSE);
+        return FALSE;
+      }
+      head_data = (ModelRwData_HeadPlaceholderRecord
+                       *)&model->datas[record_index];
+      head_data->ModelFileHeader = c_item_entries[header_entry].header;
+      head_data->RwDatas = &model->datas[data_offset];
     }
   }
   return TRUE;
@@ -1982,11 +2156,11 @@ static void practice_states_load_model_animation_internal(
   model->unk2c = saved.unk2c;
   model->framea = saved.framea;
   model->frameb = saved.frameb;
-  /* These are decoded-frame cache slots. subcalcmatrices regenerates them
-   * from anim/framea/frameb before consuming them. A value captured from a
-   * previous model instance is not persistent animation state. */
-  model->unk34 = 0;
-  model->unk38 = 0;
+  /* Offscreen CHRs can advance movement before subcalcmatrices runs again.
+   * Preserve the decoded animation-frame indices so their first movement tick
+   * after a cross-stage load consumes the same root-motion frames. */
+  model->unk34 = saved.unk34;
+  model->unk38 = saved.unk38;
   model->endframe = saved.endframe;
   model->speed = saved.speed;
   model->newspeed = saved.newspeed;
@@ -1997,8 +2171,8 @@ static void practice_states_load_model_animation_internal(
   model->unk5c = saved.unk5c;
   model->frame2a = saved.frame2a;
   model->frame2b = saved.frame2b;
-  model->unk64 = 0;
-  model->unk68 = 0;
+  model->unk64 = saved.unk64;
+  model->unk68 = saved.unk68;
   model->unk6c = saved.unk6c;
   model->speed2 = saved.speed2;
   model->unk74 = saved.unk74;
@@ -2034,6 +2208,16 @@ static void practice_states_load_model_animation_internal(
 
 void practice_states_load_model_animation(StateStream *stream, Model *model) {
   practice_states_load_model_animation_internal(stream, model, NULL);
+}
+
+void practice_states_save_animation_frame_buffer(StateStream *stream) {
+  write_animation_zero_rle(stream, (u8 *)animations_frame_buffer,
+                           sizeof(animations_frame_buffer));
+}
+
+void practice_states_load_animation_frame_buffer(StateStream *stream) {
+  read_animation_zero_rle(stream, (u8 *)animations_frame_buffer,
+                          sizeof(animations_frame_buffer));
 }
 
 bool practice_states_reload_model_root_data(StateStream *stream, Model *model,

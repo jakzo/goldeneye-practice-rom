@@ -13,6 +13,9 @@
 #include "player_2.h"
 #include "practice_config.h"
 #include "practice_render.h"
+#include "practice_ui.h"
+#include "state/practice_states_chr.h"
+#include <assert.h>
 #include <os_extension.h>
 
 #define BOND_REVEAL_BODY BODY_Brosnan_Tuxedo
@@ -342,6 +345,25 @@ void practice_bond_model_prepare_state_load(void) {
     destroy_bond();
     release_deferred_model(0);
   }
+}
+
+void practice_bond_model_finish_state_load(void) {
+  Model *model = g_Bond.chr.model;
+
+  if (!bond_instance_ready())
+    return;
+  if (!practice_states_rebuild_chr_model_allocation(&g_Bond.chr)) {
+    practiceLogError("Could not rebuild the external-camera Bond model");
+    assert(FALSE);
+    destroy_bond();
+    return;
+  }
+  model->chr = &g_Bond.chr;
+  sub_GAME_7F06FF5C(model, 0);
+  model->unk00 = BOND_MODEL_UNK00;
+  modelSetAnimPlaySpeed(model, animation_rate, 0.0f);
+  sync_bond();
+  apply_bond_animation(model);
 }
 
 Gfx *practice_bond_model_render(Gfx *gdl, s32 force_room_visible) {

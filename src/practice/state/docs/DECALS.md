@@ -84,10 +84,14 @@ struct FlyingParticles {
 - Fully world-space and pointer-free. `vertex_list` is fixed at spawn; the
   renderer rebuilds the world matrix from `position`/`rotation` each frame, so
   only `unk00 <= 0` (cleared) deactivates a slot.
-- **Saved**: cursor + each live particle's whole struct at its buffer index
-  (~122 bytes on the wire per live particle: 2-byte index + 120-byte struct).
-  Saved sparsely, so the cost is ~0 unless the state is captured during the
-  brief window an explosion's debris is still airborne.
+- **Saved**: cursor, exact occupancy bitmap and age, all four motion vectors,
+  and the visible quad parameters for every live ring slot. Motion and visual
+  fields are transposed, XORed between adjacent live slots, and zero-run
+  encoded. The quad uses its eight nonzero geometry coordinates, packed
+  two-bit U/V texture selectors, and four grayscale values; fixed zero Y/flag,
+  equal RGB channels, and alpha `0xdc` are asserted and reconstructed. This
+  retains the original random shape, texture tile, and shade after loading
+  without storing the redundant 64-byte vertex array verbatim.
 
 ## Transient gun effects
 

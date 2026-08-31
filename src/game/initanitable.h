@@ -22,6 +22,7 @@ struct animation_table_data {
  * Data holder for animations.
  */
 extern struct animation_table_data* ptr_animation_table;
+extern char animations_frame_buffer[0x2D0];
 
 /**
  * Contains offsets into ptr_animation_table for player and guard animations.

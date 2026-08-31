@@ -48,6 +48,25 @@ class ReplayTimeoutTests(unittest.TestCase):
         self.assertTrue(passed)
         self.assertEqual(detail, "completed")
 
+    def test_save_state_data_extends_replay_deadline(self):
+        previous = RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS
+        RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS = 0.1
+        try:
+            passed, detail, _ = self.run_script(
+                "REPLAY_RUNWAY_SAVE_STATES",
+                "import time; "
+                "print('REPLAY_STARTED', flush=True); time.sleep(0.08); "
+                "print('RUNWAY_STATE_DATA 00', flush=True); time.sleep(0.08); "
+                "print('RUNWAY_STATE_DATA 11', flush=True); time.sleep(0.08); "
+                "print('TEST_COMPLETE', flush=True)",
+                0.4,
+            )
+        finally:
+            RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS = previous
+
+        self.assertTrue(passed)
+        self.assertEqual(detail, "completed")
+
     def test_replay_times_out_waiting_for_start(self):
         previous = RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS
         RUNNER.REPLAY_STATUS_TIMEOUT_SECONDS = 0.1

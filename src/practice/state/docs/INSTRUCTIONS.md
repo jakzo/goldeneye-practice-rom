@@ -109,8 +109,9 @@ Add any general advice helpful for future agents working on this feature here. B
   gameplay state while the watch is open immediately resumes rendering,
   controls, and timers. The frame containing a deferred load is not equivalent
   to the saved frame's ordinary timing setup, so restore `g_GlobalTimer`,
-  `g_ClockTimer`, `g_GlobalTimerDelta`, the JP/EU fractional delta when present,
-  and `D_80048380` exactly. CHR perception timestamps, weapon timers, movement,
+  `g_ClockTimer`, `g_GlobalTimerDelta`, `g_JP_GlobalTimerDelta` when present,
+  the practice time-scale accumulator `g_FractionalClockTimerAcc`, and
+  `D_80048380` exactly. CHR perception timestamps, weapon timers, movement,
   effects, and AI all consume this shared timing state before it is recomputed.
 - **Level Exit State**: `stop_time_flag` is the global latch used by
   `AI_TriggerFadeAndExitLevelOnButtonPress`: `0` is inactive, `1` waits for
@@ -253,16 +254,17 @@ Add any general advice helpful for future agents working on this feature here. B
   the glass omit the room on the viewer's side, so the pane is then culled
   before it can render or reopen its own portal. Control's vertically stacked
   windows expose this clearly.
-- **Room Prop Lists Are Derived State**: `RoomPropListChunkIndexes` and
-  `RoomPropListChunks` are room-to-prop lookup indexes built by
-  `chrpropRegisterRooms`, not authoritative saved state. Loading gameplay from
-  a different lifecycle moment, such as an ending cutscene, can leave these
-  chunk tables stale or corrupted even when each restored `PropRecord::rooms`
-  list is correct. Clear the chunk tables before destructive prop replacement,
-  then rebuild them after props, attachments, and the player/viewer prop have
-  been restored by walking the active root prop list and registering each
-  restored room list. Otherwise `roomGetProps`/LOS collision can read garbage
-  prop indices and crash on the first post-load tick.
+- **Room Prop Lists Need Safe Rebuild and Exact Final State**:
+  `RoomPropListChunkIndexes` and `RoomPropListChunks` are room-to-prop lookup
+  indexes built by `chrpropRegisterRooms`. Loading gameplay from a different
+  lifecycle moment, such as an ending cutscene, can leave the live tables stale
+  or corrupted even when each restored `PropRecord::rooms` list is correct.
+  Clear the tables before destructive prop replacement and rebuild a safe
+  intermediate table after props, attachments, and the player/viewer prop have
+  been restored. Then restore the saved tables exactly: chunk allocation and
+  entry order can affect `roomGetProps` traversal and downstream gameplay.
+  The serialized tables use signed variable-length entries because their
+  `-1` sentinels and small prop/chunk indices otherwise waste scarce SRAM.
   Do not deregister/register individual props while the save-state loader is
   still replacing props: after the reset, the chunk tables are intentionally
   discarded, and mid-load registration can rebuild them from transient
@@ -276,6 +278,20 @@ Add any general advice helpful for future agents working on this feature here. B
   (or another verified no-`memset` pattern) for nonzero sentinel fills in
   GCC-built practice code, and confirm prod disassembly when adding similar
   bulk initialization.
+- **Clearing Attached Props Must Unlink Them First**: The fallback path for an
+  invalid or already-released object cannot call `objDetach`, because that
+  helper dereferences the missing object/model. It must still use
+  `chrpropDetach` before clearing or freeing the `PropRecord`, and clear any
+  matching CHR weapon/hat convenience pointer. Otherwise the parent retains a
+  child whose object pointer is `NULL`, and normal CHR teardown later crashes
+  in `objFree`.
+- **Model Frame Cache Pointers Need Their Shared Buffer**: `Model::unk34`,
+  `unk38`, `unk64`, and `unk68` point into the 720-byte
+  `animations_frame_buffer`. Offscreen movement can consume these decoded
+  frames before the next matrix calculation. Restore the pointers and the
+  exact buffer bytes, and restore the buffer only after prop/model recreation
+  has finished decoding its own frames. Clearing the pointers loses root
+  motion; restoring pointers alone reads unrelated destination-stage data.
 - **Discard Post-Save CHR Equipment**: A guard can acquire a different weapon
   or hat after saving. When loading, an old attachment not named by the save
   must be freed, not detached and activated as a dropped item. Activating it
@@ -317,7 +333,16 @@ Add any general advice helpful for future agents working on this feature here. B
   transfer the generated model allocation to the saved weapon prop and rebuild
   the saved attachment graph. Reusing only the old prop/object payload leaves
   stale model-buffer pointers; keeping both children duplicates the held weapon
-  and corrupts ownership links.
+  and corrupts ownership links. Do not include player/viewer parents in the
+  earlier ordinary-prop child-graph pass. Their saved child props are only
+  placeholders until the hand buffers have been regenerated. Assert that every
+  child belongs to its saved parent before installing the link.
+- **Character Slot Ownership Includes Viewers**: When normalizing stale
+  `g_ChrSlots`, accept two-way ownership from `PROP_TYPE_CHR`,
+  `PROP_TYPE_PLAYER`, and `PROP_TYPE_VIEWER`. A live third-person Bond model
+  uses a viewer-owned CHR slot. Marking that slot free while the viewer still
+  references it lets a later `chrAllocate` overwrite `chr->prop`, causing the
+  next player collision-room update to follow an unrelated pointer.
 - **Validate Complete Model Node Graphs Before Reuse**: A `Model`, its header,
   and its root node can remain in RDRAM while a descendant node still contains
   stale `Data`, `Parent`, sibling, or child pointers into an overwritten hand
