@@ -358,6 +358,9 @@ static s32 deserialize_game_state(StateStream *stream, bool *stream_error) {
   if (!practice_states_restore_chr_model_display_lists()) {
     return LOAD_SERIALIZATION_POST_PROPS_FAILED;
   }
+  if (!practice_states_finish_chr_root_data_load(stream)) {
+    return LOAD_SERIALIZATION_POST_PROPS_FAILED;
+  }
   /* Prop/model reconstruction decodes animations into the shared scratch
    * buffer. Restore the saved bytes last so cached frame pointers observe the
    * same data as they did at the save boundary. */
@@ -473,13 +476,10 @@ void load_game_state(void) {
 
   freeze_current_frame_after_load(paused_resume_delta);
 
-  if (g_SaveStateCreatedThisStage) {
-    practice_grenade_cam_refresh();
-  } else {
+  if (!g_SaveStateCreatedThisStage) {
     /* External-camera views are rebuilt by the first normal live tick. Do not
      * discover restored projectile/model pointers in the forced paused frame
      * after a complete stage reload. */
-    practice_grenade_cam_reset();
     /* The destination stage has already rendered before this older lifecycle
      * is restored. Model render positions point into its per-frame arena and
      * can contain fixed matrices or display data by the time gameplay resumes.

@@ -85,6 +85,36 @@ class BalancingTests(unittest.TestCase):
         self.assertEqual(environment["REPLAY_SAVE_STATE_BUILD_MODE"], "release")
         self.assertEqual(environment["REPLAY_SAVE_STATE_SKIP_BUILD"], "1")
 
+    def test_native_cold_restart_runs_the_python_runner_directly(self):
+        task = next(
+            task
+            for task in RUNNER.discover_tasks()
+            if task.task_id == "save-state/jp/cold-restart/03-runway"
+        )
+
+        command = RUNNER.native_save_state_command(task, "JP")
+
+        self.assertEqual(command[0], sys.executable)
+        self.assertEqual(command[1], str(RUNNER.PRACTICE_RUNNER))
+        self.assertIn("--restart-between-loads", command)
+        self.assertIn("--skip-build", command)
+        self.assertNotIn("--test-param", command)
+
+    def test_native_camera_suite_multiplexes_every_region_replay(self):
+        task = next(
+            task
+            for task in RUNNER.discover_tasks()
+            if task.task_id == "save-state/eu/cameras"
+        )
+
+        command = RUNNER.native_save_state_command(task, "EU")
+
+        fixture_count = sum(arg == "--replay-fixture" for arg in command)
+        expected_count = len(list((RUNNER.REPLAY_ROOT / "eu").glob("*.ram")))
+        self.assertEqual(fixture_count, expected_count)
+        parameter = int(command[command.index("--test-param") + 1])
+        self.assertEqual(parameter, 1 | (3 << 8) | (1 << 16) | (3 << 24))
+
 
 if __name__ == "__main__":
     unittest.main()

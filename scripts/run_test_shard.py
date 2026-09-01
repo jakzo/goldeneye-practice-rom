@@ -19,6 +19,7 @@ TESTS_FILE = ROOT / "src/practice/practice_tests.c"
 REPLAY_ROOT = ROOT / "tests/replays"
 PRACTICE_RUNNER = ROOT / "scripts/run_practice_tests.py"
 SAVE_STATE_RUNNER = ROOT / "scripts/run_replay_save_state_tests.sh"
+SAVE_STATE_FRAME_LISTER = ROOT / "scripts/list_replay_save_state_frames.py"
 PATCH_ROM_SCRIPT = ROOT / "scripts/patch_practice_rom.py"
 HOST_REPLAY_RUNNER = ROOT / "ares/tests/n64-replay/run.py"
 
@@ -234,6 +235,69 @@ def estimate_label(task: TestTask) -> str:
     return f"{task.estimate_frames} frames"
 
 
+def native_save_state_command(task: TestTask, version: str) -> list[str]:
+    """Build the save-state wrapper's command on hosts that cannot run Bash."""
+    if task.replay is None:
+        replays = sorted((REPLAY_ROOT / task.region).glob("*.ram"))
+    else:
+        replays = [task.replay]
+    if not replays:
+        raise RuntimeError(f"no replay fixtures found for {task.region}")
+
+    command = [
+        sys.executable,
+        str(PRACTICE_RUNNER),
+        "--test",
+        "REPLAY_RUNWAY_SAVE_STATES",
+    ]
+    for replay in replays:
+        command.extend(("--replay-fixture", str(replay)))
+    command.extend(("--version", version, "--build-mode", "release"))
+
+    if task.variant == "cold-restart":
+        command.append("--restart-between-loads")
+        timeout = 1200
+    else:
+        spacing_seconds = 10 if task.variant == "long" else 1
+        wait_frames = 4 if task.variant == "long" else 3
+        duration_seconds = 30 if task.variant == "long" else 1
+        camera_flags = 3 if task.variant == "cameras" else 0
+        if task.variant == "near-end":
+            assert len(replays) == 1
+            frames_per_second = 50 if version == "EU" else 60
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SAVE_STATE_FRAME_LISTER),
+                    str(replays[0]),
+                    "--spacing-frames",
+                    str(frames_per_second),
+                    "--duration-before-end",
+                    "30",
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"could not calculate near-end duration: {result.stderr.strip()}"
+                )
+            test_param = int(result.stdout.strip()) | (wait_frames << 16) | (1 << 30)
+        else:
+            test_param = (
+                spacing_seconds
+                | (wait_frames << 8)
+                | (duration_seconds << 16)
+                | (camera_flags << 24)
+            )
+        command.extend(("--test-param", str(test_param)))
+        timeout = 1800 + 900 * len(replays) if len(replays) > 1 else 1200
+
+    command.extend(("--timeout", str(timeout), "--skip-build"))
+    return command
+
+
 def task_command(task: TestTask, artifacts: Path) -> tuple[list[str], dict[str, str]]:
     version, code = REGIONS[task.region]
     environment = os.environ.copy()
@@ -326,6 +390,8 @@ def task_command(task: TestTask, artifacts: Path) -> tuple[list[str], dict[str, 
         environment["REPLAY_SAVE_STATE_END_MARGIN_FRAMES"] = "30"
     elif task.variant == "cold-restart":
         environment["REPLAY_SAVE_STATE_RESTART_BETWEEN_LOADS"] = "1"
+    if os.name == "nt":
+        return native_save_state_command(task, version), environment
     return (
         [str(SAVE_STATE_RUNNER), str(REPLAY_ROOT / task.region), version],
         environment,

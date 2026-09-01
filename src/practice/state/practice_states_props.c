@@ -23,6 +23,7 @@
 #include "practice_states_props.h"
 #include "practice_states_utils.h"
 #include "practice_ui.h"
+#include "../practice_grenade_cam.h"
 #include "../practice_render.h"
 #include "stan.h"
 #include "unk_0A1DA0.h"
@@ -277,7 +278,8 @@ static void save_object_model_animation(StateStream *stream,
                                         const Model *model) {
   ModelRwData_HeaderRecord *root_data;
   bool has_root_data =
-      model != NULL && model->obj != NULL && model->obj->RootNode != NULL &&
+      model != NULL && model->obj != NULL && model->datas != NULL &&
+      model->obj->RootNode != NULL &&
       (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
 
   write_u32(stream, model != NULL ? get_animation_offset(model->anim) : -1);
@@ -323,8 +325,7 @@ static void save_object_model_animation(StateStream *stream,
 
   write_u8(stream, has_root_data);
   if (has_root_data) {
-    root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
-        (Model *)model, model->obj->RootNode);
+    root_data = (ModelRwData_HeaderRecord *)model->datas;
     write_bytes(stream, root_data, sizeof(ModelRwData_HeaderRecord));
   }
 }
@@ -425,9 +426,7 @@ static void load_object_model_animation(StateStream *stream, Model *model) {
 
   if (has_root_data && model->obj != NULL && model->obj->RootNode != NULL &&
       (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
-    ModelRwData_HeaderRecord *dst =
-        (ModelRwData_HeaderRecord *)modelGetNodeRwData(model,
-                                                       model->obj->RootNode);
+    ModelRwData_HeaderRecord *dst = (ModelRwData_HeaderRecord *)model->datas;
     *dst = root_data;
   }
 }
@@ -2703,7 +2702,59 @@ static u8 load_affine_matrix(StateStream *stream, Mtxf *matrix) {
   return mode;
 }
 
-static void save_object_base(StateStream *stream, ObjectRecord *obj) {
+#define OBJECT_COMMON_BUFFER_SIZE 192
+
+typedef struct ObjectCommonStream {
+  StateStream base;
+  u8 bytes[OBJECT_COMMON_BUFFER_SIZE];
+  u32 size;
+} ObjectCommonStream;
+
+static void object_common_write(StateStream *stream, const void *src,
+                                u32 size) {
+  ObjectCommonStream *common = (ObjectCommonStream *)stream;
+
+  if (stream->total_processed + size > sizeof(common->bytes)) {
+    practiceLogError("Object common state exceeds its temporary buffer");
+    assert(FALSE);
+    return;
+  }
+  memcpy(common->bytes + stream->total_processed, src, size);
+  stream->total_processed += size;
+  if (stream->total_processed > common->size) {
+    common->size = stream->total_processed;
+  }
+}
+
+static void object_common_read(StateStream *stream, void *dst, u32 size) {
+  ObjectCommonStream *common = (ObjectCommonStream *)stream;
+
+  if (stream->total_processed + size > common->size) {
+    practiceLogError("Object common state read exceeds its temporary buffer");
+    assert(FALSE);
+    return;
+  }
+  memcpy(dst, common->bytes + stream->total_processed, size);
+  stream->total_processed += size;
+}
+
+static void object_common_seek(StateStream *stream, u32 absolute_offset) {
+  stream->total_processed = absolute_offset;
+}
+
+static void object_common_flush(StateStream *stream) { (void)stream; }
+
+static void object_common_stream_init(ObjectCommonStream *stream, u32 size) {
+  stream->base.write_bytes = object_common_write;
+  stream->base.read_bytes = object_common_read;
+  stream->base.seek = object_common_seek;
+  stream->base.flush = object_common_flush;
+  stream->base.total_processed = 0;
+  stream->base.base_address = 0;
+  stream->size = size;
+}
+
+static void save_object_base_fields(StateStream *stream, ObjectRecord *obj) {
   s16 projIdx = -1;
   s16 embIdx = -1;
   s16 attachmentNodeIdx = -1;
@@ -2773,14 +2824,22 @@ static void save_object_base(StateStream *stream, ObjectRecord *obj) {
     }
   }
   write_u32(stream, switchStates);
+}
+
+static void save_object_base(StateStream *stream, ObjectRecord *obj) {
+  ObjectCommonStream common;
+
+  object_common_stream_init(&common, 0);
+  save_object_base_fields(&common.base, obj);
+  write_u16(stream, common.size);
+  write_effect_zero_rle(stream, common.bytes, common.size);
   save_object_deformation(stream, obj);
 }
 
-static bool load_object_base(StateStream *stream, ObjectRecord *obj,
-                             PropRecord *prop, s16 *attachmentNodeIdx,
-                             u32 *switchStatesOut) {
+static bool load_object_base_fields(StateStream *stream, ObjectRecord *obj,
+                                    PropRecord *prop, s16 *attachmentNodeIdx,
+                                    u32 *switchStatesOut) {
   PropDefHeaderRecord *pdhr = (PropDefHeaderRecord *)obj;
-  bool liveWasDestroyed = prop != NULL && objGetDestroyedLevel(obj) > 0;
   s16 projectileIdx;
   s16 embedmentIdx;
   u32 switchStates;
@@ -2854,11 +2913,37 @@ static bool load_object_base(StateStream *stream, ObjectRecord *obj,
     sub_GAME_7F050DE8(obj->model);
   }
 
+  return TRUE;
+}
+
+static bool load_object_base(StateStream *stream, ObjectRecord *obj,
+                             PropRecord *prop, s16 *attachmentNodeIdx,
+                             u32 *switchStatesOut) {
+  ObjectCommonStream common;
+  u16 size = read_u16(stream);
+  bool liveWasDestroyed = prop != NULL && objGetDestroyedLevel(obj) > 0;
+  bool result;
+
+  if (size > sizeof(common.bytes)) {
+    practiceLogError("Saved object common state is too large (%d)", size);
+    assert(FALSE);
+    return FALSE;
+  }
+  object_common_stream_init(&common, size);
+  read_effect_zero_rle(stream, common.bytes, size);
+  result = load_object_base_fields(&common.base, obj, prop, attachmentNodeIdx,
+                                   switchStatesOut);
+  if (common.base.total_processed != common.size) {
+    practiceLogError("Saved object common state has %d unread bytes",
+                     common.size - common.base.total_processed);
+    assert(FALSE);
+    return FALSE;
+  }
+
   // Toggle-relation rebuilding can reset display-list runtime data, so install
   // the saved vertex buffer only after the model's switches are reapplied.
   load_object_deformation(stream, prop != NULL ? obj : NULL, liveWasDestroyed);
-
-  return TRUE;
+  return result;
 }
 
 static void save_compact_contained_object_base(StateStream *stream,
@@ -5023,6 +5108,7 @@ bool save_props_state(StateStream *stream) {
   }
   save_room_prop_lists(stream);
   save_onscreen_prop_list(stream);
+  practice_grenade_cam_save_state(stream);
 
   /* Patch the props header with the real size and record count. */
   u32 totalPropsSize =
@@ -5045,6 +5131,70 @@ typedef struct PendingChrAttachments {
   ChrAttachmentIndices attachments;
   u32 root_data_offset;
 } PendingChrAttachments;
+
+typedef struct PendingChrRootData {
+  u16 prop_index;
+  u32 root_data_offset;
+} PendingChrRootData;
+
+static PendingChrRootData *g_PendingChrRootData;
+static u32 g_PendingChrRootDataSize;
+static s32 g_PendingChrRootDataCount;
+
+static void clear_pending_chr_root_data(void) {
+  if (g_PendingChrRootData != NULL) {
+    memaFree(g_PendingChrRootData, g_PendingChrRootDataSize);
+  }
+  g_PendingChrRootData = NULL;
+  g_PendingChrRootDataSize = 0;
+  g_PendingChrRootDataCount = 0;
+}
+
+static bool retain_pending_chr_root_data(
+    const PendingChrAttachments *attachments, s32 count) {
+  s32 i;
+
+  clear_pending_chr_root_data();
+  if (count <= 0) {
+    return TRUE;
+  }
+  g_PendingChrRootDataSize =
+      (count * sizeof(PendingChrRootData) + 0xf) & ~0xf;
+  g_PendingChrRootData = memaAlloc(g_PendingChrRootDataSize);
+  if (g_PendingChrRootData == NULL) {
+    practiceLogError("Could not retain CHR root restore metadata");
+    g_PendingChrRootDataSize = 0;
+    return FALSE;
+  }
+  for (i = 0; i < count; i++) {
+    g_PendingChrRootData[i].prop_index = attachments[i].prop_index;
+    g_PendingChrRootData[i].root_data_offset =
+        attachments[i].root_data_offset;
+  }
+  g_PendingChrRootDataCount = count;
+  return TRUE;
+}
+
+bool practice_states_finish_chr_root_data_load(StateStream *stream) {
+  s32 i;
+  bool result = TRUE;
+
+  for (i = 0; i < g_PendingChrRootDataCount; i++) {
+    PropRecord *prop =
+        get_prop_by_index(g_PendingChrRootData[i].prop_index);
+
+    if (g_PendingChrRootData[i].root_data_offset != 0 && prop != NULL &&
+        prop->chr != NULL &&
+        !practice_states_reload_model_root_data(
+            stream, prop->chr->model,
+            g_PendingChrRootData[i].root_data_offset)) {
+      result = FALSE;
+      break;
+    }
+  }
+  clear_pending_chr_root_data();
+  return result;
+}
 
 #define MAX_PENDING_PLAYER_OBJECTS 2
 
@@ -6443,6 +6593,9 @@ static bool load_props_state_with_scratch(
     return FALSE;
   }
   load_onscreen_prop_list(stream);
+  if (!practice_grenade_cam_load_state(stream)) {
+    return FALSE;
+  }
 
   /* Replacing characters by exact prop and ChrRecord slots can leave an old,
    * now-unowned ChrRecord pointing at a model-pool entry. That entry may have
@@ -6500,28 +6653,13 @@ static bool load_props_state_with_scratch(
     }
   }
 
-  /* Later CHR/model reconstruction can initialize a display-list RW record
-   * through a temporarily stale shared index, overwriting the already-loaded
-   * root header. Reapply the exact saved root only after every prop and model
-   * allocation has settled; shared definitions and display lists are repaired
-   * immediately after this function returns. */
+  /* Definition and display-list repair can write through temporarily stale
+   * shared RW-data indices. Retain each serialized root offset so the caller
+   * can reapply it after both repair passes have completed. */
   if (!practice_states_canonicalize_chr_model_definitions()) {
     return FALSE;
   }
-  for (i = 0; i < pendingChrCount; i++) {
-    PropRecord *prop =
-        get_prop_by_index(pendingChrAttachments[i].prop_index);
-
-    if (pendingChrAttachments[i].root_data_offset != 0 && prop != NULL &&
-        prop->chr != NULL &&
-        !practice_states_reload_model_root_data(
-            stream, prop->chr->model,
-            pendingChrAttachments[i].root_data_offset)) {
-      return FALSE;
-    }
-  }
-
-  return TRUE;
+  return retain_pending_chr_root_data(pendingChrAttachments, pendingChrCount);
 }
 
 bool load_props_state(StateStream *stream) {
@@ -6538,6 +6676,8 @@ bool load_props_state(StateStream *stream) {
   SavedPropLinks *savedLinks;
   PendingChrAttachments *pendingChrAttachments;
   bool result;
+
+  clear_pending_chr_root_data();
 
   if (recordCount > POS_DATA_ENTRY_LEN) {
     practiceLogWarn("Invalid prop record count %d", recordCount);

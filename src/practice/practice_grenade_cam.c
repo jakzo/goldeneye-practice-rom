@@ -7,6 +7,9 @@
 #include "player.h"
 #include "practice_config.h"
 #include "practice_external_camera.h"
+#include "practice_ui.h"
+#include "state/practice_states_utils.h"
+#include <assert.h>
 #include <fr.h>
 #include <math.h>
 #include <ultra64.h>
@@ -233,4 +236,71 @@ void practice_grenade_cam_reset(void) {
   for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
     reset_slot(&g_GrenadeCamSlots[s]);
   }
+}
+
+void practice_grenade_cam_save_state(StateStream *stream) {
+  s32 s;
+
+  write_u8(stream, MAX_GRENADE_CAM_SLOTS);
+  for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
+    struct grenade_cam_slot *slot = &g_GrenadeCamSlots[s];
+    s16 prop_index = -1;
+
+    if (slot->item_obj != NULL) {
+      if (slot->item_obj->prop == NULL ||
+          slot->item_obj->prop->obj != slot->item_obj) {
+        practiceLogError("Grenade camera slot %d has an invalid object", s);
+        assert(FALSE);
+      } else {
+        prop_index = get_prop_index(slot->item_obj->prop);
+      }
+    }
+
+    write_u16(stream, (u16)prop_index);
+    write_bytes(stream, &slot->item_last_pos, sizeof(slot->item_last_pos));
+    write_u32(stream, get_tile_offset(slot->item_last_stan));
+    write_bytes(stream, &slot->camera_pos, sizeof(slot->camera_pos));
+    write_u32(stream, (u32)slot->freeze_ticks);
+    write_u8(stream, slot->active);
+  }
+}
+
+bool practice_grenade_cam_load_state(StateStream *stream) {
+  u8 count = read_u8(stream);
+  s32 s;
+
+  if (count != MAX_GRENADE_CAM_SLOTS) {
+    practiceLogError("Saved grenade camera slot count is invalid (%d)", count);
+    assert(FALSE);
+    return FALSE;
+  }
+
+  for (s = 0; s < MAX_GRENADE_CAM_SLOTS; s++) {
+    struct grenade_cam_slot *slot = &g_GrenadeCamSlots[s];
+    s16 prop_index = (s16)read_u16(stream);
+    PropRecord *prop;
+
+    read_bytes(stream, &slot->item_last_pos, sizeof(slot->item_last_pos));
+    slot->item_last_stan = get_tile_by_offset((s32)read_u32(stream));
+    read_bytes(stream, &slot->camera_pos, sizeof(slot->camera_pos));
+    slot->freeze_ticks = (s32)read_u32(stream);
+    slot->active = read_u8(stream) != 0;
+    slot->item_obj = NULL;
+
+    if (prop_index >= 0) {
+      prop = get_prop_by_index(prop_index);
+      if (prop == NULL ||
+          (prop->type != PROP_TYPE_OBJ && prop->type != PROP_TYPE_DOOR &&
+           prop->type != PROP_TYPE_WEAPON) ||
+          prop->obj == NULL || prop->obj->prop != prop) {
+        practiceLogError("Grenade camera slot %d has invalid prop %d", s,
+                         prop_index);
+        assert(FALSE);
+        return FALSE;
+      }
+      slot->item_obj = prop->obj;
+    }
+  }
+
+  return TRUE;
 }

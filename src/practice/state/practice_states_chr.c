@@ -1506,9 +1506,17 @@ static bool visit_model_definition_rw_indices(
     if (rw_index != NULL) {
       if (stream != NULL) {
         if (save) {
-          write_u16(stream, *rw_index);
+          /* A definition root is always the first record in its own RW-data
+           * block. Attached heads use a separate block, so their root is also
+           * index zero. Shared attachment setup can leave this mutable field
+           * describing another instance; never persist that drift. */
+          write_u16(stream,
+                    opcode == MODELNODE_OPCODE_HEADER ? 0 : *rw_index);
         } else {
-          *rw_index = read_u16(stream);
+          u16 saved_index = read_u16(stream);
+
+          *rw_index =
+              opcode == MODELNODE_OPCODE_HEADER ? 0 : saved_index;
         }
       }
       (*index_count)++;
@@ -2077,7 +2085,8 @@ void practice_states_save_model_animation(StateStream *stream,
   saved.unkb8 = model->unkb8;
   saved.unkbc = model->unkbc;
   saved.has_root_data =
-      model->obj != NULL && model->obj->RootNode != NULL &&
+      model->obj != NULL && model->datas != NULL &&
+      model->obj->RootNode != NULL &&
       (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
   if (model->animflipfunc == (s32)bheadFlipAnimation) {
     saved.anim_flip_callback = 1;
@@ -2088,8 +2097,10 @@ void practice_states_save_model_animation(StateStream *stream,
 
   write_animation_zero_rle(stream, (u8 *)&saved, sizeof(saved));
   if (saved.has_root_data) {
-    root_data = (ModelRwData_HeaderRecord *)modelGetNodeRwData(
-        (Model *)model, model->obj->RootNode);
+    /* The body header owns the first records in every model allocation.
+     * RootNode::RwDataIndex is shared definition state and can temporarily
+     * reflect another attached model while save-state data is collected. */
+    root_data = (ModelRwData_HeaderRecord *)model->datas;
     write_animation_zero_rle(stream, (u8 *)root_data, sizeof(*root_data));
   }
   {
@@ -2199,9 +2210,7 @@ static void practice_states_load_model_animation_internal(
   if (saved.has_root_data && model->obj != NULL &&
       model->obj->RootNode != NULL &&
       (model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
-    ModelRwData_HeaderRecord *dst =
-        (ModelRwData_HeaderRecord *)modelGetNodeRwData(model,
-                                                       model->obj->RootNode);
+    ModelRwData_HeaderRecord *dst = (ModelRwData_HeaderRecord *)model->datas;
     *dst = root_data;
   }
 }
@@ -2236,8 +2245,7 @@ bool practice_states_reload_model_root_data(StateStream *stream, Model *model,
   stream_seek(stream, saved_root_data_offset);
   read_animation_zero_rle(stream, (u8 *)&root_data, sizeof(root_data));
   stream_seek(stream, resume_offset);
-  *(ModelRwData_HeaderRecord *)modelGetNodeRwData(
-      model, model->obj->RootNode) = root_data;
+  *(ModelRwData_HeaderRecord *)model->datas = root_data;
   return TRUE;
 }
 
@@ -2548,10 +2556,13 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   bool supported_action = is_supported_chr_action(chr);
   bool has_model_transform =
       chr->model != NULL && chr->model->obj != NULL &&
-      chr->model->obj->RootNode != NULL &&
+      chr->model->datas != NULL && chr->model->obj->RootNode != NULL &&
+      chr->model->obj->RootNode->Data != NULL &&
       (chr->model->obj->RootNode->Opcode & 0xff) == MODELNODE_OPCODE_HEADER;
+  ModelRwData_HeaderRecord *model_root =
+      has_model_transform ? (ModelRwData_HeaderRecord *)chr->model->datas : NULL;
   f32 model_heading = has_model_transform
-                          ? normalize_chr_heading(getsubroty(chr->model))
+                          ? normalize_chr_heading(model_root->unk14)
                           : 0.0f;
 
   if (chr->model != NULL && chr->model->obj != NULL &&
@@ -2680,7 +2691,7 @@ void save_chr_record(StateStream *stream, const ChrRecord *chr) {
   if (has_model_transform) {
     coord3d model_offset;
 
-    getsuboffset(chr->model, &model_offset);
+    model_offset = model_root->pos;
     write_bytes(stream, &model_offset, sizeof(coord3d));
     write_f32(stream, model_heading);
   }
@@ -2889,10 +2900,11 @@ void load_chr_record(StateStream *stream, ChrRecord *chr,
     if (!loaded_model_animation &&
         (root->Opcode & 0xff) == MODELNODE_OPCODE_HEADER) {
       ModelRwData_HeaderRecord *root_data =
-          (ModelRwData_HeaderRecord *)modelGetNodeRwData(chr->model, root);
+          (ModelRwData_HeaderRecord *)chr->model->datas;
 
       bzero(root_data, sizeof(*root_data));
     }
+    root->Data->Header.RwDataIndex = 0;
     setsuboffset(chr->model, &model_offset);
     setsubroty(chr->model, model_heading);
   }

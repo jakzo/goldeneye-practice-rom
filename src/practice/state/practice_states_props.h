@@ -7,6 +7,7 @@
 
 bool save_props_state(StateStream *stream);
 bool load_props_state(StateStream *stream);
+bool practice_states_finish_chr_root_data_load(StateStream *stream);
 bool practice_states_restore_chr_model_display_lists(void);
 void practice_states_sanitize_chr_attachments(ChrRecord *chr);
 
