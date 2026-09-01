@@ -26,11 +26,11 @@
   "builds": {
     "dev": {
       "EU": {
-        "average_frame_cycles": 1835171.990825688,
-        "average_tlb_loads": 2.2660550458715596,
-        "frame_cycles_difference_from_base_percent": 8.82226754243513,
+        "average_frame_cycles": 1940230.0321100918,
+        "average_tlb_loads": 3.1192660550458715,
+        "frame_cycles_difference_from_base_percent": 15.05201294683821,
         "frames": 218,
-        "total_code_size_bytes": 1111584
+        "total_code_size_bytes": 1117296
       },
       "JP": {
         "average_frame_cycles": 1805211.6485148515,
@@ -40,20 +40,20 @@
         "total_code_size_bytes": 1077776
       },
       "US": {
-        "average_frame_cycles": 2006297.297029703,
-        "average_tlb_loads": 3.608910891089109,
-        "frame_cycles_difference_from_base_percent": 8.196561766858013,
+        "average_frame_cycles": 2107140.3663366335,
+        "average_tlb_loads": 4.435643564356436,
+        "frame_cycles_difference_from_base_percent": 13.634875118114707,
         "frames": 202,
-        "total_code_size_bytes": 1188672
+        "total_code_size_bytes": 1194512
       }
     },
     "release": {
       "EU": {
-        "average_frame_cycles": 1788185.7064220184,
-        "average_tlb_loads": 1.8394495412844036,
-        "frame_cycles_difference_from_base_percent": 6.036068735041302,
+        "average_frame_cycles": 1894827.9770642202,
+        "average_tlb_loads": 2.6559633027522938,
+        "frame_cycles_difference_from_base_percent": 12.359755978075714,
         "frames": 218,
-        "total_code_size_bytes": 1111232
+        "total_code_size_bytes": 1116944
       },
       "JP": {
         "average_frame_cycles": 1788854.287128713,
@@ -63,11 +63,11 @@
         "total_code_size_bytes": 1077376
       },
       "US": {
-        "average_frame_cycles": 2037414.702970297,
-        "average_tlb_loads": 3.717821782178218,
-        "frame_cycles_difference_from_base_percent": 9.874676141462608,
+        "average_frame_cycles": 2268744.5396039602,
+        "average_tlb_loads": 6.00990099009901,
+        "frame_cycles_difference_from_base_percent": 22.349942391836645,
         "frames": 202,
-        "total_code_size_bytes": 1188320
+        "total_code_size_bytes": 1194160
       }
     }
   },
