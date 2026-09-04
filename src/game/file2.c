@@ -8,6 +8,9 @@
 #include "file2.h"
 #include "front.h"
 #include "cheat_buttons.h"
+#ifdef REPLAY_RECORD
+#include "replay.h"
+#endif
 
 
 // bss
@@ -590,6 +593,9 @@ void fileValidateSaves(void)
             }
         }
     }
+#ifdef REPLAY_RECORD
+    replay_init_profile();
+#endif
 }
 
 /**

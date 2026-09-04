@@ -53,7 +53,7 @@
 #include "bondview_r.h"
 #include "initBondDATAdefaults.h"
 #include "viewport.h"
-#ifdef REPLAY_PLAYBACK
+#if defined(REPLAY_PLAYBACK) || defined(REPLAY_RECORD)
 #include "replay.h"
 #endif
 #include "stan.h"
@@ -306,7 +306,7 @@ void lvlStageLoad(s32 stage)
     s32 i;
     struct player_data *player_data;
 
-#ifdef REPLAY_PLAYBACK
+#if defined(REPLAY_PLAYBACK) || defined(REPLAY_RECORD)
     replay_before_stage_load(stage);
 #endif
     g_CurrentStageToLoad = stage;
@@ -504,7 +504,7 @@ void lvlStageLoad(s32 stage)
         }
 
         set_cur_player(0);
-#ifdef REPLAY_PLAYBACK
+#if defined(REPLAY_PLAYBACK) || defined(REPLAY_RECORD)
         replay_on_stage_load();
 #endif
     }
@@ -4616,5 +4616,4 @@ f32 lvlGetPowerOnTimeSec(void)
 {
     return g_PowerOnTimeSec;
 }
-
 

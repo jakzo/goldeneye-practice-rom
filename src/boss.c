@@ -39,7 +39,7 @@
 #include "game/player.h"
 #include "game/unk_0C0A70.h"
 #include "PR/R4300.h"
-#ifdef REPLAY_PLAYBACK
+#if defined(REPLAY_PLAYBACK) || defined(REPLAY_RECORD)
 #include "replay.h"
 #endif
 
@@ -168,7 +168,7 @@ void bossInitMainthreadData(void)
     rspInit();
     dynInit();
     joyInit();
-#ifdef REPLAY_PLAYBACK
+#if defined(REPLAY_PLAYBACK) || defined(REPLAY_RECORD)
     replay_init();
 #endif
     osCreateMesgQueue(&bossmq, &bossmsg, 1);

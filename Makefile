@@ -10,6 +10,11 @@ VERSION := US
 IDO_RECOMP := YES
 VERBOSE := 2
 REPLAY_PLAYBACK := 0
+REPLAY_RECORD := 0
+
+ifeq ($(REPLAY_PLAYBACK)$(REPLAY_RECORD),11)
+ $(error REPLAY_PLAYBACK and REPLAY_RECORD cannot both be enabled)
+endif
 # If COMPARE is 1, check the output sha1sum when building 'all', and if fail to match
 # then compare ELF sections to known md5 checksums.
 COMPARE := 1
@@ -207,6 +212,12 @@ ifeq ($(REPLAY_PLAYBACK), 1)
  CFLAGS += -DREPLAY_PLAYBACK
  LDFILEOPTS += -DREPLAY_PLAYBACK
  ASMDEFS += --defsym REPLAY_PLAYBACK=1
+endif
+
+ifeq ($(REPLAY_RECORD), 1)
+ CFLAGS += -DREPLAY_RECORD
+ LDFILEOPTS += -DREPLAY_RECORD
+ ASMDEFS += --defsym REPLAY_RECORD=1
 endif
 
 LD := $(TOOLCHAIN)ld

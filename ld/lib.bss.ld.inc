@@ -22,6 +22,9 @@
 #ifdef REPLAY_PLAYBACK
       build/OUTCODE/src/replay.o (.bss);
 #endif
+#ifdef REPLAY_RECORD
+      build/OUTCODE/src/replay_record.o (.bss);
+#endif
       build/OUTCODE/src/music.o (.bss);
       build/OUTCODE/src/snd.o (.bss);
       build/OUTCODE/src/memp.o (.bss);

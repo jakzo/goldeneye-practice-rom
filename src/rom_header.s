@@ -14,7 +14,11 @@
 .ifdef REPLAY_PLAYBACK
 .ascii "ED"       # libdragon homebrew ID; enables explicit save metadata
 .else
+.ifdef REPLAY_RECORD
+.ascii "ED"       # libdragon homebrew ID; enables explicit save metadata
+.else
 .ascii "GE"       # cartridge ID
+.endif
 .endif
 .ifdef LANG_US
 .ascii "E"        # country
@@ -28,5 +32,9 @@
 .ifdef REPLAY_PLAYBACK
 .byte  0x60       # libdragon metadata: 1 Mbit SRAM
 .else
+.ifdef REPLAY_RECORD
+.byte  0x60       # libdragon metadata: 1 Mbit SRAM
+.else
 .byte  0x00       # version
+.endif
 .endif

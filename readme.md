@@ -1,5 +1,21 @@
 # Goldeneye 007
 
+## Record a replay
+
+Build the US recording ROM with:
+
+```bash
+make -j8 REPLAY_RECORD=1 COMPARE=0 VERSION=US
+```
+
+Every non-title level starts a new recording. Return to the title screen to
+finalize it before shutting down. The replay is written to SRAM starting at
+offset `0x600`; starting another level replaces the previous recording.
+
+On first startup, folder 1 gets every level, difficulty, cheat, and multiplayer
+unlock. Its initial controls are 1.2, upright aim, look-ahead off, and the
+remaining default options. Later settings changes are saved in SRAM.
+
 ## Performance benchmarks
 
 These commands build the replay-enabled base decomp and benchmark a

@@ -24,6 +24,9 @@
 #ifdef REPLAY_PLAYBACK
       build/OUTCODE/src/replay.o (.rodata);
 #endif
+#ifdef REPLAY_RECORD
+      build/OUTCODE/src/replay_record.o (.rodata);
+#endif
       build/OUTCODE/src/music.o (.rodata);
       build/OUTCODE/src/snd.o (.rodata);
       build/OUTCODE/src/memp.o (.rodata);
