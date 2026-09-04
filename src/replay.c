@@ -3,10 +3,15 @@
 #include "game/file.h"
 #include "game/file2.h"
 #include "game/lvl.h"
+#include "game/bondview.h"
+#include "game/player.h"
 #include "game/watch.h"
 #include <PR/os_internal.h>
 #include <PR/rcp.h>
 #include <stdarg.h>
+#ifdef ENABLE_USB
+#include "usb.h"
+#endif
 
 #ifdef REPLAY_PLAYBACK
 
@@ -84,6 +89,17 @@ static u32 g_Timestamp;
 static s32 g_FrameLoaded;
 static s32 g_Playing;
 static s32 g_LogAvailable;
+#ifdef ENABLE_USB
+static u64 g_ProfileCycleTotal;
+static u32 g_ProfileCycleStart;
+static u32 g_ProfileFrameCount;
+static u32 g_ProfileDroppedFrames;
+static u32 g_ProfileRetraceFrames;
+static u32 g_ProfileFullMoveRetraceFrames;
+static u64 g_ProfileLagTimeNanoseconds;
+static s32 g_ProfileFrameActive;
+static s32 g_ProfileUpdateSeen;
+#endif
 
 static char *log_writer(char *arg, const char *src, size_t count)
 {
@@ -105,8 +121,10 @@ static void log_line(const char *format, ...)
     LogWriter writer;
     va_list args;
     s32 length;
+#ifndef ENABLE_USB
     s32 i;
     u32 word;
+#endif
 
     if (!g_LogAvailable) {
         return;
@@ -121,6 +139,9 @@ static void log_line(const char *format, ...)
     *writer.position++ = '\n';
     length = writer.position - buffer;
 
+#ifdef ENABLE_USB
+    usb_write_text((u8 *)buffer, length);
+#else
     for (i = 0; i < length; i += 4) {
         word = (u32)(u8)buffer[i] << 24;
         if (i + 1 < length) {
@@ -136,6 +157,7 @@ static void log_line(const char *format, ...)
     }
 
     IO_WRITE(ISVIEWER_WRITE_PTR, length);
+#endif
 }
 
 static s32 sram_read(u32 offset, void *destination, u32 size)
@@ -300,8 +322,12 @@ void replay_init(void)
     __osPiTable = &g_SramHandle;
     osSetIntMask(mask);
 
+#ifdef ENABLE_USB
+    g_LogAvailable = TRUE;
+#else
     IO_WRITE(ISVIEWER_MAGIC, 0x12345678);
     g_LogAvailable = IO_READ(ISVIEWER_MAGIC) == 0x12345678;
+#endif
     sram_read(REPLAY_SRAM_OFFSET, &g_Header, sizeof(g_Header));
 }
 
@@ -341,6 +367,17 @@ void replay_before_stage_load(s32 stage)
     g_Timestamp = 0;
     g_FrameLoaded = FALSE;
     g_Playing = TRUE;
+#ifdef ENABLE_USB
+    g_ProfileCycleTotal = 0;
+    g_ProfileCycleStart = 0;
+    g_ProfileFrameCount = 0;
+    g_ProfileDroppedFrames = 0;
+    g_ProfileRetraceFrames = 1;
+    g_ProfileFullMoveRetraceFrames = 0;
+    g_ProfileLagTimeNanoseconds = 0;
+    g_ProfileFrameActive = FALSE;
+    g_ProfileUpdateSeen = FALSE;
+#endif
 }
 
 void replay_on_stage_load(void)
@@ -360,6 +397,15 @@ s32 replay_override_delta(s32 delta_frames)
     }
 
     if (g_FrameIndex >= g_Header.frame_count) {
+#ifdef ENABLE_USB
+        log_line("PERF_STATS frames=%u cycle_hi=%u cycle_lo=%u dropped_frames=%u",
+                 g_ProfileFrameCount, (u32)(g_ProfileCycleTotal >> 32),
+                 (u32)g_ProfileCycleTotal, g_ProfileDroppedFrames);
+        log_line("LAG_STATS lag_ns_hi=%u lag_ns_lo=%u full_move_retrace_frames=%u mission_timer_ticks=%d",
+                 (u32)(g_ProfileLagTimeNanoseconds >> 32),
+                 (u32)g_ProfileLagTimeNanoseconds,
+                 g_ProfileFullMoveRetraceFrames, mission_timer);
+#endif
         log_line("TEST_COMPLETE frames=%u duration=%u", g_FrameIndex, g_Timestamp);
         stop_playback();
         return delta_frames;
@@ -373,6 +419,93 @@ s32 replay_override_delta(s32 delta_frames)
 
     return g_Frame.delta_frames;
 }
+
+#ifdef ENABLE_USB
+void replay_profile_update_retrace(s32 delta_frames)
+{
+    if (!g_Playing) {
+        return;
+    }
+
+    if (g_ProfileUpdateSeen) {
+        g_ProfileRetraceFrames = delta_frames;
+    } else {
+        /* Do not charge the stage-load interval to the first rendered frame. */
+        g_ProfileRetraceFrames = 1;
+    }
+    g_ProfileUpdateSeen = TRUE;
+}
+
+void replay_profile_lag_tick(void)
+{
+    f32 d;
+    f32 poly_added;
+    f32 lagged_100m_time;
+    f32 lag_seconds;
+    u32 dropped_frames;
+    u32 lag_nanoseconds;
+
+    if (!g_Playing || g_CurrentPlayer == NULL || !is_timer_active ||
+        g_ClockTimer <= 0) {
+        return;
+    }
+
+    if (g_ProfileRetraceFrames > 1) {
+        g_ProfileDroppedFrames += g_ProfileRetraceFrames - 1;
+    }
+
+    if ((g_CurrentPlayer->speedforwards > -0.5f &&
+         g_CurrentPlayer->speedforwards < 0.5f) ||
+        (g_CurrentPlayer->speedsideways > -0.5f &&
+         g_CurrentPlayer->speedsideways < 0.5f)) {
+        return;
+    }
+
+    g_ProfileFullMoveRetraceFrames += g_ProfileRetraceFrames;
+    dropped_frames = g_ProfileRetraceFrames - 1;
+    if (dropped_frames == 0) {
+        return;
+    }
+
+    d = (f32)dropped_frames;
+    poly_added =
+        d * (0.247800872f +
+             d * (0.017377249f +
+                  d * (-0.001018621f + d * 0.000013940f)));
+    if (poly_added <= 0.0f) {
+        return;
+    }
+
+    lagged_100m_time = 12.17f + poly_added;
+    lag_seconds = ((f32)g_ProfileRetraceFrames / 60.0f) *
+                  (poly_added / lagged_100m_time);
+
+    /* Quantize each contribution once, then accumulate without float drift. */
+    lag_nanoseconds = (u32)(lag_seconds * 1000000000.0f + 0.5f);
+    g_ProfileLagTimeNanoseconds += lag_nanoseconds;
+}
+
+void replay_profile_frame_start(void)
+{
+    if (!g_Playing) {
+        return;
+    }
+
+    g_ProfileCycleStart = osGetCount();
+    g_ProfileFrameActive = TRUE;
+}
+
+void replay_profile_frame_end(void)
+{
+    if (!g_ProfileFrameActive) {
+        return;
+    }
+
+    g_ProfileCycleTotal += (u32)(osGetCount() - g_ProfileCycleStart);
+    g_ProfileFrameCount++;
+    g_ProfileFrameActive = FALSE;
+}
+#endif
 
 void replay_frame_start(void)
 {

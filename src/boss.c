@@ -487,6 +487,9 @@ void bossMainloop(void)
                             permit_stderr(0);
 
                             gdl = firstGdl = dynGetMasterDisplayList();
+#if defined(REPLAY_PLAYBACK) && defined(ENABLE_USB)
+                            replay_profile_frame_start();
+#endif
 
 #ifdef DEBUGMENU
                             //ported from pd beta, official way to open debug menu
@@ -575,6 +578,9 @@ void bossMainloop(void)
                             }
 
                             freeGfx = dynGetFreeGfx2(gdl);
+#if defined(REPLAY_PLAYBACK) && defined(ENABLE_USB)
+                            replay_profile_frame_end();
+#endif
                             dynSwapBuffers();
                             video_related_8();
 

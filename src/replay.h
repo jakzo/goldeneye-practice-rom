@@ -6,6 +6,12 @@
 void replay_init(void);
 #ifdef REPLAY_PLAYBACK
 s32 replay_get_stage(void);
+#ifdef ENABLE_USB
+void replay_profile_update_retrace(s32 delta_frames);
+void replay_profile_lag_tick(void);
+void replay_profile_frame_start(void);
+void replay_profile_frame_end(void);
+#endif
 #endif
 void replay_before_stage_load(s32 stage);
 void replay_on_stage_load(void);

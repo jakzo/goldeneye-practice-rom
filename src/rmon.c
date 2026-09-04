@@ -7,6 +7,7 @@
 #include "libultra/libc/xstdio.h"
 #include "crash.h"
 #include "rmon.h" /*<PR/rmon.h>*/
+#include "sc64.h"
 
 #ifdef ENABLE_USB
 
@@ -92,6 +93,7 @@ void rmonMain(void) {
         }
         }
 
+        sc64_poll();
         osSetTimer(&rmonSleeptimer, OS_USEC_TO_CYCLES(1000000), 0, &rmonSleepMq, rmonSleepMesg);
         osRecvMesg(&rmonSleepMq, &rmonSleepMesg, OS_MESG_BLOCK);
     }

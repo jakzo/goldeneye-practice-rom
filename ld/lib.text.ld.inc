@@ -45,6 +45,8 @@
       build/OUTCODE/src/rmon.o (.text);
 #ifdef ENABLE_USB
       build/OUTCODE/src/usb.o (.text);
+      build/OUTCODE/src/sc64.o (.text);
+      build/OUTCODE/src/sc64_reboot.o (.text);
 #endif
       /*build/OUTCODE/src/libultra/osPiRawStartDma.o (.text);*/
       build/OUTCODE/src/libultra/io/pirawdma.o (.text);
