@@ -487,7 +487,7 @@ void bossMainloop(void)
                             permit_stderr(0);
 
                             gdl = firstGdl = dynGetMasterDisplayList();
-#if defined(REPLAY_PLAYBACK) && defined(ENABLE_USB)
+#ifdef REPLAY_PLAYBACK
                             replay_profile_frame_start();
 #endif
 
@@ -578,7 +578,7 @@ void bossMainloop(void)
                             }
 
                             freeGfx = dynGetFreeGfx2(gdl);
-#if defined(REPLAY_PLAYBACK) && defined(ENABLE_USB)
+#ifdef REPLAY_PLAYBACK
                             replay_profile_frame_end();
 #endif
                             dynSwapBuffers();

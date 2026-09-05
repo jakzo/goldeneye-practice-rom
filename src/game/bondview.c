@@ -42,7 +42,7 @@
 #include "explosions.h"
 #include "os_extension.h"
 #include "unk_0B3200.h"
-#if defined(REPLAY_PLAYBACK) && defined(ENABLE_USB)
+#ifdef REPLAY_PLAYBACK
 #include "replay.h"
 #endif
 
@@ -11723,7 +11723,7 @@ void bondviewMovePlayerUpdateViewport(s8 stick_x, s8 stick_y, u16 buttons)
         bondviewFrozenMoveBond(stick_x, stick_y, buttons, (u16) g_CurrentPlayer->buttons_pressed);
     }
 
-#if defined(REPLAY_PLAYBACK) && defined(ENABLE_USB)
+#ifdef REPLAY_PLAYBACK
     replay_profile_lag_tick();
 #endif
 

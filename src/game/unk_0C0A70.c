@@ -49,9 +49,7 @@ void store_osgetcount(void)
 void updateFrameCounters(s32 deltaFrames)
 {
 #ifdef REPLAY_PLAYBACK
-#ifdef ENABLE_USB
     replay_profile_update_retrace(deltaFrames);
-#endif
     deltaFrames = replay_override_delta(deltaFrames);
 #endif
     copy_of_osgetcount_value_0 = (s32) copy_of_osgetcount_value_1;

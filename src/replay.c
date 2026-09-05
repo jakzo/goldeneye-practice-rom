@@ -32,6 +32,8 @@
 #endif
 #define REPLAY_FLAG_FRAME_SEEDS 1
 #define REPLAY_SRAM_OFFSET 0x600
+#define REPLAY_PROFILE_SRAM_OFFSET 0x100
+#define REPLAY_PROFILE_MAGIC 0x50524631
 #define REPLAY_PAGE_SIZE 256
 #define ISVIEWER_MAGIC 0x13ff0000
 #define ISVIEWER_WRITE_PTR 0x13ff0014
@@ -69,6 +71,16 @@ typedef struct LogWriter {
     size_t remaining;
 } LogWriter;
 
+typedef struct ReplayProfileResult {
+    u32 magic;
+    u32 frame_count;
+    u64 cycle_total;
+    u32 dropped_frames;
+    u32 full_move_retrace_frames;
+    u64 lag_time_nanoseconds;
+    s32 mission_timer_ticks;
+} ReplayProfileResult;
+
 extern OSDevMgr __osPiDevMgr;
 extern OSPiHandle *__osPiTable;
 extern OSMesgQueue *osPiGetCmdQueue(void);
@@ -89,7 +101,6 @@ static u32 g_Timestamp;
 static s32 g_FrameLoaded;
 static s32 g_Playing;
 static s32 g_LogAvailable;
-#ifdef ENABLE_USB
 static u64 g_ProfileCycleTotal;
 static u32 g_ProfileCycleStart;
 static u32 g_ProfileFrameCount;
@@ -99,7 +110,9 @@ static u32 g_ProfileFullMoveRetraceFrames;
 static u64 g_ProfileLagTimeNanoseconds;
 static s32 g_ProfileFrameActive;
 static s32 g_ProfileUpdateSeen;
-#endif
+static s32 g_ProfileResultWritten;
+
+static void replay_profile_write_result(void);
 
 static char *log_writer(char *arg, const char *src, size_t count)
 {
@@ -172,6 +185,31 @@ static s32 sram_read(u32 offset, void *destination, u32 size)
     io.hdr.pri = OS_MESG_PRI_NORMAL;
     io.hdr.retQueue = &queue;
     io.dramAddr = destination;
+    io.devAddr = offset;
+    io.size = size;
+    io.piHandle = &g_SramHandle;
+
+    if (!__osPiDevMgr.active ||
+        osSendMesg(osPiGetCmdQueue(), (OSMesg)&io, OS_MESG_BLOCK) == -1) {
+        return FALSE;
+    }
+
+    osRecvMesg(&queue, NULL, OS_MESG_BLOCK);
+    return TRUE;
+}
+
+static s32 sram_write(u32 offset, void *source, u32 size)
+{
+    OSIoMesg io;
+    OSMesgQueue queue;
+    OSMesg message;
+
+    osWritebackDCache(source, size);
+    osCreateMesgQueue(&queue, &message, 1);
+    io.hdr.type = OS_MESG_TYPE_EDMAWRITE;
+    io.hdr.pri = OS_MESG_PRI_NORMAL;
+    io.hdr.retQueue = &queue;
+    io.dramAddr = source;
     io.devAddr = offset;
     io.size = size;
     io.piHandle = &g_SramHandle;
@@ -267,7 +305,7 @@ static s32 load_frame(void)
     return FALSE;
 }
 
-static void stop_playback(void)
+void practice_replay_stop_playback(void)
 {
     g_Playing = FALSE;
     g_FrameLoaded = FALSE;
@@ -367,7 +405,6 @@ void replay_before_stage_load(s32 stage)
     g_Timestamp = 0;
     g_FrameLoaded = FALSE;
     g_Playing = TRUE;
-#ifdef ENABLE_USB
     g_ProfileCycleTotal = 0;
     g_ProfileCycleStart = 0;
     g_ProfileFrameCount = 0;
@@ -377,10 +414,10 @@ void replay_before_stage_load(s32 stage)
     g_ProfileLagTimeNanoseconds = 0;
     g_ProfileFrameActive = FALSE;
     g_ProfileUpdateSeen = FALSE;
-#endif
+    g_ProfileResultWritten = FALSE;
 }
 
-void replay_on_stage_load(void)
+void practice_replay_on_stage_load(void)
 {
     if (g_Playing && load_frame()) {
         joySetPlaybackFunc(playback_callback, 1);
@@ -390,6 +427,39 @@ void replay_on_stage_load(void)
     }
 }
 
+void replay_on_stage_load(void)
+{
+    practice_replay_on_stage_load();
+}
+
+static void replay_profile_write_result(void)
+{
+    ReplayProfileResult result;
+
+    if (g_ProfileResultWritten) {
+        return;
+    }
+
+    result.magic = REPLAY_PROFILE_MAGIC;
+    result.frame_count = g_ProfileFrameCount;
+    result.cycle_total = g_ProfileCycleTotal;
+    result.dropped_frames = g_ProfileDroppedFrames;
+    result.full_move_retrace_frames = g_ProfileFullMoveRetraceFrames;
+    result.lag_time_nanoseconds = g_ProfileLagTimeNanoseconds;
+    result.mission_timer_ticks = mission_timer;
+    sram_write(REPLAY_PROFILE_SRAM_OFFSET, &result, sizeof(result));
+
+    log_line("PERF_STATS frames=%u cycle_hi=%u cycle_lo=%u dropped_frames=%u",
+             g_ProfileFrameCount, (u32)(g_ProfileCycleTotal >> 32),
+             (u32)g_ProfileCycleTotal, g_ProfileDroppedFrames);
+    log_line("LAG_STATS lag_ns_hi=%u lag_ns_lo=%u full_move_retrace_frames=%u mission_timer_ticks=%d",
+             (u32)(g_ProfileLagTimeNanoseconds >> 32),
+             (u32)g_ProfileLagTimeNanoseconds,
+             g_ProfileFullMoveRetraceFrames, mission_timer);
+    log_line("TEST_COMPLETE frames=%u duration=%u", g_FrameIndex, g_Timestamp);
+    g_ProfileResultWritten = TRUE;
+}
+
 s32 replay_override_delta(s32 delta_frames)
 {
     if (!g_Playing) {
@@ -397,30 +467,20 @@ s32 replay_override_delta(s32 delta_frames)
     }
 
     if (g_FrameIndex >= g_Header.frame_count) {
-#ifdef ENABLE_USB
-        log_line("PERF_STATS frames=%u cycle_hi=%u cycle_lo=%u dropped_frames=%u",
-                 g_ProfileFrameCount, (u32)(g_ProfileCycleTotal >> 32),
-                 (u32)g_ProfileCycleTotal, g_ProfileDroppedFrames);
-        log_line("LAG_STATS lag_ns_hi=%u lag_ns_lo=%u full_move_retrace_frames=%u mission_timer_ticks=%d",
-                 (u32)(g_ProfileLagTimeNanoseconds >> 32),
-                 (u32)g_ProfileLagTimeNanoseconds,
-                 g_ProfileFullMoveRetraceFrames, mission_timer);
-#endif
-        log_line("TEST_COMPLETE frames=%u duration=%u", g_FrameIndex, g_Timestamp);
-        stop_playback();
+        replay_profile_write_result();
+        practice_replay_stop_playback();
         return delta_frames;
     }
 
     if (!g_FrameLoaded && !load_frame()) {
         log_line("TEST_FAILED invalid replay data");
-        stop_playback();
+        practice_replay_stop_playback();
         return delta_frames;
     }
 
     return g_Frame.delta_frames;
 }
 
-#ifdef ENABLE_USB
 void replay_profile_update_retrace(s32 delta_frames)
 {
     if (!g_Playing) {
@@ -504,8 +564,10 @@ void replay_profile_frame_end(void)
     g_ProfileCycleTotal += (u32)(osGetCount() - g_ProfileCycleStart);
     g_ProfileFrameCount++;
     g_ProfileFrameActive = FALSE;
+    if (g_ProfileFrameCount == g_Header.frame_count) {
+        replay_profile_write_result();
+    }
 }
-#endif
 
 void replay_frame_start(void)
 {
@@ -517,7 +579,7 @@ void replay_frame_start(void)
         (g_randomSeed != g_Frame.random_seed ||
          g_chrObjRandomSeed != g_Frame.chr_obj_random_seed)) {
         log_line("TEST_FAILED replay diverged frame=%u", g_FrameIndex);
-        stop_playback();
+        practice_replay_stop_playback();
     }
 }
 
