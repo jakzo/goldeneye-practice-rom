@@ -44,6 +44,7 @@ struct PracticeConfig practice = {
     5,                             // max_save_states
     FALSE,                         // bunker1_keycard_guard_grenade
     TRUE,                          // show_bond_in_cam
+    TRUE,                          // cradle_trevelyan_health
 };
 
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
@@ -191,6 +192,7 @@ resolve_save_state_storage(PracticeStorageLocation preferred) {
 static s32 dam_apply(s32 stage_id) { return stage_id == LEVELID_DAM; }
 static s32 bunker1_apply(s32 stage_id) { return stage_id == LEVELID_BUNKER1; }
 static s32 frigate_apply(s32 stage_id) { return stage_id == LEVELID_FRIGATE; }
+static s32 cradle_apply(s32 stage_id) { return stage_id == LEVELID_CRADLE; }
 static s32 sd_card_apply(s32 stage_id) {
   (void)stage_id;
   return practice_sd_card_is_available();
@@ -267,6 +269,8 @@ static s32 replay_mode_options(s32 stage_id, s32 option_index,
 }
 
 static const struct PracticeSetting s_level_settings[] = {
+    OPTIONS_SETTING("Trevelyan health", cradle_trevelyan_health, s_on_off,
+                    cradle_apply),
     OPTIONS_SETTING("Keycard guard grenade", bunker1_keycard_guard_grenade,
                     s_off_on, bunker1_apply),
     OPTIONS_SETTING("Gate guard status", gate_guard_status, s_off_on,

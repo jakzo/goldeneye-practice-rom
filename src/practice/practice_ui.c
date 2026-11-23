@@ -3,6 +3,8 @@
 #include "emu_log.h"
 #include "game/bg.h"
 #include "game/bondview.h"
+#include "game/chr.h"
+#include "game/chrlv.h"
 #include "game/lvl.h"
 #include "game/textrelated.h"
 #include "game/unk_0C0A70.h"
@@ -424,6 +426,46 @@ static Gfx *render_freecam_room_pill(Gfx *gdl) {
   return practice_ui_render_pill(gdl, text, 0xFFFFFFFF, 0x00000099);
 }
 
+// Cradle's stage setup assigns Trevelyan character ID 0 in all regions.
+#define CRADLE_TREVELYAN_CHR_ID 0
+
+static Gfx *render_trevelyan_health_pill(Gfx *gdl) {
+  ChrRecord *trevelyan;
+  f32 health = 0.0f;
+  f32 armour = 0.0f;
+  s32 health_tenths;
+  s32 armour_tenths;
+  bool invincible;
+  char text[PILL_TEXT_MAX_LEN];
+
+  // The outro disables Bond's damage before it can spawn a replacement actor.
+  if (!practice.cradle_trevelyan_health || bossGetStageNum() != LEVELID_CRADLE ||
+      g_PlayerInvincible) {
+    return gdl;
+  }
+
+  trevelyan = chrFindByLiteralId(CRADLE_TREVELYAN_CHR_ID);
+  if (trevelyan == NULL || trevelyan->bodynum != BODY_Trevelyan_Janus) {
+    return gdl;
+  }
+
+  if (!chrIsDead(trevelyan)) {
+    // Negative damage represents armour. Positive damage depletes health.
+    armour = trevelyan->damage < 0.0f ? -trevelyan->damage : 0.0f;
+    health = trevelyan->maxdamage -
+             (trevelyan->damage > 0.0f ? trevelyan->damage : 0.0f);
+  }
+
+  invincible = (trevelyan->chrflags & CHRFLAG_INVINCIBLE) != 0;
+  health_tenths = health > 0.0f ? (s32)(health * 10.0f + 0.5f) : 0;
+  armour_tenths = (s32)(armour * 10.0f + 0.5f);
+  sprintf(text, "%.*f (%.*f)", health_tenths % 10 != 0, health_tenths / 10.0,
+          armour_tenths % 10 != 0, armour_tenths / 10.0);
+  return practice_ui_render_pill(gdl, text,
+                                 invincible ? 0xFFCC66FF : 0x88FF88FF,
+                                 0x00000099);
+}
+
 static f32 player_speed_metres_per_second(void) {
   f32 delta_x;
   f32 delta_z;
@@ -551,6 +593,7 @@ Gfx *practice_ui_render(Gfx *gdl) {
 
   gdl = render_freecam_room_pill(gdl);
   gdl = render_gate_guard_pill(gdl);
+  gdl = render_trevelyan_health_pill(gdl);
   gdl = practice_frigate_hostage_progress_render(gdl);
 
   if (g_LogQueueCount > 0) {

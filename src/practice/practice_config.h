@@ -57,6 +57,7 @@ struct PracticeConfig {
   s32 max_save_states;
   s32 bunker1_keycard_guard_grenade;
   s32 show_bond_in_cam;
+  s32 cradle_trevelyan_health;
 };
 
 extern struct PracticeConfig practice;

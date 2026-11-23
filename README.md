@@ -96,6 +96,8 @@
 
 - **Bunker 1**
     - Option to make the computer room keycard guard always pull a grenade for their first attack
+- **Cradle**
+    - **Trevelyan health** shows his remaining health and armour in the top-right HUD as `health (armour)`, rounded to the nearest tenth. Amber means invincible and green means vulnerable. Enabled by default in the level settings.
 - **Dam**
     - Indicator for when the gate guard has loaded in
     - Third-person camera which tracks the gate guard
